@@ -1,5 +1,7 @@
+# shellcheck disable=SC2016 # the fixtures' shell text and the messages' backquotes are literal
 bats_require_minimum_version 1.5.0
-load helpers
+# shellcheck source=test/helpers.bash
+source "$BATS_TEST_DIRNAME/helpers.bash"
 
 # The helpers assay's default checks run (devenv/bin/), against throwaway repos, with the real tools on the PATH.
 

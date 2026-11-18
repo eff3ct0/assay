@@ -1,5 +1,6 @@
 bats_require_minimum_version 1.5.0
-load helpers
+# shellcheck source=test/devenv/helpers.bash
+source "$BATS_TEST_DIRNAME/helpers.bash"
 
 @test "devenv test runs every check; git commit runs only the fast ones, through the assay hook" {
   consumer
@@ -53,6 +54,7 @@ load helpers
 
 @test "inside devenv shell: assay check reports, selects and lists; ASSAY_SEED comes from assay.seed" {
   consumer
+  # shellcheck disable=SC2016 # the check's own $ASSAY_SEED
   devenv_nix '{
     assay.checks.lint = { exec = "echo lint"; fast = true; };
     assay.checks.test.exec = "echo seed=$ASSAY_SEED; exit 1";

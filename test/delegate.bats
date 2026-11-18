@@ -1,5 +1,7 @@
+# shellcheck disable=SC2030,SC2031 # bats runs each test in a process of its own: what one test sets, no other reads
 bats_require_minimum_version 1.5.0
-load helpers
+# shellcheck source=test/helpers.bash
+source "$BATS_TEST_DIRNAME/helpers.bash"
 
 # Outside the repo's devenv (ASSAY_CONFIG unset), assay re-executes itself as `devenv shell -- assay <args>` from the
 # repo root. devenv here is test/stub/devenv.
@@ -129,6 +131,7 @@ not_adopted() {
   outside_devenv
   # A repo's assay that exits with the code given in its environment.
   rm "$DEVENV_STUB_PROFILE/assay"
+  # shellcheck disable=SC2016 # the script's own $FAKE_EXIT
   printf '#!/bin/sh\nexit "$FAKE_EXIT"\n' >"$DEVENV_STUB_PROFILE/assay"
   chmod +x "$DEVENV_STUB_PROFILE/assay"
   FAKE_EXIT=130 run --separate-stderr "$assay" check

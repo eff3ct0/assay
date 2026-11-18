@@ -1,5 +1,7 @@
+# shellcheck disable=SC2030,SC2031 # bats runs each test in a process of its own: what one test sets, no other reads
 bats_require_minimum_version 1.5.0
-load helpers
+# shellcheck source=test/helpers.bash
+source "$BATS_TEST_DIRNAME/helpers.bash"
 
 # The hits log: one JSON line per `assay check` run, appended to ASSAY_HITS_LOG when it is set.
 

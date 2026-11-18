@@ -1,4 +1,6 @@
-load helpers
+# shellcheck disable=SC2030,SC2031 # bats runs each test in a process of its own: what one test sets, no other reads
+# shellcheck source=test/helpers.bash
+source "$BATS_TEST_DIRNAME/helpers.bash"
 
 # The run's lines, without the timing.
 untimed() { sed -E 's/ [0-9]+\.[0-9]{2}s/ Ns/g' <<<"$output"; }

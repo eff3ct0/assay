@@ -1,5 +1,6 @@
 bats_require_minimum_version 1.5.0
-load helpers
+# shellcheck source=test/helpers.bash
+source "$BATS_TEST_DIRNAME/helpers.bash"
 
 # Coverage of new code: a check declares the report it writes (`coverage`); when the check passes, assay measures
 # the change's new lines against it with diff-cover.
@@ -90,6 +91,7 @@ writes() { echo "mkdir -p \"\$(dirname \"$2\")\" && cp '$1' \"$2\""; }
   [ ! -e coverage/lcov.info ]
 }
 
+# shellcheck disable=SC2016 # the literal text $ASSAY_DIR, which assay expands
 @test "ASSAY_DIR is assay's directory in the git directory, for every check, and coverage paths can name it" {
   local_repo
   printf 'one\n' >lib.sh

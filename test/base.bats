@@ -1,4 +1,6 @@
-load helpers
+# shellcheck disable=SC2030,SC2031 # bats runs each test in a process of its own: what one test sets, no other reads
+# shellcheck source=test/helpers.bash
+source "$BATS_TEST_DIRNAME/helpers.bash"
 
 # The base of the change, as the header shows it: "<label>@<short sha> (<source>)" or "<short sha> (<source>)".
 base_of_run() {

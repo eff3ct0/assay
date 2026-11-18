@@ -1,5 +1,7 @@
+# shellcheck disable=SC2016 # the fixtures' shell and Nix text is literal
 bats_require_minimum_version 1.5.0
-load helpers
+# shellcheck source=test/devenv/helpers.bash
+source "$BATS_TEST_DIRNAME/helpers.bash"
 
 # Nix's and bash's default checks, through the real devenv: a fixture project per language, each check failing on a
 # defect and passing on its fix, and the coverage of new code of bash's test check.
