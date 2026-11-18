@@ -35,6 +35,7 @@ adoption_doc=https://github.com/eff3ct0/assay/blob/main/docs/adoption.md
 exiting=
 finish() {
   exiting=1
+  log_run "$1"
   exit "$1"
 }
 die() {
@@ -57,6 +58,8 @@ on_exit() {
   if [ -n "$marks" ]; then rm -rf "$marks"; fi
   if [ -z "$exiting" ] && [ "$rc" -ne 0 ]; then
     echo "assay: unexpected failure (exit $rc)" >&2
+    exiting=1
+    log_run 2
     exit 2
   fi
 }
@@ -65,6 +68,50 @@ trap 'echo >&2; finish 130' INT TERM
 
 # assay's own git calls never fetch, not even the missing objects of a partial clone. Checks don't see this function.
 git() { GIT_NO_LAZY_FETCH=1 command git "$@"; }
+
+# The hits log: one JSON object per line, appended to ASSAY_HITS_LOG only when it is set. Every source writes
+# through log_hit <source> <filter> [<jq option>...]: the fields every line has (v, time, source, repo, agent), then
+# the source's own, which the jq filter builds from the jq options given. Best-effort: a failure writes nothing,
+# prints nothing and changes no exit code.
+log_hit() {
+  local source=$1 filter=$2 common repo="" line
+  shift 2
+  [ -n "${ASSAY_HITS_LOG:-}" ] || return 0
+  {
+    # The main checkout, the same from any of its worktrees: the parent of the common git directory.
+    if common=$(git rev-parse --path-format=absolute --git-common-dir); then repo=${common%/.git}; fi
+    line=$(jq -nc --arg source "$source" --arg repo "$repo" --arg agent "${ASSAY_AGENT:-}" "$@" '
+      def text_or_null: if . == "" then null else . end;
+      {v: 1, time: (now | todate), source: $source, repo: ($repo | text_or_null), agent: ($agent | text_or_null)}
+      + ('"$filter"')') &&
+      mkdir -p "$(dirname "$ASSAY_HITS_LOG")" &&
+      printf '%s\n' "$line" >>"$ASSAY_HITS_LOG"
+  } 2>/dev/null || true
+}
+
+# When `assay check` started a run: set once its arguments parsed into one (not --list). A run, passing or not,
+# writes one check line to the hits log when it exits, whatever its exit code.
+run_start=
+log_run() {
+  [ -n "$run_start" ] || return 0
+  local d secs mode=full i
+  local -a args=()
+  d=$((${EPOCHREALTIME//[!0-9]/} - run_start))
+  run_start=
+  printf -v secs '%d.%02d' $((d / 1000000)) $((d % 1000000 / 10000))
+  if [ "$opt_fast" = 1 ]; then mode=fast; fi
+  # Check names have no spaces; the names given may be anything, so each goes in an option of its own.
+  args=(--arg mode "$mode" --arg seconds "$secs" --arg failed "${failed[*]}" --arg exit "$1")
+  for i in "${!wanted[@]}"; do args+=(--arg "only$i" "${wanted[$i]}"); done
+  # shellcheck disable=SC2016 # jq's $variables, not the shell's
+  log_hit check '{
+    mode: $mode,
+    only: ([$ARGS.named | to_entries[] | select(.key | test("^only[0-9]+$")) | .value] | unique),
+    seconds: ($seconds | tonumber),
+    failed: ($failed | split(" ") | map(select(. != ""))),
+    exit: ($exit | tonumber)
+  }' "${args[@]}"
+}
 
 # The configuration, validated whole before anything is printed, and emitted as shell assignments (strings quoted
 # with @sh) that end with config_loaded=1.
@@ -143,6 +190,7 @@ opt_base=
 opt_base_set=0
 wanted=()
 selected=()
+failed=()
 
 # The checks to run, in name order: the named ones, or every enabled one; with --fast, only fast ones.
 select_checks() {
@@ -278,7 +326,7 @@ shell_word() {
 
 run_checks() {
   local logdir=$gitdir/assay n log rc t0 now secs start i shown what
-  local -a skipped=() failed=()
+  local -a skipped=()
   declare -A is_skipped=() code=()
   mkdir -p "$logdir" 2>/dev/null || die "cannot create $logdir"
   [ -w "$logdir" ] || die "cannot write to $logdir"
@@ -410,6 +458,7 @@ cmd_check() {
   if [ "$opt_list" = 1 ] && { [ "$opt_fast" = 1 ] || [ "$opt_base_set" = 1 ] || [ ${#wanted[@]} -gt 0 ]; }; then
     usage_error "--list takes no other argument"
   fi
+  if [ "$opt_list" = 0 ]; then run_start=${EPOCHREALTIME//[!0-9]/}; fi
 
   local t
   for t in git jq head tail wc mkdir rm; do
