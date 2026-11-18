@@ -50,12 +50,19 @@ usage_error() {
   echo "assay: $*" >&2
   usage
 }
-# The delegating assay's temporary directory, removed on exit.
-delegate_tmp=
+# Temporary files and directories, removed on exit.
+tmp_paths=()
+# tmp_file <var> [-d] [<template>]: a new temporary file (or directory, with -d), removed on exit, its path in <var>.
+tmp_file() {
+  local -n tmp_var=$1
+  shift
+  tmp_var=$(mktemp "$@") || die "cannot create a temporary file"
+  tmp_paths+=("$tmp_var")
+}
 # shellcheck disable=SC2329 # invoked by the EXIT trap
 on_exit() {
   local rc=$?
-  if [ -n "$delegate_tmp" ]; then rm -rf "$delegate_tmp"; fi
+  if [ ${#tmp_paths[@]} -gt 0 ]; then rm -rf -- "${tmp_paths[@]}"; fi
   if [ -z "$exiting" ] && [ "$rc" -ne 0 ]; then
     echo "assay: unexpected failure (exit $rc)" >&2
     finish 2
@@ -310,6 +317,108 @@ requires_met() {
   return 1
 }
 
+# New code: the lines a change adds or modifies, from the base's tree to the working tree, untracked files included.
+# `suppressions` reads it here, and the `findings` check reuses it.
+
+# change_diff <base>: the change as `git diff -U0` prints it, through a copy of the index that adds the untracked
+# files (not the ignored ones) as intent-to-add, so that they count as added. Renames are followed; binary files and
+# submodules show no lines. Every option that a user's configuration could change is fixed, so that the same tree
+# and base give the same diff anywhere. A path is quoted, C-style, only when it holds a control character, `"` or `\`.
+change_diff() {
+  local index untracked objects store
+  tmp_file index
+  tmp_file untracked
+  # Intent-to-add writes the empty blob: objects git writes go to a throwaway store, the repo's own an alternate.
+  tmp_file objects -d
+  store=$(git rev-parse --path-format=absolute --git-path objects) || die "cannot find the object store"
+  cp -- "$(git rev-parse --git-path index)" "$index" 2>/dev/null || rm -f -- "$index"
+  git ls-files -z --others --exclude-standard >"$untracked" || die "cannot list the untracked files"
+  if [ -s "$untracked" ]; then
+    GIT_INDEX_FILE=$index GIT_OBJECT_DIRECTORY=$objects GIT_ALTERNATE_OBJECT_DIRECTORIES=$store \
+      git --literal-pathspecs add --intent-to-add --pathspec-from-file="$untracked" --pathspec-file-nul ||
+      die "cannot add the untracked files to a copy of the index"
+  fi
+  GIT_INDEX_FILE=$index GIT_OBJECT_DIRECTORY=$objects GIT_ALTERNATE_OBJECT_DIRECTORIES=$store \
+    git -c core.quotePath=false diff -U0 --inter-hunk-context=0 --histogram -M --no-relative --no-color \
+    --no-ext-diff --no-textconv --ignore-submodules=all --src-prefix=a/ --dst-prefix=b/ "$1" ||
+    die "cannot diff the working tree against the base $1"
+}
+
+# Reads change_diff's output. Prints "<first>\t<last>\t<path>" for each hunk that adds lines (the path as git prints
+# it, quoted or not). With the variable `removed` set to a file name, also writes "<path>\t<text>" there for each line
+# the change removes, under the file's new path (its old one when the file is deleted).
+# shellcheck disable=SC2016 # awk's $0, not the shell's
+diff_awk='
+function path_of(p, prefix) {
+  sub(/\t$/, "", p)
+  if (p == "/dev/null") return ""
+  if (substr(p, 1, 1) == "\"") return "\"" substr(p, 2 + length(prefix))
+  return substr(p, 1 + length(prefix))
+}
+old > 0 || new > 0 {
+  c = substr($0, 1, 1)
+  if (c == "-") { old--; if (removed != "") print path "\t" substr($0, 2) > removed; next }
+  if (c == "+") { new--; next }
+  if (c == "\\") next
+  old = 0; new = 0
+}
+/^diff --git / { from = ""; path = ""; to = ""; next }
+/^--- / { from = path_of(substr($0, 5), "a/"); next }
+/^\+\+\+ / { to = path_of(substr($0, 5), "b/"); path = (to == "") ? from : to; next }
+/^@@ / {
+  split($0, f, " ")
+  n = split(substr(f[2], 2), o, ","); old = (n > 1) ? o[2] + 0 : 1
+  n = split(substr(f[3], 2), w, ","); new = (n > 1) ? w[2] + 0 : 1
+  if (new > 0 && to != "") printf "%d\t%d\t%s\n", w[1], w[1] + new - 1, to
+}
+'
+
+# new_code <diff file>: the new code in a diff from change_diff, as NUL-terminated records: a path, then the first
+# and the last line of one of its ranges. A file's ranges come in order.
+new_code() {
+  local first last path
+  LC_ALL=C awk "$diff_awk" "$1" | while IFS=$'\t' read -r first last path; do
+    if [[ $path == \"*\" ]]; then
+      path=${path:1:${#path}-2}
+      path=${path//%/%%}
+      # shellcheck disable=SC2059 # the format decodes git's C-style quoting
+      printf -v path -- "$path"
+    fi
+    printf '%s\0%s\0%s\0' "$path" "$first" "$last"
+  done
+}
+
+cmd_new_code() {
+  parse_base_option new-code "$@"
+  find_repo
+  resolve_base
+  local diff
+  tmp_file diff
+  change_diff "$base_sha" >"$diff"
+  new_code "$diff" | jq -S -R -s 'split("\u0000") | .[:-1] as $f
+    | reduce range(0; $f | length; 3) as $i ({}; .[$f[$i]] += [[($f[$i + 1] | tonumber), ($f[$i + 2] | tonumber)]])'
+  finish 0
+}
+
+# parse_base_option <command> [--base <rev>]: the arguments of a command whose only option is --base.
+parse_base_option() {
+  local command=$1
+  shift
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --base)
+        [ $# -ge 2 ] || usage_error "--base needs a revision"
+        opt_base=$2 opt_base_set=1
+        shift
+        ;;
+      --base=*) opt_base=${1#--base=} opt_base_set=1 ;;
+      *) usage_error "$command: unexpected argument '$1'" ;;
+    esac
+    shift
+  done
+  if [ "$opt_base_set" = 1 ] && [ -z "$opt_base" ]; then usage_error "--base needs a revision"; fi
+}
+
 now_us() { now=${EPOCHREALTIME//[!0-9]/}; }
 # fmt_secs <var> <microseconds>
 fmt_secs() { printf -v "$1" '%d.%02ds' $(($2 / 1000000)) $(($2 % 1000000 / 10000)); }
@@ -508,7 +617,8 @@ delegate() {
   [ -f "$root/devenv.nix" ] || not_adopted "$root has no devenv.nix"
   PATH=$caller_path command -v devenv >/dev/null ||
     die "cannot find devenv on the PATH, which assay needs to run inside the repo's devenv"
-  delegate_tmp=$(mktemp -d) || die "cannot create a temporary directory"
+  local delegate_tmp
+  tmp_file delegate_tmp -d
   PATH=$caller_path devenv shell -- "$BASH" -c "$delegate_sh" assay "$delegate_tmp" "$@" || rc=$?
   if [ -e "$delegate_tmp/unadopted" ]; then not_adopted "the devenv of $root does not import assay's module"; fi
   # devenv itself failed (exit 1 on an evaluation error), which must not pass for a failing check.
@@ -532,6 +642,11 @@ main() {
       shift
       if [ -z "${ASSAY_CONFIG:-}" ]; then delegate check "$@"; fi
       cmd_check "$@"
+      ;;
+    new-code)
+      shift
+      if [ -z "${ASSAY_CONFIG:-}" ]; then delegate new-code "$@"; fi
+      cmd_new_code "$@"
       ;;
     # The machine-level subcommands run outside any devenv and never delegate.
     guard) not_yet guard "--rules <file>    the agent guard: one harness hook event on stdin" ;;
