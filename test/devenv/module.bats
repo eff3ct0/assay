@@ -170,7 +170,8 @@ source "$BATS_TEST_DIRNAME/helpers.bash"
 	run --separate-stderr nix run . -- check --list
 	echo "$stderr"
 	[ "$status" -eq 0 ]
-	[ "$output" = bats ]
+	[ "$output" = "$(printf '%s\n' bats 'deadnix (fast)' nix-flake-check 'nixf-tidy (fast)' 'nixfmt (fast)' \
+		'shellcheck (fast)' 'shfmt (fast)' 'statix (fast)')" ]
 	run git commit --allow-empty -m "an empty commit"
 	echo "$output"
 	[ "$status" -eq 0 ]

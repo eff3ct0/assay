@@ -1,12 +1,13 @@
-# assay's own checks, run by the version of assay this tree ships (devenv.yaml imports ./devenv).
+# assay's own checks: Nix's and bash's default checks, run by the version of assay this tree ships (devenv.yaml
+# imports ./devenv). Its bats suite is bash's test check, which runs every .bats file, test/devenv's included.
 { pkgs, ... }:
 {
+  languages.nix.enable = true;
+  languages.shell.enable = true;
+
+  # What the tests run beside the checks' own tools.
   packages = with pkgs; [
-    bats
     git
     jq
   ];
-
-  # assay's bats suite (test/), until the bash default checks replace it.
-  assay.checks.bats.exec = "bats test";
 }
