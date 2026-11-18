@@ -18,9 +18,14 @@ usage_text() {
   cat <<'EOF'
 usage: assay check [--fast] [--base <rev>] [<check>...]    run the repo's checks
        assay check --list                                  list them, fast ones marked
+       assay builtin agents-md [<commit>]                  one of the built-in checks that are assay's own code
+       assay builtin commit-trailers [--base <rev>]
+       assay builtin gitleaks
+       assay builtin suppressions [--base <rev>]
+       assay new-code [--base <rev>]                       the change's new code, as JSON
 
-Outside the repo's devenv (ASSAY_CONFIG unset), assay check runs itself inside it, from the repo root:
-devenv shell -- assay check, so the version the repo pins decides.
+Outside the repo's devenv (ASSAY_CONFIG unset), these run themselves inside it, from the repo root:
+devenv shell -- assay <command>, so the version the repo pins decides.
 The base of the change: --base, else ASSAY_BASE, else GitHub's event (GITHUB_EVENT_PATH), else the
 fork point of HEAD from the default branch, else their merge base. assay never fetches.
 Exit codes: 0 every selected check passed, 1 at least one failed, 2 assay could not run.
