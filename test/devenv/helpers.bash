@@ -5,13 +5,15 @@
 # git-hooks.nix at a fixed revision, so that a run does not depend on upstream's latest.
 git_hooks_rev=204b6977e00caac19e2313015a598543ca7be150
 
-# copy_assay <dir>: this working tree, uncommitted changes included, as a git repo with one commit.
+# copy_assay <dir>: this working tree, uncommitted changes included, as a git repo with one commit: the files git
+# sees, not ignored ones such as .devenv/.
 copy_assay() {
-  local src
+  local src f
   src=$(cd "$BATS_TEST_DIRNAME/../.." && pwd)
   mkdir -p "$1"
-  cp -r "$src/." "$1/"
-  rm -rf "$1/.git"
+  while IFS= read -r -d '' f; do
+    if [ -e "$src/$f" ]; then (cd "$src" && cp -P --parents "$f" "$1/"); fi
+  done < <(git -C "$src" ls-files -z --cached --others --exclude-standard)
   git -C "$1" init --quiet
   git -C "$1" add -A
   git -C "$1" commit --quiet -m copy
@@ -28,7 +30,7 @@ setup_file() {
   git config --global init.defaultBranch main
   git config --global gc.auto 0
   git config --global maintenance.auto false
-  unset ASSAY_CONFIG ASSAY_BASE ASSAY_SEED GITHUB_EVENT_PATH
+  unset ASSAY_CONFIG ASSAY_BASE ASSAY_SEED GITHUB_EVENT_PATH ASSAY_HITS_LOG ASSAY_AGENT
   export NIXPKGS_REV
   NIXPKGS_REV=$(jq -r .nodes.nixpkgs.locked.rev "$BATS_TEST_DIRNAME/../../flake.lock")
   export ASSAY=$BATS_FILE_TMPDIR/assay

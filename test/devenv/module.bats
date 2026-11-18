@@ -125,3 +125,52 @@ load helpers
   [ "$(hook always_run)" = false ]
   [ "$(hook entry)" = '"devenv shell -- assay check --fast"' ]
 }
+
+@test "outside the devenv, plain assay check re-executes itself through devenv shell" {
+  consumer
+  devenv_nix '{
+    assay.checks.lint = { exec = "echo lint"; fast = true; };
+    assay.checks.test.exec = "echo tests failed; exit 1";
+  }'
+  mkdir sub
+  cd sub
+  run --separate-stderr "$ASSAY/assay.sh" check --list
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf 'lint (fast)\ntest')" ]
+  run --separate-stderr "$ASSAY/assay.sh" check
+  echo "$output"
+  [ "$status" -eq 1 ]
+  [[ ${lines[-1]} == "1 of 2 checks failed in "*"; rerun: assay check test" ]]
+}
+
+@test "a repo without devenv.nix, or whose devenv does not import assay's module, exits 2 naming docs/adoption.md" {
+  mkdir "$T/repo"
+  cd "$T/repo"
+  git init --quiet
+  git commit --quiet --allow-empty -m init
+  run --separate-stderr "$ASSAY/assay.sh" check
+  [ "$status" -eq 2 ]
+  [[ $stderr == *"has no devenv.nix"*"docs/adoption.md" ]]
+  printf '%s\n' inputs: '  nixpkgs:' "    url: github:NixOS/nixpkgs/$NIXPKGS_REV" >devenv.yaml
+  echo '{ }' >devenv.nix
+  printf '%s\n' .devenv/ .devenv.flake.nix devenv.lock >.gitignore
+  git add -A
+  git commit --quiet -m devenv
+  run --separate-stderr "$ASSAY/assay.sh" check
+  echo "$stderr"
+  [ "$status" -eq 2 ]
+  [[ $stderr == *"does not import assay's module"*"docs/adoption.md" ]]
+}
+
+@test "assay adopts itself: nix run . -- check --list goes through its devenv, and git commit runs the fast checks" {
+  copy_assay "$T/self"
+  cd "$T/self"
+  run --separate-stderr nix run . -- check --list
+  echo "$stderr"
+  [ "$status" -eq 0 ]
+  [ "$output" = bats ]
+  run git commit --allow-empty -m "an empty commit"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ $output == *"assay check --fast"*Passed* ]]
+}

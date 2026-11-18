@@ -129,8 +129,8 @@ in
         cp -r ${src} src
         chmod -R u+w src
         cd src
-        patchShebangs assay.sh
-        shellcheck assay.sh test/helpers.bash test/devenv/helpers.bash
+        patchShebangs assay.sh test/stub
+        shellcheck assay.sh test/helpers.bash test/devenv/helpers.bash test/stub/devenv
         bats test
         touch $out
       '';
