@@ -101,7 +101,7 @@ EOF
   plant tracked.txt
   # A cp that refuses hard links, as across file systems.
   mkdir "$T/bin"
-  printf '%s\n' '#!/usr/bin/env bash' 'for a; do [ "$a" != --link ] || exit 1; done' "exec $(command -v cp) \"\$@\"" \
+  printf '%s\n' "#!$BASH" 'for a; do [ "$a" != --link ] || exit 1; done' "exec $(command -v cp) \"\$@\"" \
     >"$T/bin/cp"
   chmod +x "$T/bin/cp"
   PATH=$T/bin:$PATH run --separate-stderr "$assay" builtin gitleaks
