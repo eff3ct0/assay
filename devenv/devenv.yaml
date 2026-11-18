@@ -1,0 +1,8 @@
+# The inputs of assay's devenv module. devenv 2.4.1 and later compose them into the importing repo's devenv.lock;
+# devenv 2.4.0 ignores this file, so a repo on 2.4.0 declares git-hooks in its own devenv.yaml too.
+inputs:
+  git-hooks:
+    url: github:cachix/git-hooks.nix
+    inputs:
+      nixpkgs:
+        follows: nixpkgs
