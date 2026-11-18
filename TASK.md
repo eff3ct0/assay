@@ -49,10 +49,6 @@ Issue #3 ("Built-in checks every repo runs") is the specification; read it and t
 
 ## Remaining steps
 
-1. `jsonl` commit.
-2. New code helper and `assay new-code` (test/new-code.bats).
-3. `agents-md`, `commit-trailers`, `suppressions`, `gitleaks` builtins with bats tests.
-4. defaults.nix, module packages, nix/checks.nix, test/defaults/*.json, flake devShell, package.nix tools.
-5. oxfmt and actionlint fixture tests; test/devenv updates (bare copy for runner tests, a built-in consumer test).
-6. README, GLOSSARY, AGENTS.md; `devenv test`, `nix flake check`, `bats test/devenv`.
-7. code-review skill, critic, recheck critic, PR.
+1. Done: the jsonl commit, new code, the four builtins, the module defaults, the tests, the docs. `devenv test`,
+   `nix flake check` and `nix develop -c bats test/devenv` pass.
+2. code-review skill, critic, recheck critic, PR (`Closes https://github.com/eff3ct0/assay/issues/3`, not merged).
