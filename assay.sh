@@ -533,6 +533,55 @@ builtin_commit_trailers() {
   finish 1
 }
 
+# gitleaks: gitleaks over the files git sees in the working tree (tracked, or untracked but not ignored), not over
+# history. `gitleaks dir` reads ignored files too (.devenv/, a local .env), so it scans a hard-linked copy of the
+# files git sees (a plain copy where hard links fail), from that copy's root: the paths it reports, the fingerprints
+# in .gitleaksignore and the repo's .gitleaks.toml work as from the repo root. Secrets are redacted.
+builtin_gitleaks() {
+  local copy list report f i rc=0 count
+  local -a files=()
+  [ $# -eq 0 ] || usage_error "gitleaks takes no argument"
+  find_repo
+  if ! command -v gitleaks >/dev/null; then
+    echo "assay: cannot find gitleaks on the PATH" >&2
+    finish 127
+  fi
+  mkdir -p "$gitdir/assay" || die "cannot create $gitdir/assay"
+  tmp_file copy -d "$gitdir/assay/gitleaks.XXXXXX"
+  tmp_file list
+  tmp_file report
+  git ls-files -z --cached --others --exclude-standard --deduplicate >"$list" || die "cannot list the working tree"
+  while IFS= read -r -d '' f; do
+    # A deleted tracked file is gone, and a directory is a submodule or a nested repo.
+    if [ -L "$f" ] || [ -f "$f" ]; then files+=("$root/$f"); fi
+  done <"$list"
+  [ ${#files[@]} -gt 0 ] || finish 0
+  # copy_files <cp option>...: every file at its absolute path under the copy, symlinks as symlinks.
+  copy_files() {
+    for ((i = 0; i < ${#files[@]}; i += 1000)); do
+      cp "$@" -P --parents -t "$copy" -- "${files[@]:i:1000}" || return 1
+    done
+  }
+  if ! copy_files --link 2>/dev/null; then
+    { rm -rf "$copy" && mkdir "$copy"; } || die "cannot recreate $copy"
+    copy_files --reflink=auto || die "cannot copy the working tree's files to $copy"
+  fi
+  (cd "$copy$root" && gitleaks dir --no-banner --no-color --redact --log-level error --exit-code 0 \
+    --report-format json --report-path "$report" .) || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "gitleaks failed (exit $rc)"
+    finish "$rc"
+  fi
+  count=$(jq length "$report") || die "cannot read gitleaks's report"
+  [ "$count" -gt 0 ] || finish 0
+  jq -r 'sort_by(.File, .StartLine, .RuleID)[] | "\(.File):\(.StartLine): \(.RuleID) (fingerprint \(.Fingerprint))"' \
+    "$report"
+  if [ "$count" -eq 1 ]; then echo -n "gitleaks found 1 secret"; else echo -n "gitleaks found $count secrets"; fi
+  echo " in the working tree: remove each one, and rotate it if it ever left this machine; a false positive's" \
+    "fingerprint goes in .gitleaksignore."
+  finish 1
+}
+
 cmd_builtin() {
   [ $# -ge 1 ] || usage_error "builtin needs the name of a built-in check"
   local check=$1
@@ -540,6 +589,7 @@ cmd_builtin() {
   case $check in
     agents-md) builtin_agents_md "$@" ;;
     commit-trailers) builtin_commit_trailers "$@" ;;
+    gitleaks) builtin_gitleaks "$@" ;;
     *) usage_error "no built-in check named '$check'" ;;
   esac
 }
