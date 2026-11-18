@@ -1,6 +1,6 @@
 # assay
 
-A repo's named checks, run the same way from pre-commit, `devenv test` and an agent's shell: a bash + jq CLI
+A repo's named checks, run the same way from pre-commit, `devenv test` and an agent's shell: a bash CLI, with jq and awk
 (`assay.sh`: `assay check`, the built-in checks that are its own code as `assay builtin <check>`, and
 `assay new-code`), the devenv module repos import (`devenv/`, the built-in checks in `devenv/defaults.nix`), and a Nix
 flake with the CLI's package (`nix/`). `README.md` says how a repo uses it, `docs/adoption.md` how an existing repo
@@ -26,7 +26,7 @@ repo's GitHub issues: read it, and the specifications it links, before changing 
 - In this repo, or one that imports the module: `assay check [--fast] [--base <rev>] [<check>...]` or
   `assay check --list`, from the devenv (`devenv shell -- assay check`) or from outside it (plain `assay check`, or
   `nix run . -- check` here), which re-executes itself through `devenv shell` from the repo root.
-- From this checkout without devenv: `ASSAY_CONFIG=<file> ./assay.sh check`, with git and jq on the PATH. The file
+- From this checkout without devenv: `ASSAY_CONFIG=<file> ./assay.sh check`, with git, jq and awk on the PATH. The file
   has the shape `devenv/module.nix` writes; `test/helpers.bash` builds one by hand.
 - One built-in check alone: `assay builtin <check>` (its `exec`); a change's new code as JSON: `assay new-code`.
 - `nix build .#assay` builds the CLI.

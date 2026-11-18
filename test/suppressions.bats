@@ -271,3 +271,35 @@ web.ts:11: oxlint-disable gives no reason"
   run "$assay" check --base HEAD
   [ "$status" -eq 0 ]
 }
+
+@test "a suppression removed from one file does not excuse a new one in another; a renamed file keeps its own" {
+  local_repo
+  printf '%s\n' 'x = 1  # noqa' >a.py
+  # Unlike b.ts below, so that git sees no rename from a.ts to b.ts.
+  { echo '// @ts-ignore'; seq -f 'f%g(x);' 1 9; } >a.ts
+  # Large enough for git to see the rename.
+  { echo 'y = 1  # noqa'; seq -f 'v%g = 0' 1 9; } >old.py
+  git add a.py a.ts old.py
+  git commit --quiet -m old
+  base=$(sha HEAD)
+  rm a.py a.ts
+  printf '%s\n' 'y = 2  # noqa' >b.py
+  printf '%s\n' '// @ts-ignore' 'g(y);' >b.ts
+  git mv old.py new.py
+  sed -i '1s/.*/y = 10  # noqa/' new.py
+  sup
+  [ "$status" -eq 1 ]
+  [ "$(problems | cut -d: -f1-2)" = "$(printf '%s\n' b.py:1 b.ts:1)" ]
+}
+
+@test "in a file whose name git quotes, a suppression the change keeps on a modified line passes" {
+  local_repo
+  f=$'we"ird\tname.py'
+  printf '%s\n' 'x = 1  # noqa' >"$f"
+  git add -- "$f"
+  git commit --quiet -m old
+  base=$(sha HEAD)
+  printf '%s\n' 'x = 2  # noqa' >"$f"
+  sup
+  [ "$status" -eq 0 ]
+}

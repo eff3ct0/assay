@@ -159,3 +159,13 @@ no_related='AGENTS.md has no "Related repos" section: add one naming the repos t
   [ "$status" -eq 2 ]
   [ "$stderr" = "assay: agents-md: 'nope' is not a commit" ]
 }
+
+@test "a Related repos heading inside a fenced code block does not count; a CRLF @AGENTS.md line passes" {
+  local_repo
+  agents $'# repo\n\n```md\n## Related repos\n```\n'
+  claude '@AGENTS.md'
+  both_ways 1 "$no_related"
+  agents "$related"
+  claude $'@AGENTS.md\r\n'
+  both_ways 0
+}

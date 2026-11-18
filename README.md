@@ -136,8 +136,8 @@ They are default checks: turning one off or redefining its `exec` is a loosening
 
 - `suppressions`: a suppression (a comment or attribute that silences a finding at its place) added on new code
   names the rule it silences and gives a reason. Old suppressions never block a change: one on a line the change
-  leaves alone is not read, and one the change also removes, with the same marker and rules (a modified or moved
-  line), is not new.
+  leaves alone is not read, and one the change also removes from the same file, with the same marker and rules (a
+  modified or moved line, in a file git sees as the same or renamed), is not new.
 
 The markers `suppressions` knows, by language (by a file's extension, and by its shebang for a shell script without
 one), each in a form that passes:
@@ -193,7 +193,7 @@ assay new-code [--base <rev>]                       the change's new code, as JS
 
 The built-in checks that are assay's own code run as `assay builtin <check>`, which is their `exec`; an agent can run
 one alone. The base is `assay check`'s, from `ASSAY_BASE` when `assay check` runs them. Exit codes: `0` passed, `1`
-failed, `2` could not run. Outside the repo's devenv they re-execute themselves through it, as `assay check` does.
+failed, `2` could not run, `127` the check's tool (gitleaks) is missing. Outside the repo's devenv they re-execute themselves through it, as `assay check` does.
 
 ## The hits log
 

@@ -108,3 +108,12 @@ EOF
   [ "$status" -eq 1 ]
   [ "${lines[0]}" = "tracked.txt:1: github-pat (fingerprint tracked.txt:github-pat:1)" ]
 }
+
+@test "gitleaks failing on its own (a broken .gitleaks.toml) is exit 2, not a finding" {
+  local_repo
+  echo 'this is = not [toml' >.gitleaks.toml
+  run --separate-stderr "$assay" builtin gitleaks
+  echo "$output $stderr"
+  [ "$status" -eq 2 ]
+  [[ $stderr == *$'\nassay: gitleaks failed (exit '* ]]
+}

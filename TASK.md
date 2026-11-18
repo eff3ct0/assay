@@ -10,7 +10,7 @@ Removed once the last critic passes.
 > agent/, y el crítico te toca a ti, porque tú eres el autor de este cambio. Termina con un pull request que diga
 > "Closes https://github.com/eff3ct0/assay/issues/3" y no lo mergees.
 
-Issue #3 ("Built-in checks every repo runs") is the specification; read it and the nixos-config issues it links.
+Issue #3 ("Built-in checks every repo runs") is the specification; read it and the specifications it links.
 
 ## Decisions
 
@@ -35,8 +35,8 @@ Issue #3 ("Built-in checks every repo runs") is the specification; read it and t
 - **suppressions.** Markers per language by extension (shell also by shebang). Markers with a reason field must use
   it (eslint/oxlint `--`, Rust `reason = "…"`, Stryker `:`, scalafix `;`, qlty's long form `qlty-ignore(…): …`,
   `@ts-expect-error TS<code>: …`); the others take a comment on the same line or a comment line just above.
-  `@ts-ignore` and `@ts-nocheck` always fail. A suppression on new code whose marker and rules match one removed
-  by the change (a modified or moved line) is not new and passes.
+  `@ts-ignore` and `@ts-nocheck` always fail. A suppression on new code whose marker and rules match one the change
+  removes from the same file (a modified or moved line; git's renames followed) is not new and passes.
 - **Workflow lint.** A sixth built-in fast check, `actionlint`, `requires = ".github/workflows/*"`; nixpkgs wraps it
   with shellcheck, which lints `run:` blocks. zizmor stays out (its default audits would rewrite every workflow, and
   its online audits need the network).

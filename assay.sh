@@ -445,11 +445,12 @@ root_entry() {
   esac
 }
 
-# has_related_repos <markdown>: the text has a "Related repos" heading, of any level and case.
+# has_related_repos <markdown>: the text has a "Related repos" heading, of any level and case, outside fenced code.
 has_related_repos() {
-  local line
+  local line fenced=0
   while IFS= read -r line; do
-    if [[ ${line,,} =~ ^#{1,6}[[:space:]]+related[[:space:]]+repos[[:space:]#]*$ ]]; then return 0; fi
+    if [[ $line =~ ^\ {0,3}('```'|'~~~') ]]; then fenced=$((1 - fenced)); fi
+    if [ "$fenced" = 0 ] && [[ ${line,,} =~ ^#{1,6}[[:space:]]+related[[:space:]]+repos[[:space:]#]*$ ]]; then return 0; fi
   done <<<"$1"
   return 1
 }
@@ -489,7 +490,8 @@ agents_md_problems() {
     instructions=AGENTS.md text=$a_content
     if [ "$c_type" = symlink ] && [ "$c_to_a" = 0 ]; then
       problems+=("CLAUDE.md is a symlink to $c_content: make it the single line @AGENTS.md, or a symlink to AGENTS.md")
-    elif [ "$c_type" = file ] && [ "$c_content" != @AGENTS.md ] && [ "$c_content" != $'@AGENTS.md\n' ]; then
+    elif [ "$c_type" = file ] && [ "$c_content" != @AGENTS.md ] && [ "$c_content" != $'@AGENTS.md\n' ] &&
+      [ "$c_content" != $'@AGENTS.md\r\n' ]; then
       if [ "$c_content" = "$a_content" ]; then
         problems+=("CLAUDE.md copies AGENTS.md: a copy falls short, even an identical one; make CLAUDE.md the single line @AGENTS.md")
       else
@@ -575,8 +577,7 @@ builtin_gitleaks() {
   (cd "$copy$root" && gitleaks dir --no-banner --no-color --redact --log-level error --exit-code 0 \
     --report-format json --report-path "$report" .) || rc=$?
   if [ "$rc" -ne 0 ]; then
-    echo "gitleaks failed (exit $rc)"
-    finish "$rc"
+    die "gitleaks failed (exit $rc)"
   fi
   count=$(jq length "$report") || die "cannot read gitleaks's report"
   [ "$count" -gt 0 ] || finish 0
@@ -591,8 +592,8 @@ builtin_gitleaks() {
 # suppressions: a new suppression on new code names the rule it silences and gives a reason. The markers are known
 # per language, which a file's extension gives (a shell script's shebang too, when it has none). A marker with a
 # reason field must give the reason there; one without takes a comment on the same line or a comment line just
-# above. A suppression the change also removes (the same marker and rules on a removed line: a modified or a moved
-# line) is not new.
+# above. A suppression the change also removes from the same file (the same marker and rules on a removed line: a
+# modified or a moved line) is not new.
 #
 # Inputs, in this order: the removed lines ("<path>\t<text>", from diff_awk), the new code ("<n>\t<first>\t<last>",
 # <n> being the position of the file among those that follow) and the files that hold new code, each as ./<path>.
@@ -621,6 +622,9 @@ BEGIN {
   form["@SuppressWarnings"] = "@SuppressWarnings(Array(\"org.wartremover.warts.Var\")) // <why>"
   form["scalafix:off"] = "// scalafix:off DisableSyntax.var; <why>"
   form["scalafix:ok"] = "// scalafix:ok DisableSyntax.var; <why>"
+  split("a b t n v f r", names, " ")
+  for (i = 1; i <= 7; i++) escaped[names[i]] = sprintf("%c", i + 6)
+  escaped["\""] = "\""; escaped["\\"] = "\\"
   bad = 0
 }
 
@@ -640,13 +644,28 @@ function ext_lang(p,   b, e) {
 function shebang_lang(first) {
   return (first ~ /^#![ \t]*[^ \t]*\/(env[ \t]+(-[^ \t]+[ \t]+)*)?((ba|da|k)?sh|bats)([ \t]|$)/) ? "sh" : ""
 }
-# The language of a removed line, by its path as diff_awk gives it (quoted or not).
-function removed_lang(p,   q, l, first) {
-  q = (p ~ /^".*"$/)
-  if (q) p = substr(p, 2, length(p) - 2)
+# A path as diff_awk gives it, which git quotes C-style when it holds a control character, `"` or `\`.
+function unquote(p,   out, i, c) {
+  if (p !~ /^".*"$/) return p
+  p = substr(p, 2, length(p) - 2)
+  out = ""
+  for (i = 1; i <= length(p); i++) {
+    c = substr(p, i, 1)
+    if (c == "\\") {
+      c = substr(p, ++i, 1)
+      if (c ~ /[0-7]/) {
+        c = sprintf("%c", substr(p, i, 1) * 64 + substr(p, i + 1, 1) * 8 + substr(p, i + 2, 1))
+        i += 2
+      } else if (c in escaped) c = escaped[c]
+    }
+    out = out c
+  }
+  return out
+}
+# The language of a removed line, by the path of its file.
+function removed_lang(p,   l, first) {
   l = ext_lang(p)
   if (l != "none") return l
-  if (q) return ""
   if (!(p in shebang_of)) {
     first = ""
     if ((getline first < p) > 0) shebang_of[p] = shebang_lang(first); else shebang_of[p] = ""
@@ -831,8 +850,9 @@ function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t\r]+$/, "", s); return s }
 
 FILENAME == ARGV[1] {
   t = index($0, "\t")
-  lang = removed_lang(substr($0, 1, t - 1))
-  if (lang != "") for (k = scan(lang, substr($0, t + 1), R); k > 0; k--) base[R[k, "key"]]++
+  path = unquote(substr($0, 1, t - 1))
+  lang = removed_lang(path)
+  if (lang != "") for (k = scan(lang, substr($0, t + 1), R); k > 0; k--) base[path, R[k, "key"]]++
   next
 }
 FILENAME == ARGV[2] {
@@ -870,7 +890,7 @@ lang == "" { next }
       reason = above_ok
     }
     if (M[k, "banned"] == "" && M[k, "named"] && reason) continue
-    if (base[M[k, "key"]] > 0) { base[M[k, "key"]]--; continue }
+    if (base[name, M[k, "key"]] > 0) { base[name, M[k, "key"]]--; continue }
     label = M[k, "label"]
     if (M[k, "banned"] != "") msg = M[k, "banned"]
     else if (!M[k, "named"] && !reason) msg = label " names no rule and gives no reason; write it like: " form_of(label) (M[k, "field"] ? "" : " (or with the reason in a comment on the line above)")
