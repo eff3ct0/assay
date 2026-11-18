@@ -14,7 +14,10 @@ let
   # Built with the repo's own pkgs, so the input can stay `flake: false`.
   assay = pkgs.callPackage ../nix/package.nix { };
 
-  defaultChecks = defaults { inherit config lib pkgs; };
+  defaults' = defaults { inherit config lib pkgs; };
+  # The checks, without the tools each one lists.
+  defaultChecks = lib.mapAttrs (_: d: removeAttrs d [ "packages" ]) defaults';
+  defaultTools = lib.concatMap (d: d.packages or [ ]) (lib.attrValues defaults');
 
   # A loosening: the repo turns one of assay's default checks off, or redefines its exec.
   loosenings = lib.concatLists (
@@ -141,7 +144,7 @@ in
   config = {
     assay.checks = lib.mapAttrs (_: lib.mapAttrs (_: mkDefault)) defaultChecks;
 
-    packages = [ assay ];
+    packages = [ assay ] ++ defaultTools;
     env.ASSAY_CONFIG = "${configFile}";
     env.ASSAY_SEED = toString cfg.seed;
 
