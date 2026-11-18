@@ -21,6 +21,7 @@ writeShellApplication {
   + builtins.readFile ../assay.sh;
   meta = {
     description = "A repo's named checks, run the same way from pre-commit, devenv test and an agent's shell";
+    license = lib.licenses.mit;
     mainProgram = "assay";
   };
 }

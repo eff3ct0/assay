@@ -5,6 +5,8 @@ A repo's named checks, declared once in its devenv and run the same way from pre
 
 ## In a repo
 
+An existing repo adopts assay in a change of its own, before other work: [docs/adoption.md](docs/adoption.md).
+
 `devenv.yaml`:
 
 ```yaml
@@ -80,9 +82,40 @@ assay check --list                                  list them, fast ones marked
   and its full log, `<git-dir>/assay/<check>.log`; a last line with the count and the command that reruns the
   failures.
 - Exit codes: `0` every selected check passed, `1` at least one failed, `2` assay could not run (usage, no
-  configuration, no base, not in a git repo), with an `assay:` message on stderr.
+  configuration, no base, not in a git repo, a repo that has not adopted assay), with an `assay:` message on stderr.
 - The base of the change, exported to each check as `ASSAY_BASE`: `--base`, else `ASSAY_BASE`, else GitHub's event
   when `GITHUB_EVENT_PATH` is set (`pull_request.base.sha`, or a push's `before` unless all zeros), else
   `git merge-base --fork-point <default> HEAD`, else `git merge-base <default> HEAD`. The default branch is
   `origin/HEAD`'s target, else `origin/main`, `origin/master`, `main` or `master`. assay never fetches: a base missing
   from the clone is exit 2.
+
+### From outside the devenv
+
+`assay` knows it runs inside the repo's devenv when `ASSAY_CONFIG` is set. Outside it, as in a shell that does not
+activate direnv, `assay check <args>` re-executes itself as `devenv shell -- assay check <args>` from the repo root,
+so the version the repo pins always decides; `nix run github:eff3ct0/assay -- check` behaves the same. A repo without
+`devenv.nix`, or whose devenv does not import assay's module, is exit 2: the message names
+[docs/adoption.md](docs/adoption.md) and says that an adoption is a change of its own, made before other work.
+
+The machine-level subcommands, `guard`, `git-hook` and `collect`, never delegate; this version only prints their
+usage.
+
+## The hits log
+
+When `ASSAY_HITS_LOG` names a file, each `assay check` run appends one JSON line to it, passing or not. Append-only
+and best-effort: a failed write is ignored and never changes an exit code. The run that executes the checks writes
+it, never the `assay` that delegates to the repo's devenv.
+
+- Every line: `v` (the line format's version, `1`), `time` (UTC, RFC 3339), `source` (`guard`, `git-hook` or
+  `check`), `repo` (the absolute path of the main checkout, from `git rev-parse --git-common-dir`), `agent` (the value
+  of `ASSAY_AGENT`, or `null`).
+- `check`: `mode` (`fast` or `full`), `only` (the check names given, once each and in name order; empty for all),
+  `seconds`, `failed` (the failing checks' names) and `exit`.
+
+```json
+{"v":1,"time":"2026-11-18T21:04:05Z","source":"check","repo":"/path/to/repo","agent":null,"mode":"fast","only":[],"seconds":0.42,"failed":["lint"],"exit":1}
+```
+
+## License
+
+[MIT](LICENSE)
