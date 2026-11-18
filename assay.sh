@@ -373,11 +373,12 @@ old > 0 || new > 0 {
 }
 '
 
-# new_code <diff file>: the new code in a diff from change_diff, as NUL-terminated records: a path, then the first
-# and the last line of one of its ranges. A file's ranges come in order.
+# new_code <diff file> [<removed file>]: the new code in a diff from change_diff, as NUL-terminated records: a path,
+# then the first and the last line of one of its ranges. A file's ranges come in order. With a second file, the
+# lines the change removes are written there too, as diff_awk writes them.
 new_code() {
   local first last path
-  LC_ALL=C awk "$diff_awk" "$1" | while IFS=$'\t' read -r first last path; do
+  LC_ALL=C awk -v removed="${2:-}" "$diff_awk" "$1" | while IFS=$'\t' read -r first last path; do
     if [[ $path == \"*\" ]]; then
       path=${path:1:${#path}-2}
       path=${path//%/%%}
@@ -582,6 +583,338 @@ builtin_gitleaks() {
   finish 1
 }
 
+# suppressions: a new suppression on new code names the rule it silences and gives a reason. The markers are known
+# per language, which a file's extension gives (a shell script's shebang too, when it has none). A marker with a
+# reason field must give the reason there; one without takes a comment on the same line or a comment line just
+# above. A suppression the change also removes (the same marker and rules on a removed line: a modified or a moved
+# line) is not new.
+#
+# Inputs, in this order: the removed lines ("<path>\t<text>", from diff_awk), the new code ("<n>\t<first>\t<last>",
+# <n> being the position of the file among those that follow) and the files that hold new code, each as ./<path>.
+# Prints each new suppression that falls short as "<path>:<line>: <problem>" with the line under it, then a count;
+# exits 1 when there is any.
+# shellcheck disable=SC2016 # awk's $0, not the shell's
+suppressions_awk='
+BEGIN {
+  for (i = 3; i < ARGC; i++) position[ARGV[i]] = i - 2
+  form["noqa"] = "# noqa: E501  # <why>"
+  form["ruff: noqa"] = "# ruff: noqa: E501  # <why>"
+  form["flake8: noqa"] = "# flake8: noqa: E501  # <why>"
+  form["type: ignore"] = "# type: ignore[attr-defined]  # <why>"
+  form["pyright: ignore"] = "# pyright: ignore[reportAttributeAccessIssue]  # <why>"
+  form["pragma: no cover"] = "# pragma: no cover  # <why>"
+  form["pragma: no branch"] = "# pragma: no branch  # <why>"
+  form["shellcheck disable"] = "# shellcheck disable=SC2086 # <why>"
+  form["@ts-expect-error"] = "// @ts-expect-error TS2345: <why>"
+  form["Stryker disable"] = "// Stryker disable next-line EqualityOperator: <why>"
+  form["#[allow]"] = "#[allow(clippy::too_many_lines, reason = \"<why>\")]"
+  form["#![allow]"] = "#![allow(dead_code, reason = \"<why>\")]"
+  form["#[expect]"] = "#[expect(clippy::too_many_lines, reason = \"<why>\")]"
+  form["#![expect]"] = "#![expect(dead_code, reason = \"<why>\")]"
+  form["#[mutants::skip]"] = "#[mutants::skip] // <why>"
+  form["@nowarn"] = "@nowarn(\"cat=deprecation\") // <why>"
+  form["@SuppressWarnings"] = "@SuppressWarnings(Array(\"org.wartremover.warts.Var\")) // <why>"
+  form["scalafix:off"] = "// scalafix:off DisableSyntax.var; <why>"
+  form["scalafix:ok"] = "// scalafix:ok DisableSyntax.var; <why>"
+  bad = 0
+}
+
+# The language of a file, by its extension; "none" for a file that has none.
+function ext_lang(p,   b, e) {
+  b = p
+  sub(/.*\//, "", b)
+  if (!match(b, /.\.[^.]+$/)) return "none"
+  e = tolower(substr(b, RSTART + 2))
+  if (e ~ /^(js|jsx|mjs|cjs|ts|tsx|mts|cts|vue|svelte)$/) return "js"
+  if (e ~ /^(py|pyi)$/) return "py"
+  if (e == "rs") return "rs"
+  if (e ~ /^(scala|sc|sbt)$/) return "scala"
+  if (e ~ /^(sh|bash|bats)$/) return "sh"
+  return ""
+}
+function shebang_lang(first) {
+  return (first ~ /^#![ \t]*[^ \t]*\/(env[ \t]+(-[^ \t]+[ \t]+)*)?((ba|da|k)?sh|bats)([ \t]|$)/) ? "sh" : ""
+}
+# The language of a removed line, by its path as diff_awk gives it (quoted or not).
+function removed_lang(p,   q, l, first) {
+  q = (p ~ /^".*"$/)
+  if (q) p = substr(p, 2, length(p) - 2)
+  l = ext_lang(p)
+  if (l != "none") return l
+  if (q) return ""
+  if (!(p in shebang_of)) {
+    first = ""
+    if ((getline first < p) > 0) shebang_of[p] = shebang_lang(first); else shebang_of[p] = ""
+    close(p)
+  }
+  return shebang_of[p]
+}
+
+function has_text(s) { return s ~ /[^[:space:][:punct:]]/ }
+# A comment line with text, in the language.
+function comment_line(lang, s) {
+  if (lang == "py" || lang == "sh") {
+    if (s !~ /^[ \t]*#/ || s ~ /^[ \t]*#!/) return 0
+    match(s, /#/)
+  } else if (!match(s, /^[ \t]*(\/\/|\/\*|\*)/)) return 0
+  return has_text(substr(s, RSTART + RLENGTH))
+}
+# A comment with text in what is left of a line once its markers are cut out.
+function trailing_comment(lang, w) {
+  if (lang == "py" || lang == "sh") { if (!match(w, /#/)) return 0 }
+  else if (!match(w, /\/\/|\/\*/)) return 0
+  return has_text(substr(w, RSTART + RLENGTH))
+}
+function squeeze(s) { gsub(/[ \t:]+/, "", s); return s }
+# The body of a comment that starts at the end of the match: up to its "*/", or the end.
+function body(w, from,   s) {
+  s = substr(w, from)
+  if (match(s, /\*\//)) s = substr(s, 1, RSTART - 1)
+  return s
+}
+
+# add(M, label, key, named, reason, field): one marker found by scan. reason: given in its field, or (without a field)
+# in a comment on the same line, which scan settles once every marker of the line is cut out.
+function add(M, label, key, named, reason, field,   j) {
+  j = ++M["n"]
+  M[j, "label"] = label; M[j, "key"] = label ":" key; M[j, "named"] = named
+  M[j, "reason"] = reason; M[j, "field"] = field; M[j, "banned"] = ""
+}
+# cut(w): w with the last match blanked out, so that it is not found again and is no comment of its own.
+function cut(w, len) { return substr(w, 1, RSTART - 1) " " substr(w, RSTART + (len ? len : RLENGTH)) }
+
+# qlty-ignore, in the comment syntax of the language: qlty-ignore: <tool:rule>..., or qlty-ignore(<tool:rule>...):
+# <why>. Specs that all start with "-" end a region and are no suppression.
+function scan_qlty(M, w, delim,   s, specs, why, at, len, named) {
+  while (match(w, "(" delim ")[ \t]*qlty-ignore")) {
+    at = RSTART; len = RLENGTH
+    s = body(w, at + len)
+    why = ""
+    if (match(s, /^[ \t]*\([^)]*\)/)) {
+      specs = substr(s, RSTART, RLENGTH); why = substr(s, RSTART + RLENGTH)
+      gsub(/[()]/, "", specs)
+      if (!sub(/^[ \t]*:/, "", why)) why = ""
+    } else {
+      specs = s; sub(/^[ \t]*:/, "", specs)
+    }
+    RSTART = at
+    w = cut(w, len + length(s))
+    if (specs ~ /^[ \t,]*(-[^ \t,]+[ \t,]*)+$/) continue
+    named = (specs ~ /(^|[ \t,])[+>]?[a-z0-9_.-]+[:\/][^ \t,]/)
+    add(M, "qlty-ignore", squeeze(specs), named, has_text(why), 1)
+  }
+  return w
+}
+
+# scan(lang, s, M): the suppressions in s, into M (see add). Returns how many.
+function scan(lang, s, M,   w, t, at, len, rules, why, label, j, k, same, c) {
+  M["n"] = 0
+  w = tolower(s)
+  if (lang == "py") {
+    while (match(w, /#[ \t]*((ruff|flake8)[ \t]*:[ \t]*)?noqa([ \t]*:[ \t]*[a-z]+[0-9]+([ \t]*,?[ \t]*[a-z]+[0-9]+)*)?/)) {
+      t = substr(w, RSTART, RLENGTH); w = cut(w)
+      label = (t ~ /ruff[ \t]*:/) ? "ruff: noqa" : (t ~ /flake8[ \t]*:/) ? "flake8: noqa" : "noqa"
+      rules = t; sub(/.*noqa/, "", rules)
+      add(M, label, squeeze(rules), squeeze(rules) != "", 0, 0)
+    }
+    while (match(w, /#[ \t]*(type|pyright):[ \t]*ignore(\[[^]]*\])?/)) {
+      t = substr(w, RSTART, RLENGTH); w = cut(w)
+      label = (t ~ /pyright/) ? "pyright: ignore" : "type: ignore"
+      rules = t; sub(/^[^[]*/, "", rules); gsub(/[][]/, "", rules)
+      add(M, label, squeeze(rules), has_text(rules), 0, 0)
+    }
+    while (match(w, /#[ \t]*pragma:[ \t]*no[ \t]+(cover|branch)/)) {
+      t = substr(w, RSTART, RLENGTH); w = cut(w)
+      label = (t ~ /cover/) ? "pragma: no cover" : "pragma: no branch"
+      add(M, label, "", 1, 0, 0)
+    }
+    w = scan_qlty(M, w, "#")
+  } else if (lang == "sh") {
+    while (match(w, /#[ \t]*shellcheck[ \t]+([a-z]+=[^ \t]*[ \t]+)*disable=[^ \t]*/)) {
+      t = substr(w, RSTART, RLENGTH); w = cut(w)
+      rules = t; sub(/.*disable=/, "", rules)
+      add(M, "shellcheck disable", rules, has_text(rules) && ("," rules ",") !~ /,all,/, 0, 0)
+    }
+  } else if (lang == "js") {
+    while (match(w, /(\/\/|\/\*)[ \t]*(eslint|oxlint)-disable(-next-line|-line)?/)) {
+      at = RSTART; len = RLENGTH
+      t = substr(w, at, len); label = t; sub(/^[^a-z]*/, "", label)
+      c = substr(w, at + len, 1)
+      if (c != "" && c != " " && c != "\t" && c != "*") { w = cut(w); continue }
+      rules = body(w, at + len); RSTART = at; w = cut(w, len + length(rules))
+      why = ""
+      if (match(rules, /--+/)) { why = substr(rules, RSTART + RLENGTH); rules = substr(rules, 1, RSTART - 1) }
+      add(M, label, squeeze(rules), rules ~ /[a-z0-9@]/, has_text(why), 1)
+    }
+    while (match(w, /(\/\/|\/\*)[ \t]*@ts-(ignore|nocheck|expect-error)/)) {
+      at = RSTART; len = RLENGTH
+      t = substr(w, at, len); label = t; sub(/^[^@]*/, "", label)
+      why = body(w, at + len); RSTART = at; w = cut(w, len + length(why))
+      if (label == "@ts-expect-error") {
+        rules = ""
+        while (match(why, /ts[0-9]+/)) { rules = rules "," substr(why, RSTART, RLENGTH); why = cut(why) }
+        add(M, label, rules, rules != "", has_text(why), 1)
+        continue
+      }
+      add(M, label, "", 0, 0, 1)
+      j = M["n"]
+      if (label == "@ts-ignore")
+        M[j, "banned"] = "@ts-ignore is not allowed; use @ts-expect-error, which fails once the error is gone, like: " form["@ts-expect-error"]
+      else
+        M[j, "banned"] = "@ts-nocheck silences the whole file; fix its errors, or silence each one like: " form["@ts-expect-error"]
+    }
+    while (match(w, /(\/\/|\/\*)[ \t]*stryker[ \t]+disable/)) {
+      at = RSTART; len = RLENGTH
+      rules = body(w, at + len); RSTART = at; w = cut(w, len + length(rules))
+      why = ""
+      if (match(rules, /:/)) { why = substr(rules, RSTART + 1); rules = substr(rules, 1, RSTART - 1) }
+      sub(/^[ \t]*(next-line|line)([ \t]|$)/, "", rules)
+      add(M, "Stryker disable", squeeze(rules), has_text(rules) && (" " rules " ") !~ /[ \t,]all[ \t,]/, has_text(why), 1)
+    }
+    w = scan_qlty(M, w, "\\/\\/|\\/\\*")
+  } else if (lang == "rs") {
+    while (match(w, /#!?\[[ \t]*(allow|expect)[ \t]*\(/)) {
+      at = RSTART; len = RLENGTH
+      t = substr(w, at, len); label = (t ~ /!/ ? "#![" : "#[") (t ~ /allow/ ? "allow" : "expect") "]"
+      rules = substr(w, at + len)
+      if (match(rules, /\)[ \t]*\]/)) rules = substr(rules, 1, RSTART - 1)
+      RSTART = at; w = cut(w, len + length(rules))
+      why = ""
+      if (match(rules, /reason[ \t]*=[ \t]*"[^"]*"/)) {
+        why = substr(rules, RSTART, RLENGTH); sub(/^[^"]*"/, "", why)
+        rules = cut(rules)
+      }
+      add(M, label, squeeze(rules), rules ~ /[a-z_]/, has_text(why), 1)
+    }
+    while (match(w, /#\[[ \t]*mutants::skip[ \t]*\]/)) {
+      w = cut(w)
+      add(M, "#[mutants::skip]", "", 1, 0, 0)
+    }
+    w = scan_qlty(M, w, "\\/\\/|\\/\\*")
+  } else if (lang == "scala") {
+    while (match(w, /@nowarn([ \t]*\([^)]*\))?/)) {
+      t = substr(w, RSTART, RLENGTH); w = cut(w)
+      rules = t; sub(/^@nowarn/, "", rules)
+      add(M, "@nowarn", squeeze(rules), rules ~ /"[^"]*[^"[:space:]][^"]*"/, 0, 0)
+    }
+    while (match(w, /@suppresswarnings[ \t]*(\(([^()]|\([^()]*\))*\))?/)) {
+      t = substr(w, RSTART, RLENGTH); w = cut(w)
+      rules = t; sub(/^@suppresswarnings/, "", rules)
+      add(M, "@SuppressWarnings", squeeze(rules), rules ~ /"[^"]*[^"[:space:]][^"]*"/, 0, 0)
+    }
+    while (match(w, /\/\/[ \t]*scalafix:(off|ok)/)) {
+      at = RSTART; len = RLENGTH
+      t = substr(w, at, len); label = t; sub(/^[^s]*/, "", label)
+      rules = substr(w, at + len); RSTART = at; w = cut(w, len + length(rules))
+      why = ""
+      if (match(rules, /;/)) { why = substr(rules, RSTART + 1); rules = substr(rules, 1, RSTART - 1) }
+      add(M, label, squeeze(rules), has_text(rules), has_text(why), 1)
+    }
+    w = scan_qlty(M, w, "\\/\\/|\\/\\*")
+  }
+  # A marker without a reason field takes its reason from a comment left on the line.
+  same = trailing_comment(lang, w)
+  for (k = 1; k <= M["n"]; k++) if (!M[k, "field"]) M[k, "reason"] = same
+  return M["n"]
+}
+
+function isnew(n, ln) {
+  while (ptr <= count[n] && last[n, ptr] + 0 < ln) ptr++
+  return ptr <= count[n] && first[n, ptr] + 0 <= ln
+}
+function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t\r]+$/, "", s); return s }
+
+FILENAME == ARGV[1] {
+  t = index($0, "\t")
+  lang = removed_lang(substr($0, 1, t - 1))
+  if (lang != "") for (k = scan(lang, substr($0, t + 1), R); k > 0; k--) base[R[k, "key"]]++
+  next
+}
+FILENAME == ARGV[2] {
+  split($0, r, "\t")
+  n = r[1]; count[n]++; first[n, count[n]] = r[2]; last[n, count[n]] = r[3]
+  next
+}
+FNR == 1 {
+  n = position[FILENAME]; name = substr(FILENAME, 3); ptr = 1; prev = ""
+  lang = ext_lang(name)
+  if (lang == "none") lang = shebang_lang($0)
+}
+lang == "" { next }
+{
+  line = $0; at = FNR; text = $0; fresh = isnew(n, FNR); w = tolower($0)
+  # An attribute or a block comment over several lines is read whole; it is new when any of its lines is.
+  if ((lang == "rs" && w ~ /#!?\[[ \t]*(allow|expect)[ \t]*\(/ && w !~ /\)[ \t]*\]/) ||
+      (lang == "js" && w ~ /\/\*[ \t]*(eslint|oxlint)-disable/ && w !~ /\/\*[ \t]*(eslint|oxlint)-disable.*\*\//)) {
+    nxt = $0
+    for (j = 0; j < 50 && (getline nxt) > 0; j++) {
+      text = text " " nxt
+      if (isnew(n, FNR)) fresh = 1
+      if ((lang == "rs" && nxt ~ /\)[ \t]*\]/) || (lang == "js" && nxt ~ /\*\//)) break
+    }
+    $0 = nxt
+  }
+  above = prev
+  prev = $0
+  if (!fresh || scan(lang, text, M) == 0) next
+  checked_above = 0
+  for (k = 1; k <= M["n"]; k++) {
+    reason = M[k, "reason"]
+    if (!reason && !M[k, "field"]) {
+      if (!checked_above) { above_ok = comment_line(lang, above) && scan(lang, above, A) == 0; checked_above = 1 }
+      reason = above_ok
+    }
+    if (M[k, "banned"] == "" && M[k, "named"] && reason) continue
+    if (base[M[k, "key"]] > 0) { base[M[k, "key"]]--; continue }
+    label = M[k, "label"]
+    if (M[k, "banned"] != "") msg = M[k, "banned"]
+    else if (!M[k, "named"] && !reason) msg = label " names no rule and gives no reason; write it like: " form_of(label) (M[k, "field"] ? "" : " (or with the reason in a comment on the line above)")
+    else if (!M[k, "named"]) msg = label " names no rule; name the one it silences, like: " form_of(label)
+    else msg = label " gives no reason; give one, like: " form_of(label) (M[k, "field"] ? "" : " (or in a comment on the line above)")
+    printf "%s:%d: %s\n    %s\n", name, at, msg, trim(line)
+    bad++
+  }
+}
+function form_of(label) {
+  if (label in form) return form[label]
+  if (label == "qlty-ignore") return (lang == "py" ? "# " : "// ") "qlty-ignore(eslint:camelcase): <why>"
+  return "// " label " no-console -- <why>"
+}
+END {
+  if (bad == 0) exit 0
+  printf "%d new suppression%s short: each one names the rule it silences and gives a reason.\n", bad, (bad == 1 ? " falls" : "s fall")
+  exit 1
+}
+'
+
+builtin_suppressions() {
+  local diff removed ranges path first last n=0 rc=0
+  local -a files=()
+  local -A position=()
+  parse_base_option suppressions "$@"
+  find_repo
+  resolve_base
+  tmp_file diff
+  tmp_file removed
+  tmp_file ranges
+  change_diff "$base_sha" >"$diff"
+  while IFS= read -r -d '' path && IFS= read -r -d '' first && IFS= read -r -d '' last; do
+    if [ -z "${position[$path]+set}" ]; then
+      if [ -L "$path" ] || [ ! -f "$path" ]; then continue; fi
+      n=$((n + 1))
+      position[$path]=$n
+      files+=("./$path")
+    fi
+    printf '%s\t%s\t%s\n' "${position[$path]}" "$first" "$last"
+  done < <(new_code "$diff" "$removed") >"$ranges"
+  [ "$n" -gt 0 ] || finish 0
+  LC_ALL=C awk "$suppressions_awk" "$removed" "$ranges" "${files[@]}" || rc=$?
+  case $rc in
+    0 | 1) finish "$rc" ;;
+    *) die "cannot read the files that hold new code (awk exit $rc)" ;;
+  esac
+}
+
 cmd_builtin() {
   [ $# -ge 1 ] || usage_error "builtin needs the name of a built-in check"
   local check=$1
@@ -590,6 +923,7 @@ cmd_builtin() {
     agents-md) builtin_agents_md "$@" ;;
     commit-trailers) builtin_commit_trailers "$@" ;;
     gitleaks) builtin_gitleaks "$@" ;;
+    suppressions) builtin_suppressions "$@" ;;
     *) usage_error "no built-in check named '$check'" ;;
   esac
 }
