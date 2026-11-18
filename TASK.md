@@ -37,10 +37,10 @@ nixos-config issues it links.
 
 ## Steps
 
-1. [ ] Delegation + exit 2 + stubs, with `test/stub/devenv` and `test/delegate.bats`.
-2. [ ] Hits log writer + check lines, `test/hits.bats`.
-3. [ ] Real devenv tests in `test/devenv/module.bats` (delegation, unadopted consumer).
-4. [ ] Self-adoption files, `.gitignore`, `devenv.lock`; `nix run . -- check --list`; `devenv test`; hook on commit.
-5. [ ] `check.yml`, `docs/adoption.md`, `GLOSSARY.md`, `AGENTS.md`, `README.md`, `LICENSE`, package license.
-6. [ ] `nix flake check` (patchShebangs and shellcheck the stub), `bats test/devenv`, genericity grep.
+1. [x] Delegation + exit 2 + stubs, with `test/stub/devenv` and `test/delegate.bats`.
+2. [x] Hits log writer + check lines, `test/hits.bats`.
+3. [x] Real devenv tests in `test/devenv/module.bats` (delegation, unadopted consumer).
+4. [x] Self-adoption files, `.gitignore`, `devenv.lock`; `nix run . -- check --list`; `devenv test`; hook on commit.
+5. [x] `check.yml`, `docs/adoption.md`, `GLOSSARY.md`, `AGENTS.md`, `README.md`, `LICENSE`, package license.
+6. [x] `nix flake check` (patchShebangs and shellcheck the stub), `bats test/devenv`, genericity grep.
 7. [ ] code-review skill, critic, push, PR (CI on the PR is an acceptance criterion).
