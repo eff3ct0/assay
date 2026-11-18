@@ -30,7 +30,8 @@ let
     };
   };
 
-  # The module with one default check, `demo`, and a repo's own definitions.
+  # The module with two default checks, `demo` and `tested` (which writes a coverage report and needs a tool), and
+  # a repo's own definitions.
   evalWith =
     repo:
     (lib.evalModules {
@@ -41,6 +42,11 @@ let
             demo = {
               exec = "true";
               fast = true;
+            };
+            tested = {
+              exec = "run-tests";
+              coverage = "$ASSAY_DIR/t.xml";
+              packages = [ pkgs.hello ];
             };
           };
         })
@@ -73,6 +79,25 @@ let
     assay.seed = 7;
     git-hooks.hooks.assay.entry = "other";
   };
+  lowered = evalWith {
+    assay.coverage = {
+      newCode = 50;
+      reason = "legacy scripts";
+    };
+  };
+  uncovered = evalWith {
+    assay.checks.tested = {
+      coverage = null;
+      reason = "no report for the test";
+    };
+  };
+  untested = evalWith {
+    assay.checks.tested = {
+      enable = false;
+      reason = "off for the test";
+    };
+  };
+  names = config: map (p: lib.getName p) config.packages;
 
   expectations = {
     "turning a default off without a reason fails evaluation" =
@@ -93,6 +118,22 @@ let
       };
     };
     "the repo's own check is no loosening" = evaluates { assay.checks.own.exec = "true"; };
+    "lowering assay.coverage.newCode without a reason fails evaluation" =
+      !evaluates {
+        assay.coverage.newCode = 79;
+      };
+    "raising assay.coverage.newCode is no loosening" = evaluates { assay.coverage.newCode = 90; };
+    "dropping a default check's coverage without a reason fails evaluation" =
+      !evaluates {
+        assay.checks.tested.coverage = null;
+      };
+    "changing a default check's coverage report without a reason fails evaluation" =
+      !evaluates {
+        assay.checks.tested.coverage = "other.xml";
+      };
+    "adding coverage to a check is no loosening" = evaluates {
+      assay.checks.demo.coverage = "lcov.info";
+    };
     "a check name that cannot be a file name fails evaluation" =
       !evaluates {
         assay.checks."a/b".exec = "true";
@@ -109,7 +150,17 @@ let
       };
     "a plain definition changes a hook field" = own.git-hooks.hooks.assay.entry == "other";
     "enterTest runs assay check" = lib.hasInfix "assay check\n" plain.enterTest;
-    "packages has the CLI" = map (p: p.name) plain.packages == [ "assay" ];
+    "packages has the CLI, the default checks' tools and diff-cover" =
+      names plain == [
+        "assay"
+        "hello"
+        "diff-cover"
+      ];
+    "without an enabled check that declares coverage, no diff-cover" =
+      names untested == [
+        "assay"
+        "hello"
+      ];
   };
   failed = lib.attrNames (lib.filterAttrs (_: ok: !ok) expectations);
 in
@@ -143,14 +194,22 @@ in
       ''
         ${lib.concatMapStrings (f: "echo ${lib.escapeShellArg "FAIL: ${f}"} >&2\n") failed}
         ${lib.optionalString (failed != [ ]) "exit 1"}
-        jq -e '. == {version: 1, checks: {demo: {exec: "true", fast: true, enable: true, requires: null}}, loosenings: []}' \
+        jq -e '. == {version: 1,
+          checks: {
+            demo: {exec: "true", fast: true, enable: true, requires: null, coverage: null},
+            tested: {exec: "run-tests", fast: false, enable: true, requires: null, coverage: "$ASSAY_DIR/t.xml"}},
+          coverage: {newCode: 80}, loosenings: []}' \
           ${plain.env.ASSAY_CONFIG}
         jq -e '.checks.demo.enable == false and .loosenings == [{check: "demo", kind: "off", reason: "off for the test"}]' \
           ${off.env.ASSAY_CONFIG}
         jq -e '.checks.demo.exec == "echo mine" and .loosenings == [{check: "demo", kind: "exec", reason: "mine for the test"}]' \
           ${exec.env.ASSAY_CONFIG}
-        jq -e '.checks.own == {exec: "make lint", fast: false, enable: true, requires: "Makefile"} and .loosenings == []' \
+        jq -e '.checks.own == {exec: "make lint", fast: false, enable: true, requires: "Makefile", coverage: null} and .loosenings == []' \
           ${own.env.ASSAY_CONFIG}
+        jq -e '.coverage == {newCode: 50} and .loosenings == [{kind: "new-code", newCode: 50, default: 80, reason: "legacy scripts"}]' \
+          ${lowered.env.ASSAY_CONFIG}
+        jq -e '.checks.tested.coverage == null and .loosenings == [{check: "tested", kind: "coverage", reason: "no report for the test"}]' \
+          ${uncovered.env.ASSAY_CONFIG}
         touch $out
       '';
 }

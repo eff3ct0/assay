@@ -117,23 +117,30 @@ log_run() {
 config_jq='
 def fail($m): "\($m)\n" | halt_error(1);
 def text: type == "string" and length > 0;
+def percent: type == "number" and . == floor and . >= 0 and . <= 100;
 def check_ok($n):
   if type != "object" then fail("check \($n): not an object")
   elif (.exec | text | not) then fail("check \($n): exec must be a non-empty string")
   elif (.fast | type) != "boolean" then fail("check \($n): fast must be true or false")
   elif (.enable | type) != "boolean" then fail("check \($n): enable must be true or false")
   elif .requires != null and (.requires | text | not) then fail("check \($n): requires must be null or a non-empty string")
+  elif .coverage != null and (.coverage | text | not) then fail("check \($n): coverage must be null or a non-empty string")
   else . end;
 def loosening_ok($checks):
   if type != "object" then fail("a loosening is not an object")
+  elif .kind == "new-code" then
+    if (.newCode | percent | not) or (.default | percent | not) then fail("loosening of new code: newCode and default must be integers from 0 to 100")
+    elif (.reason | text | not) then fail("loosening of new code has no reason")
+    else . end
   elif (.check | type) != "string" or (.check as $k | $checks | has($k) | not) then fail("loosening of an unknown check \(.check | tojson)")
-  elif (.kind | IN("off", "exec") | not) then fail("loosening of \(.check): unknown kind \(.kind | tojson)")
+  elif (.kind | IN("off", "exec", "coverage") | not) then fail("loosening of \(.check): unknown kind \(.kind | tojson)")
   elif (.reason | text | not) then fail("loosening of \(.check) has no reason")
   else . end;
 def validate:
   if type != "object" then fail("not a JSON object")
   elif .version != 1 then fail("unknown version \(.version | tojson)")
   elif (.checks | type) != "object" then fail("checks must be an object")
+  elif (.coverage | type) != "object" or (.coverage.newCode | percent | not) then fail("coverage.newCode must be an integer from 0 to 100")
   elif (.loosenings | type) != "array" then fail("loosenings must be an array")
   else
     . as $c
@@ -151,16 +158,24 @@ def validate:
       "c_exec[\($n | @sh)]=\($c.exec | @sh)",
       "c_fast[\($n | @sh)]=\(if $c.fast then 1 else 0 end)",
       "c_enable[\($n | @sh)]=\(if $c.enable then 1 else 0 end)",
-      "c_requires[\($n | @sh)]=\($c.requires // "" | @sh)"),
-  (.loosenings[] | "loose_check+=(\(.check | @sh)) loose_kind+=(\(.kind | @sh)) loose_reason+=(\(.reason | @sh))"),
+      "c_requires[\($n | @sh)]=\($c.requires // "" | @sh)",
+      "c_coverage[\($n | @sh)]=\($c.coverage // "" | @sh)"),
+  "new_code=\(.coverage.newCode)",
+  (.loosenings[]
+    | "loose_check+=(\(.check // "" | @sh)) loose_kind+=(\(.kind | @sh)) loose_reason+=(\(.reason | @sh))",
+      "loose_value+=(\(if .kind == "new-code" then "\(.newCode) \(.default)" else "" end | @sh))"),
   "config_loaded=1"
 '
 
 names=()
-declare -A c_exec=() c_fast=() c_enable=() c_requires=()
+declare -A c_exec=() c_fast=() c_enable=() c_requires=() c_coverage=()
+# The percentage of the new lines a coverage report can cover that must be covered.
+new_code=
 loose_check=()
 loose_kind=()
 loose_reason=()
+# A new-code loosening's threshold and assay's default, "<newCode> <default>"; empty for the others.
+loose_value=()
 config_loaded=0
 
 # Only ever called with ASSAY_CONFIG set: without it, main delegates.
@@ -322,12 +337,80 @@ shell_word() {
   if [[ $1 =~ ^[A-Za-z0-9._/@:+=-]+$ ]]; then echo "$1"; else echo "'${1//\'/$q}'"; fi
 }
 
+# report_path <coverage> <assay dir>: the path of a check's coverage report. $ASSAY_DIR (or ${ASSAY_DIR}) in it
+# stands for assay's directory, and a relative path is taken from the repo root.
+# shellcheck disable=SC2016 # the literal text $ASSAY_DIR
+report_path() {
+  local p=${1//'${ASSAY_DIR}'/$2}
+  p=${p//'$ASSAY_DIR'/$2}
+  if [[ $p != /* ]]; then p=$root/$p; fi
+  echo "$p"
+}
+
+# measure <check> <report> <dir>: coverage of new code, for a check that passed. Runs diff-cover on the report
+# against the base, with the PATH assay was called with, writing its console report to <dir>/<check>.txt. Sets note
+# to what the check's line says about it, and returns 1 when the check fails on it: the new lines the report can
+# cover are under new_code percent covered, the report is missing, or diff-cover cannot run.
+measure() {
+  local n=$1 report=$2 dir=$3 rc=0 total missed covered
+  if [ ! -f "$report" ]; then
+    note="no coverage report at $report"
+    return 1
+  fi
+  mkdir -p "$dir"
+  {
+    echo "\$ diff-cover $(shell_word "$report") --compare-branch=$base_sha --diff-range-notation=.. --include-untracked"
+    PATH=$caller_path diff-cover "$report" --compare-branch="$base_sha" --diff-range-notation=.. \
+      --include-untracked --format "json:$dir/$n.json" </dev/null 2>&1 || rc=$?
+  } >"$dir/$n.txt"
+  if [ "$rc" -eq 127 ]; then
+    note="diff-cover not found"
+    return 1
+  elif [ "$rc" -ne 0 ]; then
+    note="diff-cover exit $rc"
+    return 1
+  fi
+  if ! read -r total missed < <(jq -r '"\(.total_num_lines) \(.total_num_violations)"' "$dir/$n.json" 2>/dev/null) ||
+    ! [[ $total =~ ^[0-9]+$ && $missed =~ ^[0-9]+$ ]]; then
+    note="cannot read diff-cover's report $dir/$n.json"
+    return 1
+  fi
+  if [ "$total" -eq 0 ]; then
+    note="new code: no lines to cover"
+    return 0
+  fi
+  covered=$((total - missed))
+  note="new code: $covered of $total lines covered"
+  # Exact: covered / total >= new_code / 100, without rounding.
+  if [ $((covered * 100)) -ge $((new_code * total)) ]; then return 0; fi
+  note+=", $((covered * 100 / total))%, under $new_code%"
+  return 1
+}
+
+# print_head <file>: the first 100 lines of a file, ending in a newline, and how many more it has.
+print_head() {
+  local lines
+  lines=$(wc -l <"$1")
+  if [ -n "$(tail -c 1 "$1")" ]; then lines=$((lines + 1)); fi
+  if [ "$lines" -eq 0 ]; then
+    echo "(no output)"
+    return 0
+  fi
+  head -n 100 "$1"
+  if [ -n "$(tail -c 1 "$1")" ] && [ "$lines" -le 100 ]; then echo; fi
+  if [ "$lines" -gt 100 ]; then echo "[$((lines - 100)) more lines in the log]"; fi
+}
+
 run_checks() {
-  local logdir=$gitdir/assay n log rc t0 now secs start i shown what
+  local logdir=$gitdir/assay n log rc t0 now secs start i shown what lowered default note report
+  local covdir=$gitdir/assay/coverage.tmp
   local -a skipped=()
-  declare -A is_skipped=() code=()
+  # why: what a failing check's lines say in parentheses; detail: the file its failure section shows instead of its
+  # log (diff-cover's report).
+  declare -A is_skipped=() why=() detail=()
   mkdir -p "$logdir" 2>/dev/null || die "cannot create $logdir"
   [ -w "$logdir" ] || die "cannot write to $logdir"
+  rm -rf "$covdir"
 
   for n in "${selected[@]}"; do
     if [ -n "${c_requires[$n]}" ] && ! requires_met "${c_requires[$n]}"; then
@@ -344,12 +427,24 @@ run_checks() {
   base_short=$(git rev-parse --short "$base_sha")
   if [[ $base_sha == "$base_label"* ]]; then shown=$base_short; else shown=$base_label@$base_short; fi
   echo "$mode · base $shown ($base_source)"
-  for i in "${!loose_check[@]}"; do
+  for i in "${!loose_kind[@]}"; do
+    n=${loose_check[$i]}
     case ${loose_kind[$i]} in
-      off) what="is off" ;;
-      exec) what="runs the repo's own exec" ;;
+      off) what="$n is off" ;;
+      exec) what="$n runs the repo's own exec" ;;
+      coverage)
+        if [ -z "${c_coverage[$n]}" ]; then
+          what="$n measures no coverage of new code"
+        else
+          what="$n reads another coverage report, ${c_coverage[$n]}"
+        fi
+        ;;
+      new-code)
+        read -r lowered default <<<"${loose_value[$i]}"
+        what="new code needs $lowered% coverage, not assay's $default%"
+        ;;
     esac
-    echo "  loosening: ${loose_check[$i]} $what: ${loose_reason[$i]//$'\n'/ }"
+    echo "  loosening: $what: ${loose_reason[$i]//$'\n'/ }"
   done
   for n in "${skipped[@]}"; do
     echo "  skipped: $n (no ${c_requires[$n]})"
@@ -367,14 +462,34 @@ run_checks() {
     now_us
     t0=$now
     rc=0
-    PATH=$caller_path ASSAY_BASE=$base_sha "$BASH" -c "${c_exec[$n]}" </dev/null >"$log" 2>&1 || rc=$?
+    report=
+    # A report left by an earlier run never counts.
+    if [ -n "${c_coverage[$n]}" ]; then
+      report=$(report_path "${c_coverage[$n]}" "$logdir")
+      rm -f "$report"
+    fi
+    PATH=$caller_path ASSAY_BASE=$base_sha ASSAY_DIR=$logdir "$BASH" -c "${c_exec[$n]}" </dev/null >"$log" 2>&1 ||
+      rc=$?
+    note=
+    if [ "$rc" -eq 0 ] && [ -n "$report" ]; then
+      if ! measure "$n" "$report" "$covdir"; then
+        failed+=("$n")
+        why[$n]=$note
+      fi
+      if [ -f "$covdir/$n.txt" ]; then
+        { echo; cat "$covdir/$n.txt"; } >>"$log"
+        detail[$n]=$covdir/$n.txt
+      fi
+    fi
     now_us
     fmt_secs secs $((now - t0))
-    if [ "$rc" -eq 0 ]; then
-      echo "ok   $n $secs"
+    if [ "$rc" -eq 0 ] && [ -z "${why[$n]:-}" ]; then
+      echo "ok   $n $secs${note:+ ($note)}"
+    elif [ "$rc" -eq 0 ]; then
+      echo "FAIL $n $secs (${why[$n]})"
     else
       failed+=("$n")
-      code[$n]=$rc
+      why[$n]="exit $rc"
       if [ "$rc" -eq 127 ]; then
         echo "FAIL $n $secs (exit 127: tool not found)"
       else
@@ -385,24 +500,17 @@ run_checks() {
   now_us
   fmt_secs secs $((now - start))
 
-  # Each failure: its command, the first 100 lines of its output, and the path of its full log.
-  local lines
+  # Each failure: its command, the first 100 lines of its output (of diff-cover's report, when it failed on
+  # coverage), and the path of its full log.
   for n in "${failed[@]}"; do
     log=$logdir/$n.log
-    lines=$(wc -l <"$log")
-    if [ -n "$(tail -c 1 "$log")" ]; then lines=$((lines + 1)); fi
     echo
-    echo "--- FAIL $n (exit ${code[$n]})"
+    echo "--- FAIL $n (${why[$n]})"
     echo "\$ ${c_exec[$n]}"
-    if [ "$lines" -eq 0 ]; then
-      echo "(no output)"
-    else
-      head -n 100 "$log"
-      if [ -n "$(tail -c 1 "$log")" ] && [ "$lines" -le 100 ]; then echo; fi
-      if [ "$lines" -gt 100 ]; then echo "[$((lines - 100)) more lines in the log]"; fi
-    fi
+    print_head "${detail[$n]:-$log}"
     echo "log: $log"
   done
+  rm -rf "$covdir"
 
   # The last line: the count, and the command that reruns the failures.
   local last rerun

@@ -89,8 +89,8 @@ load helpers
   run devenv shell -- true
   echo "$output"
   [ "$status" -ne 0 ]
-  [[ $output == *"a loosening needs a reason; set assay.checks.<name>.reason for:"* ]]
-  [[ $output == *"- demo: turned off"* ]]
+  [[ $output == *"a loosening needs a reason:"* ]]
+  [[ $output == *"- demo turned off; set assay.checks.demo.reason"* ]]
   devenv_nix '{ assay.checks.demo = { enable = false; reason = "too slow on this repo"; }; }'
   run --separate-stderr devenv shell -- assay check
   echo "$output"
@@ -104,7 +104,7 @@ load helpers
   run devenv shell -- true
   echo "$output"
   [ "$status" -ne 0 ]
-  [[ $output == *"- demo: exec redefined"* ]]
+  [[ $output == *"- demo's exec redefined; set assay.checks.demo.reason"* ]]
   devenv_nix '{ assay.checks.demo = { exec = "echo mine"; reason = "the repo has its own"; }; }'
   run --separate-stderr devenv shell -- assay check
   echo "$output"

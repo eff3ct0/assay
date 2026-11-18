@@ -46,12 +46,12 @@ devenv_files() {
 # no_checks: an empty configuration, pointed at by ASSAY_CONFIG.
 no_checks() {
   export ASSAY_CONFIG=$T/config.json
-  echo '{"version": 1, "checks": {}, "loosenings": []}' >"$ASSAY_CONFIG"
+  echo '{"version": 1, "checks": {}, "coverage": {"newCode": 80}, "loosenings": []}' >"$ASSAY_CONFIG"
 }
 
-# check <name> <exec> [--fast] [--off] [--requires <glob>]: add a check to the configuration.
+# check <name> <exec> [--fast] [--off] [--requires <glob>] [--coverage <path>]: add a check to the configuration.
 check() {
-  local name=$1 exec=$2 fast=false enable=true requires=null
+  local name=$1 exec=$2 fast=false enable=true requires=null coverage=null
   shift 2
   while [ $# -gt 0 ]; do
     case $1 in
@@ -61,11 +61,22 @@ check() {
         requires=$(jq -n --arg r "$2" '$r')
         shift
         ;;
+      --coverage)
+        coverage=$(jq -n --arg c "$2" '$c')
+        shift
+        ;;
     esac
     shift
   done
   jq --arg n "$name" --arg e "$exec" --argjson f "$fast" --argjson on "$enable" --argjson r "$requires" \
-    '.checks[$n] = {exec: $e, fast: $f, enable: $on, requires: $r}' "$ASSAY_CONFIG" >"$ASSAY_CONFIG.new"
+    --argjson c "$coverage" '.checks[$n] = {exec: $e, fast: $f, enable: $on, requires: $r, coverage: $c}' \
+    "$ASSAY_CONFIG" >"$ASSAY_CONFIG.new"
+  mv "$ASSAY_CONFIG.new" "$ASSAY_CONFIG"
+}
+
+# new_code <percent>: the configuration's coverage threshold for new code.
+new_code() {
+  jq --argjson p "$1" '.coverage.newCode = $p' "$ASSAY_CONFIG" >"$ASSAY_CONFIG.new"
   mv "$ASSAY_CONFIG.new" "$ASSAY_CONFIG"
 }
 

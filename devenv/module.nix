@@ -16,39 +16,52 @@ let
 
   defaultChecks = defaults { inherit config lib pkgs; };
 
-  # A loosening: the repo turns one of assay's default checks off, or redefines its exec.
-  loosenings = lib.concatLists (
-    lib.mapAttrsToList (
-      name: d:
-      let
-        c = cfg.checks.${name};
-      in
-      if (d.enable or true) && !c.enable then
-        [
-          {
+  # The coverage of new code assay asks for, in percent of the new lines a check's report can cover.
+  defaultNewCode = 80;
+
+  # A loosening: the repo turns one of assay's default checks off, redefines its exec, or changes the coverage
+  # report it is measured with; or it lowers assay.coverage.newCode.
+  loosenings =
+    lib.concatLists (
+      lib.mapAttrsToList (
+        name: d:
+        let
+          c = cfg.checks.${name};
+          loosening = kind: {
             check = name;
-            kind = "off";
+            inherit kind;
             inherit (c) reason;
-          }
-        ]
-      else if c.enable && c.exec != d.exec then
-        [
-          {
-            check = name;
-            kind = "exec";
-            inherit (c) reason;
-          }
-        ]
-      else
-        [ ]
-    ) defaultChecks
-  );
+            where = "assay.checks.${name}.reason";
+          };
+        in
+        if (d.enable or true) && !c.enable then
+          [ (loosening "off") ]
+        else
+          lib.optional (c.enable && c.exec != d.exec) (loosening "exec")
+          ++ lib.optional (c.enable && (d.coverage or null) != null && c.coverage != d.coverage) (
+            loosening "coverage"
+          )
+      ) defaultChecks
+    )
+    ++ lib.optional (cfg.coverage.newCode < defaultNewCode) {
+      kind = "new-code";
+      inherit (cfg.coverage) newCode reason;
+      default = defaultNewCode;
+      where = "assay.coverage.reason";
+    };
   unreasoned = builtins.filter (l: l.reason == null) loosenings;
+  describe =
+    l:
+    {
+      off = "${l.check} turned off";
+      exec = "${l.check}'s exec redefined";
+      coverage = "${l.check}'s coverage changed";
+      new-code = "assay.coverage.newCode lowered to ${toString l.newCode}, under assay's ${toString l.default}";
+    }
+    .${l.kind};
   unreasonedMessage = ''
-    assay: a loosening needs a reason; set assay.checks.<name>.reason for:
-    ${lib.concatMapStringsSep "\n" (
-      l: "  - ${l.check}: ${if l.kind == "off" then "turned off" else "exec redefined"}"
-    ) unreasoned}'';
+    assay: a loosening needs a reason:
+    ${lib.concatMapStringsSep "\n" (l: "  - ${describe l}; set ${l.where}") unreasoned}'';
 
   # Check names become log file names.
   badNames = builtins.filter (n: builtins.match "[A-Za-z0-9][A-Za-z0-9._-]*" n == null) (
@@ -73,9 +86,24 @@ let
               fast
               enable
               requires
+              coverage
               ;
           }) cfg.checks;
-          loosenings = map (l: { inherit (l) check kind reason; }) loosenings;
+          coverage = { inherit (cfg.coverage) newCode; };
+          loosenings = map (
+            l:
+            if l.kind == "new-code" then
+              {
+                inherit (l)
+                  kind
+                  newCode
+                  default
+                  reason
+                  ;
+              }
+            else
+              { inherit (l) check kind reason; }
+          ) loosenings;
         }
       );
 
@@ -109,12 +137,25 @@ let
           `assay check` prints `skip <name> (no <glob>)` and the check counts as passing.
         '';
       };
+      coverage = mkOption {
+        type = types.nullOr types.nonEmptyStr;
+        default = null;
+        example = "$ASSAY_DIR/coverage/lcov.info";
+        description = ''
+          The coverage report the check writes, LCOV or Cobertura: a path relative to the repo root, in which
+          `$ASSAY_DIR` stands for assay's directory in the git directory (`<git-dir>/assay`, exported to every check).
+          `assay check` removes it before the check runs; when the check passes, it runs diff-cover on it against the
+          base, and the check fails unless `assay.coverage.newCode` percent of the new lines the report can cover are
+          covered. Changing a default check's coverage is a loosening and needs `reason`.
+        '';
+      };
       reason = mkOption {
         type = types.nullOr types.nonEmptyStr;
         default = null;
         description = ''
-          Why the repo loosens one of assay's default checks: turns it off or redefines its exec. A loosening without
-          a reason fails evaluation; with one, `assay check` lists it in its header on every run.
+          Why the repo loosens one of assay's default checks: turns it off, redefines its exec or changes its
+          coverage. A loosening without a reason fails evaluation; with one, `assay check` lists it in its header on
+          every run.
         '';
       };
     };
@@ -126,6 +167,20 @@ in
       type = types.attrsOf (types.submodule checkModule);
       default = { };
       description = "The repo's named checks, run by `assay check`, assay's default checks included.";
+    };
+    coverage.newCode = mkOption {
+      type = types.ints.between 0 100;
+      default = defaultNewCode;
+      description = ''
+        The percentage of the new lines a check's coverage report can cover that must be covered, for every check
+        that declares `coverage`. No exemption for small changes. Lowering it is a loosening and needs
+        `assay.coverage.reason`.
+      '';
+    };
+    coverage.reason = mkOption {
+      type = types.nullOr types.nonEmptyStr;
+      default = null;
+      description = "Why the repo lowers `assay.coverage.newCode` below assay's default; `assay check` lists it in its header.";
     };
     seed = mkOption {
       type = types.ints.between 1 2147483647;
@@ -139,9 +194,18 @@ in
   };
 
   config = {
-    assay.checks = lib.mapAttrs (_: lib.mapAttrs (_: mkDefault)) defaultChecks;
+    assay.checks = lib.mapAttrs (
+      _: d: lib.mapAttrs (_: mkDefault) (removeAttrs d [ "packages" ])
+    ) defaultChecks;
 
-    packages = [ assay ];
+    # The CLI, the tools of assay's default checks, and diff-cover when an enabled check declares coverage.
+    packages = [
+      assay
+    ]
+    ++ lib.concatMap (d: d.packages or [ ]) (lib.attrValues defaultChecks)
+    ++ lib.optional (lib.any (c: c.enable && c.coverage != null) (
+      lib.attrValues cfg.checks
+    )) pkgs.python3Packages.diff-cover;
     env.ASSAY_CONFIG = "${configFile}";
     env.ASSAY_SEED = toString cfg.seed;
 
