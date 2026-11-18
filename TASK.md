@@ -62,10 +62,13 @@ nixos-config issues it links (#50, #52, #58, #56, #47). Branch `agent/nix-bash-d
 
 ## Remaining steps
 
-1. assay.sh: `ASSAY_DIR`, `coverage`, `coverage.newCode`, loosening kinds, diff-cover run (test/coverage.bats).
-2. module.nix: options, loosenings, `packages`, diff-cover; nix/checks.nix.
-3. nix/kcov.nix + patch; devenv/bin helpers (test/defaults.bats); flake devShell and sandbox tools.
-4. defaults.nix: Nix and bash checks; test/devenv/defaults.bats; module.bats's self-adoption expectation.
-5. assay adopts the defaults: devenv.nix, one cleanup commit per check.
-6. README, AGENTS.md, GLOSSARY, docs/adoption.md; `devenv test`, `nix flake check`, `bats test/devenv`.
-7. code-review skill, critic, recheck critic; push.
+Done: steps 1-5 (CLI coverage, module, helpers, kcov patch, defaults, devenv fixtures, assay's adoption with its
+shellcheck and shfmt cleanup commits). `devenv test` passes (bats: 436 of 480 new lines covered); `nix flake check`
+passed before the reformat; `bats test/devenv` passes inside the bats check.
+
+1. Docs: README.md (`coverage`, `assay.coverage.newCode`/`reason`, `ASSAY_DIR`, the Nix and bash defaults and their
+   helpers, the new loosening kinds), AGENTS.md (bats check runs test/devenv too; `nix/test-tools.nix`), GLOSSARY.md
+   if a term is missing, docs/adoption.md if needed.
+2. Re-run `nix flake check` after the reformat.
+3. `.git-blame-ignore-revs` for the shfmt commit only if p3rkins merges without squashing (ask).
+4. code-review skill, critic, recheck critic; push; p3rkins decides on the PR.
