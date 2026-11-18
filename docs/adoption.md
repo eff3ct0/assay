@@ -18,7 +18,6 @@ module.
 - The repo gains `devenv.yaml` and `devenv.nix`, or extends the ones it has, with the `assay` input and its import,
   plus the `git-hooks` input until devenv 2.4.1 (which brings it from assay's own `devenv/devenv.yaml`), as
   [README.md](../README.md#in-a-repo) shows.
-
 - It enables its languages in `devenv.nix` (`languages.<language>.enable = true;`).
 - `.gitignore` gains devenv's entries (`.devenv*`, `devenv.local.nix`, `devenv.local.yaml`) and
   `.pre-commit-config.yaml`, which devenv's git-hooks writes at the root as a symlink into the store. `devenv.lock`
@@ -74,8 +73,8 @@ instructions name `assay check`: `devenv test` runs every check, as CI does, and
 - A repo with a remote gains the weekly update workflow: every Monday, and on demand, it runs `devenv update assay`
   and `assay preset`, which brings later preset versions; when anything changed it runs `devenv test`, and only when
   that passes does it land the change as a `devenv.lock: update` commit, pushed to the default branch, or as one pull
-  request, refreshed by each run, where the default branch requires a review. A failed run lands nothing and leaves the pin where it was. Only `assay`
-  moves; the repo's other inputs are its own business.
+  request, refreshed by each run, where the default branch requires a review. A failed run lands nothing and leaves
+  the pin where it was. Only `assay` moves; the repo's other inputs are its own business.
 - A repo with no remote updates by hand: `devenv update assay`.
 - `devenv update assay` in an ordinary change brings a fix sooner.
 
