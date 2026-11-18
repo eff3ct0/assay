@@ -314,11 +314,12 @@ fails_closed() {
   [ ! -e "$T/ran" ]
 }
 
-@test "without ASSAY_CONFIG assay exits 2" {
+@test "without ASSAY_CONFIG, in a repo that has not adopted assay, assay exits 2" {
   local_repo
-  unset ASSAY_CONFIG
+  check a "touch $T/ran"
+  outside_devenv
   fails_closed unset
-  [[ $output == *"devenv shell -- assay check"* ]]
+  [[ $output == *"/docs/adoption.md"* ]]
 }
 
 @test "an unreadable configuration exits 2" {

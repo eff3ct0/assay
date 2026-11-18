@@ -4,7 +4,8 @@ setup() {
   T=$BATS_TEST_TMPDIR
   export HOME=$T/home GIT_CONFIG_GLOBAL=$T/gitconfig GIT_CONFIG_NOSYSTEM=1
   mkdir -p "$HOME"
-  unset ASSAY_CONFIG ASSAY_BASE GITHUB_EVENT_PATH assay_tools
+  # ASSAY_HITS_LOG and ASSAY_AGENT too: the suite, run on a machine that sets them, writes nothing to its log.
+  unset ASSAY_CONFIG ASSAY_BASE GITHUB_EVENT_PATH assay_tools ASSAY_HITS_LOG ASSAY_AGENT DEVENV_STUB_FAIL
   git config --global user.name Test
   git config --global user.email test@example.com
   git config --global init.defaultBranch main
@@ -15,7 +16,31 @@ setup() {
   git config --global maintenance.auto false
   # shellcheck disable=SC2034 # used by the .bats files
   assay=$BATS_TEST_DIRNAME/../assay.sh
+  # devenv is the stub in test/stub/; the devenv it stands in for puts this checkout's assay on the PATH.
+  export PATH=$BATS_TEST_DIRNAME/stub:$PATH DEVENV_STUB_CALLS=$T/devenv.calls DEVENV_STUB_PROFILE=$T/profile
+  mkdir -p "$DEVENV_STUB_PROFILE"
+  ln -s "$assay" "$DEVENV_STUB_PROFILE/assay"
   no_checks
+}
+
+# outside_devenv: what follows runs as from a shell outside the repo's devenv: ASSAY_CONFIG unset, and the
+# configuration handed to the stub's devenv instead.
+outside_devenv() {
+  export DEVENV_STUB_CONFIG=$ASSAY_CONFIG
+  unset ASSAY_CONFIG
+}
+
+# devenv_files <imports assay: yes|no>: commit a devenv.nix and a devenv.yaml, which imports assay/devenv or not.
+devenv_files() {
+  echo '{ }' >devenv.nix
+  if [ "$1" = yes ]; then
+    printf '%s\n' 'inputs:' '  assay:' '    url: github:eff3ct0/assay' '    flake: false' 'imports:' '  - assay/devenv' \
+      >devenv.yaml
+  else
+    printf '%s\n' 'inputs:' '  nixpkgs:' '    url: github:cachix/devenv-nixpkgs/rolling' >devenv.yaml
+  fi
+  git add devenv.nix devenv.yaml
+  git commit --quiet -m devenv
 }
 
 # no_checks: an empty configuration, pointed at by ASSAY_CONFIG.

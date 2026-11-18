@@ -1,0 +1,13 @@
+# assay adopts itself: it imports its own devenv module by path, so that each change to assay is checked by the
+# version it ships. A repo that uses assay imports the module through an input instead (README.md).
+inputs:
+  nixpkgs:
+    url: github:cachix/devenv-nixpkgs/rolling
+  # devenv 2.4.0 needs it here; from 2.4.1 the module's own devenv/devenv.yaml brings it.
+  git-hooks:
+    url: github:cachix/git-hooks.nix
+    inputs:
+      nixpkgs:
+        follows: nixpkgs
+imports:
+  - ./devenv

@@ -2,3 +2,10 @@
 .direnv/
 result
 result-*
+
+# devenv
+.devenv*
+devenv.local.nix
+devenv.local.yaml
+# devenv's git-hooks writes it, a symlink into the store.
+.pre-commit-config.yaml
