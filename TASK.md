@@ -28,10 +28,14 @@ Base commit: `bca17dd` (`chore: init`). Branch: `agent/assay-check`.
 - `requires` is matched with git's `:(glob)` pathspec against the files git sees in the working tree (tracked and
   untracked, not ignored), existing on disk.
 - The resolved base's full sha is exported to each check as `ASSAY_BASE`.
-- Output: header `assay check[ --fast][ <names>] · base <label>@<short> (<source>)`, then indented
-  `loosening:` and `skipped:` lines; one line per check (`ok  `, `FAIL`, `skip` padded to 4, name, seconds; FAIL
-  adds `(exit N)`, `127: tool not found`); `skip <name> (no <glob>)` verbatim; failure details after all checks;
-  last line with the count, total seconds and, on failure, `rerun: assay check [--base <rev>] <names>`.
+- Output: header `assay check[ --fast][ <names>] · base <label>@<short> (<source>)` (label omitted when it is the
+  sha itself), then `  loosening: <check> is off|runs the repo's own exec: <reason>` and `  skipped: <check> (no
+  <glob>)` lines; one line per check (`ok  `, `FAIL`, `skip` padded to 4, name, seconds; FAIL adds `(exit N)`,
+  `(exit 127: tool not found)`); `skip <name> (no <glob>)` verbatim; after all checks, a `--- FAIL <check> (exit N)`
+  block per failure (`$ <exec>`, first 100 lines, `[N more lines in the log]`, `log: <path>`); last line
+  `N of M checks failed in Xs; rerun: assay check [--base <rev>] <names>` or `M checks passed[ (K skipped)] in Xs`,
+  plus `(over the fast set's 5s budget)` under `--fast`.
+- Exit handling: every exit goes through `finish`/`die`; an EXIT trap turns any other non-zero exit into 2.
 - `--list` takes no other argument. Naming an unknown or disabled check is exit 2; with `--fast`, naming a check
   that is not fast is exit 2.
 - Tests: `test/*.bats` hermetic (hand-written configs, throwaway repos; run by `nix flake check`);
@@ -41,8 +45,6 @@ Base commit: `bca17dd` (`chore: init`). Branch: `agent/assay-check`.
 
 ## Remaining steps
 
-1. `assay.sh`, `nix/package.nix`, `flake.nix` + `flake.lock`, `nix/checks.nix`.
-2. `devenv/devenv.nix`, `devenv/module.nix`, `devenv/defaults.nix`, `devenv/devenv.yaml`.
-3. bats: `test/check.bats`, `test/base.bats`, `test/devenv/module.bats`, helpers.
-4. `AGENTS.md`, `CLAUDE.md`, `README.md`.
-5. Run everything; critic; fixes; recheck critic; PR.
+1. Done: CLI, package, flake, module, hermetic and devenv tests, AGENTS.md, CLAUDE.md, README.md
+   (`nix flake check` and `bats test/devenv` pass).
+2. Critic; fixes; recheck critic; push; PR; remove this file once the last critic passes.

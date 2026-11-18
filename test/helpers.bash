@@ -13,6 +13,7 @@ setup() {
   # Detached auto-gc would race the teardown.
   git config --global gc.auto 0
   git config --global maintenance.auto false
+  # shellcheck disable=SC2034 # used by the .bats files
   assay=$BATS_TEST_DIRNAME/../assay.sh
   no_checks
 }
@@ -67,14 +68,14 @@ upstream() {
   git -C "$T/up" remote add origin "$T/origin.git"
   git -C "$T/up" fetch --quiet origin
   git clone --quiet "$T/origin.git" "$T/work"
-  cd "$T/work"
+  cd "$T/work" || return 1
 }
 
 # local_repo: a repo with one commit and no remote, the current directory.
 local_repo() {
   git init --quiet "$T/work"
   commit_file "$T/work" a.txt
-  cd "$T/work"
+  cd "$T/work" || return 1
 }
 
 # sha <rev> [dir]

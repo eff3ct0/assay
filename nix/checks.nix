@@ -75,14 +75,17 @@ let
   };
 
   expectations = {
-    "turning a default off without a reason fails evaluation" = !evaluates {
-      assay.checks.demo.enable = false;
-    };
-    "redefining a default's exec without a reason fails evaluation" = !evaluates {
-      assay.checks.demo.exec = "echo mine";
-    };
-    "a loosening without a reason fails an assertion" = builtins.any (a: !a.assertion)
-      (evalWith { assay.checks.demo.enable = false; }).assertions;
+    "turning a default off without a reason fails evaluation" =
+      !evaluates {
+        assay.checks.demo.enable = false;
+      };
+    "redefining a default's exec without a reason fails evaluation" =
+      !evaluates {
+        assay.checks.demo.exec = "echo mine";
+      };
+    "a loosening without a reason fails an assertion" =
+      builtins.any (a: !a.assertion)
+        (evalWith { assay.checks.demo.enable = false; }).assertions;
     "a loosening with a reason evaluates" = evaluates {
       assay.checks.demo = {
         enable = false;
@@ -90,18 +93,20 @@ let
       };
     };
     "the repo's own check is no loosening" = evaluates { assay.checks.own.exec = "true"; };
-    "a check name that cannot be a file name fails evaluation" = !evaluates {
-      assay.checks."a/b".exec = "true";
-    };
+    "a check name that cannot be a file name fails evaluation" =
+      !evaluates {
+        assay.checks."a/b".exec = "true";
+      };
     "ASSAY_SEED has a fixed default" = plain.env.ASSAY_SEED == "42";
     "assay.seed sets ASSAY_SEED" = own.env.ASSAY_SEED == "7";
-    "the hook runs the fast checks through devenv shell" = plain.git-hooks.hooks.assay == {
-      enable = true;
-      name = "assay check --fast";
-      entry = "devenv shell -- assay check --fast";
-      pass_filenames = false;
-      always_run = true;
-    };
+    "the hook runs the fast checks through devenv shell" =
+      plain.git-hooks.hooks.assay == {
+        enable = true;
+        name = "assay check --fast";
+        entry = "devenv shell -- assay check --fast";
+        pass_filenames = false;
+        always_run = true;
+      };
     "a plain definition changes a hook field" = own.git-hooks.hooks.assay.entry == "other";
     "enterTest runs assay check" = lib.hasInfix "assay check\n" plain.enterTest;
     "packages has the CLI" = map (p: p.name) plain.packages == [ "assay" ];
