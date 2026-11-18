@@ -510,12 +510,36 @@ builtin_agents_md() {
   finish 1
 }
 
+# commit-trailers: no commit in base..HEAD carries a Co-Authored-By trailer, matched case-insensitively on any line
+# of its message, as GitHub reads one.
+builtin_commit_trailers() {
+  local re='^[[:space:]]*co-authored-by[[:space:]]*:' list commit subject line base_short
+  parse_base_option commit-trailers "$@"
+  find_repo
+  resolve_base
+  list=$(git log --no-show-signature -i -E --grep="$re" --format='%H %h %s' "$base_sha..HEAD") ||
+    die "cannot read the commits in $base_sha..HEAD"
+  [ -n "$list" ] || finish 0
+  base_short=$(git rev-parse --short "$base_sha")
+  echo "Co-Authored-By trailers in $base_short..HEAD:"
+  while IFS=' ' read -r commit subject; do
+    echo "  $subject"
+    while IFS= read -r line; do
+      if [[ ${line,,} =~ $re ]]; then echo "      ${line#"${line%%[![:space:]]*}"}"; fi
+    done < <(git log -1 --no-show-signature --format=%B "$commit")
+  done <<<"$list"
+  echo "A commit names no co-author: reword each of these without its trailer (git rebase -i $base_short)," \
+    "and push with --force-with-lease where they were pushed."
+  finish 1
+}
+
 cmd_builtin() {
   [ $# -ge 1 ] || usage_error "builtin needs the name of a built-in check"
   local check=$1
   shift
   case $check in
     agents-md) builtin_agents_md "$@" ;;
+    commit-trailers) builtin_commit_trailers "$@" ;;
     *) usage_error "no built-in check named '$check'" ;;
   esac
 }
