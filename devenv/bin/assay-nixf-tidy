@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# assay-nixf-tidy [<file>...]: nixf-tidy with variable lookup over each Nix file. nixf-tidy reads only stdin and
+# always exits 0, its diagnostics as a JSON array; this prints each one as `<file>:<line>:<column>: <severity>
+# <name>: <message>` and exits 1 when there is any, whatever its severity.
+set -euo pipefail
+
+# shellcheck disable=SC2016 # jq's $variables, not the shell's
+format='.[]
+	| (["fatal", "error", "warning", "info", "hint"][.severity] // "severity \(.severity)") as $severity
+	| (reduce .args[] as $arg (.message; sub("\\{\\}"; $arg))) as $message
+	| "\($file):\(.range.lCur.line + 1):\(.range.lCur.column + 1): \($severity) \(.sname): \($message)"'
+
+found=0
+for file in "$@"; do
+	diagnostics=$(nixf-tidy --variable-lookup <"$file")
+	if ! lines=$(jq -r --arg file "$file" "$format" <<<"$diagnostics"); then
+		echo "assay-nixf-tidy: cannot read nixf-tidy's output for $file: $diagnostics" >&2
+		exit 2
+	fi
+	if [ -n "$lines" ]; then
+		printf '%s\n' "$lines"
+		found=1
+	fi
+done
+exit "$found"

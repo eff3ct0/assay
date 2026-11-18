@@ -27,6 +27,8 @@ let
         type = lib.types.listOf lib.types.attrs;
         default = [ ];
       };
+      languages.nix.enable = lib.mkEnableOption "Nix";
+      languages.shell.enable = lib.mkEnableOption "shell";
     };
   };
 
@@ -99,6 +101,37 @@ let
   };
   names = config: map (p: lib.getName p) config.packages;
 
+  # The module with assay's own defaults (devenv/defaults.nix), for the languages a repo enables.
+  withDefaults =
+    repo:
+    (lib.evalModules {
+      modules = [
+        devenvStub
+        (import ../devenv/module.nix { defaults = import ../devenv/defaults.nix; })
+        { _module.args.pkgs = pkgs; }
+        repo
+      ];
+    }).config;
+  nixRepo = withDefaults { languages.nix.enable = true; };
+  shellRepo = withDefaults { languages.shell.enable = true; };
+  # Each check's name with what `assay check --list` shows of it: fast or not, and what it requires and covers.
+  listed =
+    config:
+    lib.mapAttrs (_: c: {
+      inherit (c)
+        fast
+        enable
+        requires
+        coverage
+        ;
+    }) config.assay.checks;
+  fastCheck = {
+    fast = true;
+    enable = true;
+    requires = null;
+    coverage = null;
+  };
+
   expectations = {
     "turning a default off without a reason fails evaluation" =
       !evaluates {
@@ -156,6 +189,58 @@ let
         "hello"
         "diff-cover"
       ];
+    "a repo that enables no language gets no default check" = (withDefaults { }).assay.checks == { };
+    "Nix's defaults: nixfmt, statix, deadnix and nixf-tidy fast, nix flake check when flake.nix exists" =
+      listed nixRepo == {
+        nixfmt = fastCheck;
+        statix = fastCheck;
+        deadnix = fastCheck;
+        nixf-tidy = fastCheck;
+        nix-flake-check = {
+          fast = false;
+          enable = true;
+          requires = "flake.nix";
+          coverage = null;
+        };
+      };
+    "bash's defaults: shellcheck and shfmt fast, bats with its coverage report under ASSAY_DIR" =
+      listed shellRepo == {
+        shellcheck = fastCheck;
+        shfmt = fastCheck;
+        bats = {
+          fast = false;
+          enable = true;
+          requires = null;
+          coverage = "$ASSAY_DIR/kcov/bats/cobertura.xml";
+        };
+      };
+    "Nix's tools join the devenv, nixfmt and nixf among them" =
+      lib.all (t: builtins.elem t (names nixRepo))
+        [
+          "assay-check-helpers"
+          "nixfmt"
+          "statix"
+          "deadnix"
+          "nixf"
+          "jq"
+        ];
+    "bash's tools join the devenv, kcov and diff-cover among them" =
+      lib.all (t: builtins.elem t (names shellRepo))
+        [
+          "assay-check-helpers"
+          "ShellCheck"
+          "shfmt"
+          "bats"
+          "kcov"
+          "diff-cover"
+        ];
+    "dropping the bats check's coverage is a loosening" =
+      !(builtins.tryEval
+        (withDefaults {
+          languages.shell.enable = true;
+          assay.checks.bats.coverage = null;
+        }).env.ASSAY_CONFIG
+      ).success;
     "without an enabled check that declares coverage, no diff-cover" =
       names untested == [
         "assay"
@@ -168,20 +253,14 @@ in
   tests =
     pkgs.runCommand "assay-tests"
       {
-        nativeBuildInputs = with pkgs; [
-          bats
-          shellcheck
-          git
-          jq
-          coreutils
-        ];
+        nativeBuildInputs = import ./test-tools.nix { inherit pkgs; } ++ [ pkgs.coreutils ];
       }
       ''
         cp -r ${src} src
         chmod -R u+w src
         cd src
-        patchShebangs assay.sh test/stub
-        shellcheck assay.sh test/helpers.bash test/devenv/helpers.bash test/stub/devenv
+        patchShebangs assay.sh test/stub devenv/bin
+        shellcheck assay.sh test/helpers.bash test/devenv/helpers.bash test/stub/devenv devenv/bin/*
         bats test
         touch $out
       '';

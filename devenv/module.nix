@@ -202,7 +202,7 @@ in
     packages = [
       assay
     ]
-    ++ lib.concatMap (d: d.packages or [ ]) (lib.attrValues defaultChecks)
+    ++ lib.unique (lib.concatMap (d: d.packages or [ ]) (lib.attrValues defaultChecks))
     ++ lib.optional (lib.any (c: c.enable && c.coverage != null) (
       lib.attrValues cfg.checks
     )) pkgs.python3Packages.diff-cover;

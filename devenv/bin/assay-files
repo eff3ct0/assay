@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# assay-files [<glob>...]: the files git sees in the working tree (tracked, or untracked and not ignored) that exist,
+# matching the globs, or all of them; NUL-terminated, sorted, relative to the current directory. A glob is a git glob
+# pathspec taken from the repo root, as a check's `requires`: `*` stays within a directory, `**/` crosses them. What
+# assay's default checks pass to their tools: never ignored files such as `.devenv/`, never a tracked file deleted
+# from the working tree, never a directory (a submodule).
+set -euo pipefail
+
+specs=(":(top)")
+if [ $# -gt 0 ]; then
+	specs=()
+	for glob in "$@"; do specs+=(":(top,glob)$glob"); done
+fi
+git ls-files -z --cached --others --exclude-standard --deduplicate -- "${specs[@]}" |
+	while IFS= read -r -d '' f; do
+		if [ -f "$f" ]; then printf '%s\0' "$f"; fi
+	done |
+	LC_ALL=C sort -z

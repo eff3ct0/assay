@@ -36,13 +36,7 @@
 
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {
-          packages = with pkgs; [
-            bats
-            shellcheck
-            nixfmt
-            jq
-            git
-          ];
+          packages = import ./nix/test-tools.nix { inherit pkgs; };
         };
       });
 
