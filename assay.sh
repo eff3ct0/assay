@@ -400,6 +400,126 @@ cmd_new_code() {
   finish 0
 }
 
+# The built-in checks that are assay's own code, run as `assay builtin <check>`.
+
+# root_entry <commit> <name>: one entry at the repo root, from the working tree (<commit> empty) or from a commit's
+# tree. Sets entry_type (missing, file, symlink or other) and entry_content (a file's bytes, a symlink's target).
+root_entry() {
+  local rev=$1 name=$2 line mode oid
+  entry_type=missing entry_content=
+  if [ -z "$rev" ]; then
+    if [ -L "$name" ]; then
+      entry_type=symlink
+      entry_content=$(readlink -- "$name") || die "cannot read the symlink $name"
+    elif [ -f "$name" ]; then
+      entry_type="file"
+      entry_content=$(cat -- "$name" && echo .) || die "cannot read $name"
+      entry_content=${entry_content%.}
+    elif [ -e "$name" ]; then
+      entry_type=other
+    fi
+    return 0
+  fi
+  line=$(git ls-tree --full-tree "$rev" -- "$name") || die "cannot read the tree of $rev"
+  [ -n "$line" ] || return 0
+  mode=${line%% *}
+  oid=${line#* * }
+  oid=${oid%%$'\t'*}
+  case $mode in
+    100644 | 100755)
+      entry_type="file"
+      entry_content=$(git cat-file blob "$oid" && echo .) || die "cannot read $name in $rev"
+      entry_content=${entry_content%.}
+      ;;
+    120000)
+      entry_type=symlink
+      entry_content=$(git cat-file blob "$oid") || die "cannot read $name in $rev"
+      ;;
+    *) entry_type=other ;;
+  esac
+}
+
+# has_related_repos <markdown>: the text has a "Related repos" heading, of any level and case.
+has_related_repos() {
+  local line
+  while IFS= read -r line; do
+    if [[ ${line,,} =~ ^#{1,6}[[:space:]]+related[[:space:]]+repos[[:space:]#]*$ ]]; then return 0; fi
+  done <<<"$1"
+  return 1
+}
+
+# agents_md_problems [<commit>]: the AGENTS.md / CLAUDE.md shape at the repo root (the current directory), in the
+# working tree or in a commit's tree, which the global pre-push hook reads for each pushed tip. AGENTS.md holds the
+# instructions, with a "Related repos" section, and CLAUDE.md is the single line @AGENTS.md; or either file is a
+# symlink to the other, which holds them. Prints one line per problem and returns 1 when there is any.
+agents_md_problems() {
+  local rev=${1:-} a_type a_content c_type c_content a_to_c=0 c_to_a=0 instructions="" text
+  local -a problems=()
+  root_entry "$rev" AGENTS.md
+  a_type=$entry_type a_content=$entry_content
+  root_entry "$rev" CLAUDE.md
+  c_type=$entry_type c_content=$entry_content
+  if [ "$a_type" = symlink ]; then case $a_content in CLAUDE.md | ./CLAUDE.md) a_to_c=1 ;; esac; fi
+  if [ "$c_type" = symlink ]; then case $c_content in AGENTS.md | ./AGENTS.md) c_to_a=1 ;; esac; fi
+
+  case $a_type in
+    missing) problems+=("AGENTS.md is missing: it holds the repo's instructions for every agent") ;;
+    other) problems+=("AGENTS.md is not a file: it holds the repo's instructions for every agent") ;;
+  esac
+  case $c_type in
+    missing) problems+=("CLAUDE.md is missing: make it the single line @AGENTS.md") ;;
+    other) problems+=("CLAUDE.md is not a file: make it the single line @AGENTS.md") ;;
+  esac
+  if [ "$a_to_c" = 1 ] && [ "$c_to_a" = 1 ]; then
+    problems+=("AGENTS.md and CLAUDE.md are symlinks to each other: AGENTS.md holds the instructions, and CLAUDE.md is the single line @AGENTS.md")
+  elif [ "$a_to_c" = 1 ]; then
+    case $c_type in
+      file) instructions=CLAUDE.md text=$c_content ;;
+      symlink) problems+=("CLAUDE.md is a symlink to $c_content, and AGENTS.md a symlink to CLAUDE.md: CLAUDE.md holds the instructions itself") ;;
+    esac
+  elif [ "$a_type" = symlink ]; then
+    problems+=("AGENTS.md is a symlink to $a_content: it holds the instructions itself, or is a symlink to CLAUDE.md")
+  elif [ "$a_type" = file ]; then
+    instructions=AGENTS.md text=$a_content
+    if [ "$c_type" = symlink ] && [ "$c_to_a" = 0 ]; then
+      problems+=("CLAUDE.md is a symlink to $c_content: make it the single line @AGENTS.md, or a symlink to AGENTS.md")
+    elif [ "$c_type" = file ] && [ "$c_content" != @AGENTS.md ] && [ "$c_content" != $'@AGENTS.md\n' ]; then
+      if [ "$c_content" = "$a_content" ]; then
+        problems+=("CLAUDE.md copies AGENTS.md: a copy falls short, even an identical one; make CLAUDE.md the single line @AGENTS.md")
+      else
+        problems+=("CLAUDE.md is neither the single line @AGENTS.md nor a symlink to AGENTS.md: move its instructions into AGENTS.md, then make it the single line @AGENTS.md")
+      fi
+    fi
+  fi
+  if [ -n "$instructions" ] && ! has_related_repos "$text"; then
+    problems+=("$instructions has no \"Related repos\" section: add one naming the repos this one depends on and the repos that depend on it, with what passes between them, or saying there are none")
+  fi
+  [ ${#problems[@]} -gt 0 ] || return 0
+  printf '%s\n' "${problems[@]}"
+  return 1
+}
+
+builtin_agents_md() {
+  local rev=
+  [ $# -le 1 ] || usage_error "agents-md takes at most one commit"
+  find_repo
+  if [ $# -eq 1 ]; then
+    rev=$(git rev-parse -q --verify --end-of-options "$1^{commit}") || die "agents-md: '$1' is not a commit"
+  fi
+  if agents_md_problems "$rev"; then finish 0; fi
+  finish 1
+}
+
+cmd_builtin() {
+  [ $# -ge 1 ] || usage_error "builtin needs the name of a built-in check"
+  local check=$1
+  shift
+  case $check in
+    agents-md) builtin_agents_md "$@" ;;
+    *) usage_error "no built-in check named '$check'" ;;
+  esac
+}
+
 # parse_base_option <command> [--base <rev>]: the arguments of a command whose only option is --base.
 parse_base_option() {
   local command=$1
@@ -642,6 +762,11 @@ main() {
       shift
       if [ -z "${ASSAY_CONFIG:-}" ]; then delegate check "$@"; fi
       cmd_check "$@"
+      ;;
+    builtin)
+      shift
+      if [ -z "${ASSAY_CONFIG:-}" ]; then delegate builtin "$@"; fi
+      cmd_builtin "$@"
       ;;
     new-code)
       shift
