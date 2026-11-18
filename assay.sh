@@ -19,12 +19,16 @@ usage_text() {
 usage: assay check [--fast] [--base <rev>] [<check>...]    run the repo's checks
        assay check --list                                  list them, fast ones marked
 
-Run it inside the repo's devenv (devenv shell -- assay check), which sets ASSAY_CONFIG.
+Outside the repo's devenv (ASSAY_CONFIG unset), assay check runs itself inside it, from the repo root:
+devenv shell -- assay check, so the version the repo pins decides.
 The base of the change: --base, else ASSAY_BASE, else GitHub's event (GITHUB_EVENT_PATH), else the
 fork point of HEAD from the default branch, else their merge base. assay never fetches.
 Exit codes: 0 every selected check passed, 1 at least one failed, 2 assay could not run.
 EOF
 }
+
+# The procedure a repo follows to adopt assay, named by the error for a repo that has not.
+adoption_doc=https://github.com/eff3ct0/assay/blob/main/docs/adoption.md
 
 # Every exit goes through these, so that any other exit (an unexpected failure under `set -e`) becomes exit 2 and
 # never passes for a run's 0 or 1.
@@ -45,9 +49,12 @@ usage_error() {
   echo "assay: $*" >&2
   usage
 }
+# The delegating assay's temporary directory, removed on exit.
+marks=
 # shellcheck disable=SC2329 # invoked by the EXIT trap
 on_exit() {
   local rc=$?
+  if [ -n "$marks" ]; then rm -rf "$marks"; fi
   if [ -z "$exiting" ] && [ "$rc" -ne 0 ]; then
     echo "assay: unexpected failure (exit $rc)" >&2
     exit 2
@@ -111,9 +118,9 @@ loose_kind=()
 loose_reason=()
 config_loaded=0
 
+# Only ever called with ASSAY_CONFIG set: without it, main delegates.
 load_config() {
-  local cfg=${ASSAY_CONFIG:-} out
-  [ -n "$cfg" ] || die "ASSAY_CONFIG is not set: run assay inside the repo's devenv (devenv shell -- assay check)"
+  local cfg=$ASSAY_CONFIG out
   if [ ! -f "$cfg" ] || [ ! -r "$cfg" ]; then die "cannot read the configuration $cfg (ASSAY_CONFIG)"; fi
   if ! out=$(jq -n -r --arg name_re "$name_re" "$config_jq" "$cfg" 2>&1); then
     die "invalid configuration $cfg: $out"
@@ -419,13 +426,68 @@ cmd_check() {
   run_checks
 }
 
+# not_adopted <why>: exit 2 for a repo that has not adopted assay, naming the procedure.
+not_adopted() {
+  {
+    echo "assay: this repo has not adopted assay: $*"
+    echo "assay: adopting it is a change of its own, on its own branch and pull request, made before any other" \
+      "work in the repo; tell the user about it before starting"
+    echo "assay: the procedure: $adoption_doc"
+  } >&2
+  finish 2
+}
+
+# What the delegating assay runs inside the repo's devenv: it records in the directory given first whether the
+# devenv set ASSAY_CONFIG (assay's module does) and whether it handed over, then runs the repo's own assay. Being
+# the delegating assay's own code, it works whatever version of assay the repo pins.
+# shellcheck disable=SC2016 # expanded by the bash that runs it
+delegate_sh='marks=$1
+shift
+if [ -z "${ASSAY_CONFIG:-}" ]; then
+  : >"$marks/unadopted"
+  exit 2
+fi
+: >"$marks/started"
+exec assay "$@"'
+
+# delegate <command> [<arg>...]: outside the repo's devenv, run `assay <command> <arg>...` inside it, from the repo
+# root, so that the version the repo pins decides. devenv runs with the caller's PATH, not assay's own tools.
+delegate() {
+  local root rc=0
+  root=$(git rev-parse --show-toplevel 2>/dev/null) || die "not in a git working tree"
+  [ -f "$root/devenv.nix" ] || not_adopted "$root has no devenv.nix"
+  PATH=$caller_path command -v devenv >/dev/null ||
+    die "cannot find devenv on the PATH, which assay needs to run inside the repo's devenv"
+  marks=$(mktemp -d) || die "cannot create a temporary directory"
+  cd "$root"
+  PATH=$caller_path devenv shell -- "$BASH" -c "$delegate_sh" assay "$marks" "$@" || rc=$?
+  if [ -e "$marks/unadopted" ]; then not_adopted "the devenv of $root does not import assay's module"; fi
+  # devenv itself failed (exit 1 on an evaluation error), which must not pass for a failing check.
+  [ -e "$marks/started" ] || die "devenv shell failed (exit $rc) before assay could run in the repo's devenv"
+  case $rc in
+    0 | 1 | 2 | 130) finish "$rc" ;;
+    *) die "the repo's assay exited $rc" ;;
+  esac
+}
+
+# not_yet <command> <usage>: a subcommand a later version implements.
+not_yet() {
+  echo "usage: assay $1 $2" >&2
+  die "$1 is not implemented yet"
+}
+
 main() {
   [ $# -ge 1 ] || usage
   case $1 in
     check)
       shift
+      if [ -z "${ASSAY_CONFIG:-}" ]; then delegate check "$@"; fi
       cmd_check "$@"
       ;;
+    # The machine-level subcommands run outside any devenv and never delegate.
+    guard) not_yet guard "--rules <file>    the agent guard: one harness hook event on stdin" ;;
+    git-hook) not_yet git-hook "--rules <file> <hook> [<git args>]    the global git hooks" ;;
+    collect) not_yet collect "--db <file>    the nightly collector" ;;
     -h | --help | help)
       usage_text
       finish 0

@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# A stand-in for devenv in the CLI's tests. `devenv shell -- <command> [<arg>...]` appends a line to
+# DEVENV_STUB_CALLS (its directory and its arguments, each quoted with printf %q), then runs the command. When the
+# directory's devenv.yaml imports assay/devenv, it runs it as a devenv with assay's module would: ASSAY_CONFIG set to
+# DEVENV_STUB_CONFIG, and DEVENV_STUB_PROFILE (which holds the repo's `assay`) first on the PATH. With
+# DEVENV_STUB_FAIL set, it fails as an evaluation error does: exit 1, before running anything.
+set -euo pipefail
+
+call=$(printf '%q ' "$PWD" "$@")
+echo "${call% }" >>"$DEVENV_STUB_CALLS"
+if [ "${1:-}" != shell ] || [ "${2:-}" != -- ] || [ $# -lt 3 ]; then
+  echo "devenv stub: unexpected arguments: $*" >&2
+  exit 64
+fi
+shift 2
+if [ -n "${DEVENV_STUB_FAIL:-}" ]; then
+  echo "error: the stub's evaluation failed" >&2
+  exit 1
+fi
+if [ -f devenv.yaml ] && grep -qx '  - assay/devenv' devenv.yaml; then
+  export ASSAY_CONFIG=$DEVENV_STUB_CONFIG
+  PATH=$DEVENV_STUB_PROFILE:$PATH
+fi
+exec "$@"
