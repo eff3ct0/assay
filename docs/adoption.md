@@ -16,23 +16,8 @@ module.
 ### devenv
 
 - The repo gains `devenv.yaml` and `devenv.nix`, or extends the ones it has, with the `assay` input and its import,
-  plus the `git-hooks` input until devenv 2.4.1 (which brings it from assay's own `devenv/devenv.yaml`):
-
-  ```yaml
-  inputs:
-    nixpkgs:
-      url: github:cachix/devenv-nixpkgs/rolling
-    git-hooks:
-      url: github:cachix/git-hooks.nix
-      inputs:
-        nixpkgs:
-          follows: nixpkgs
-    assay:
-      url: github:eff3ct0/assay
-      flake: false
-  imports:
-    - assay/devenv
-  ```
+  plus the `git-hooks` input until devenv 2.4.1 (which brings it from assay's own `devenv/devenv.yaml`), as
+  [README.md](../README.md#in-a-repo) shows.
 
 - It enables its languages in `devenv.nix` (`languages.<language>.enable = true;`).
 - `.gitignore` gains devenv's entries (`.devenv*`, `devenv.local.nix`, `devenv.local.yaml`) and
@@ -56,31 +41,13 @@ what exists; assay injects no configuration at run time.
 
 - Every CI step that passes or fails on the tree becomes a named check (`assay.checks.<name>`), so the agent and the
   critic run what CI runs.
-- CI becomes one job running `devenv test`, with no matrix:
-
-  ```yaml
-  name: check
-
-  on:
-    pull_request:
-    push:
-      branches: [main]
-
-  jobs:
-    check:
-      runs-on: ubuntu-latest
-      steps:
-        - uses: actions/checkout@v7
-          with:
-            fetch-depth: 0
-        - uses: cachix/install-nix-action@v31
-        - run: nix profile add nixpkgs#devenv
-        - run: devenv test
-  ```
-
-  It sets no `ASSAY_BASE`: assay reads the base from GitHub's event itself, and `fetch-depth: 0` puts it in the
-  clone.
+- CI becomes one job running `devenv test`, with no matrix: assay's own
+  [`.github/workflows/check.yml`](../.github/workflows/check.yml), on pull requests and on pushes to the default
+  branch. It sets no `ASSAY_BASE`: assay reads the base from GitHub's event itself, and `fetch-depth: 0` puts it in
+  the clone.
 - Workflows that are not checks stay: release, deploy, docs, bots.
+- Where the repo's owner keeps a security configuration for dependencies (alerts and grouped security updates), the
+  adoption attaches it to the repo: from then on, `devenv test` in CI verifies those updates' pull requests.
 
 ### Checks that need more than the tree
 
@@ -104,10 +71,10 @@ instructions name `assay check`: `devenv test` runs every check, as CI does, and
 
 ## Keeping assay current
 
-- A repo with a remote gains the weekly update workflow: every Monday, and on demand, it runs `devenv update assay`;
-  when `devenv.lock` changed it runs `devenv test`, and only when that passes does it land the lock as a
-  `devenv.lock: update` commit, pushed to the default branch, or as one pull request, refreshed by each run, where
-  the default branch requires a review. A failed run lands nothing and leaves the pin where it was. Only `assay`
+- A repo with a remote gains the weekly update workflow: every Monday, and on demand, it runs `devenv update assay`
+  and `assay preset`, which brings later preset versions; when anything changed it runs `devenv test`, and only when
+  that passes does it land the change as a `devenv.lock: update` commit, pushed to the default branch, or as one pull
+  request, refreshed by each run, where the default branch requires a review. A failed run lands nothing and leaves the pin where it was. Only `assay`
   moves; the repo's other inputs are its own business.
 - A repo with no remote updates by hand: `devenv update assay`.
 - `devenv update assay` in an ordinary change brings a fix sooner.

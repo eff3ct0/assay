@@ -27,7 +27,7 @@ hit() { sed -n "$1p" "$ASSAY_HITS_LOG"; }
   hit 2 | jq -e '.agent == "claude-code" and .mode == "fast" and .only == ["a"] and .failed == [] and .exit == 0'
 }
 
-@test "repo is the main checkout, from a worktree too; only is the names given, once each, in name order" {
+@test "repo is the main checkout, from a worktree too; only is the names as given" {
   local_repo
   check a true
   check c true
@@ -36,7 +36,7 @@ hit() { sed -n "$1p" "$ASSAY_HITS_LOG"; }
   export ASSAY_HITS_LOG=$T/hits.jsonl ASSAY_AGENT=
   run "$assay" check c a c
   [ "$status" -eq 0 ]
-  hit 1 | jq -e --arg repo "$(cd "$T/work" && pwd -P)" '.repo == $repo and .only == ["a", "c"] and .agent == null'
+  hit 1 | jq -e --arg repo "$(cd "$T/work" && pwd -P)" '.repo == $repo and .only == ["c", "a", "c"] and .agent == null'
 }
 
 @test "a run that exits 2 appends its line too; --list, usage errors and help append nothing" {

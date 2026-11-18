@@ -109,8 +109,8 @@ it, never the `assay` that delegates to the repo's devenv.
 - Every line: `v` (the line format's version, `1`), `time` (UTC, RFC 3339), `source` (`guard`, `git-hook` or
   `check`), `repo` (the absolute path of the main checkout, from `git rev-parse --git-common-dir`), `agent` (the value
   of `ASSAY_AGENT`, or `null`).
-- `check`: `mode` (`fast` or `full`), `only` (the check names given, once each and in name order; empty for all),
-  `seconds`, `failed` (the failing checks' names) and `exit`.
+- `check`: `mode` (`fast` or `full`), `only` (the check names given, as given; empty for all), `seconds`, `failed`
+  (the failing checks' names) and `exit`.
 
 ```json
 {"v":1,"time":"2026-11-18T21:04:05Z","source":"check","repo":"/path/to/repo","agent":null,"mode":"fast","only":[],"seconds":0.42,"failed":["lint"],"exit":1}

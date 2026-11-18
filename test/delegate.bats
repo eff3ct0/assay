@@ -122,3 +122,19 @@ not_adopted() {
   done
   [ ! -e "$T/devenv.calls" ]
 }
+
+@test "the repo's assay exiting 130 passes through; any code outside 0, 1, 2 and 130 is exit 2" {
+  local_repo
+  devenv_files yes
+  outside_devenv
+  # A repo's assay that exits with the code given in its environment.
+  rm "$DEVENV_STUB_PROFILE/assay"
+  printf '#!/bin/sh\nexit "$FAKE_EXIT"\n' >"$DEVENV_STUB_PROFILE/assay"
+  chmod +x "$DEVENV_STUB_PROFILE/assay"
+  FAKE_EXIT=130 run --separate-stderr "$assay" check
+  [ "$status" -eq 130 ]
+  [ -z "$stderr" ]
+  FAKE_EXIT=7 run --separate-stderr "$assay" check
+  [ "$status" -eq 2 ]
+  [ "$stderr" = "assay: the repo's assay exited 7" ]
+}

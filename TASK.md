@@ -28,7 +28,9 @@ nixos-config issues it links.
   trailing `/.git`, `null` outside a repo; `agent` is `ASSAY_AGENT`, `null` when unset or empty. Creates the
   file's directory; every failure is silent. `check` lines: one per run that got past argument parsing and is not
   `--list`, whatever its exit (0, 1, 2, 130), written by the process that runs the checks (never by the
-  delegating one); `only` is the names given, deduplicated, in name order; `seconds` has two decimals.
+  delegating one); `only` is the names as given (the spec: "the check names given"); `seconds` has two decimals.
+  No line for usage errors, `--list`, help, or a delegation that never reached the repo's assay (not adopted,
+  devenv failing): none of them ran the checks.
 - Self-adoption: root `devenv.yaml` (nixpkgs `github:cachix/devenv-nixpkgs/rolling`, `git-hooks`,
   `imports: [ ./devenv ]`), root `devenv.nix` declaring the `bats` check (`bats test`) with bats, git and jq;
   `devenv.lock` committed. Checked by hand that devenv 2.4.0 imports `./devenv` and lists the check.

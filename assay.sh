@@ -51,16 +51,14 @@ usage_error() {
   usage
 }
 # The delegating assay's temporary directory, removed on exit.
-marks=
+delegate_tmp=
 # shellcheck disable=SC2329 # invoked by the EXIT trap
 on_exit() {
   local rc=$?
-  if [ -n "$marks" ]; then rm -rf "$marks"; fi
+  if [ -n "$delegate_tmp" ]; then rm -rf "$delegate_tmp"; fi
   if [ -z "$exiting" ] && [ "$rc" -ne 0 ]; then
     echo "assay: unexpected failure (exit $rc)" >&2
-    exiting=1
-    log_run 2
-    exit 2
+    finish 2
   fi
 }
 trap on_exit EXIT
@@ -94,23 +92,23 @@ log_hit() {
 run_start=
 log_run() {
   [ -n "$run_start" ] || return 0
-  local d secs mode=full i
+  local now secs mode=full i
   local -a args=()
-  d=$((${EPOCHREALTIME//[!0-9]/} - run_start))
+  now_us
+  fmt_secs secs $((now - run_start))
   run_start=
-  printf -v secs '%d.%02d' $((d / 1000000)) $((d % 1000000 / 10000))
   if [ "$opt_fast" = 1 ]; then mode=fast; fi
-  # Check names have no spaces; the names given may be anything, so each goes in an option of its own.
-  args=(--arg mode "$mode" --arg seconds "$secs" --arg failed "${failed[*]}" --arg exit "$1")
+  args=(--arg mode "$mode" --arg seconds "${secs%s}" --arg exit "$1")
+  # Each name goes in an option of its own, only<i> or failed<i>: the names given may hold any character.
   for i in "${!wanted[@]}"; do args+=(--arg "only$i" "${wanted[$i]}"); done
+  for i in "${!failed[@]}"; do args+=(--arg "failed$i" "${failed[$i]}"); done
   # shellcheck disable=SC2016 # jq's $variables, not the shell's
-  log_hit check '{
-    mode: $mode,
-    only: ([$ARGS.named | to_entries[] | select(.key | test("^only[0-9]+$")) | .value] | unique),
-    seconds: ($seconds | tonumber),
-    failed: ($failed | split(" ") | map(select(. != ""))),
-    exit: ($exit | tonumber)
-  }' "${args[@]}"
+  log_hit check '
+    def names($list):
+      [$ARGS.named | to_entries[] | {i: (.key | capture("^\($list)(?<i>[0-9]+)$").i | tonumber), value}]
+      | sort_by(.i) | map(.value);
+    {mode: $mode, only: names("only"), seconds: ($seconds | tonumber), failed: names("failed"), exit: ($exit | tonumber)}
+  ' "${args[@]}"
 }
 
 # The configuration, validated whole before anything is printed, and emitted as shell assignments (strings quoted
@@ -458,7 +456,10 @@ cmd_check() {
   if [ "$opt_list" = 1 ] && { [ "$opt_fast" = 1 ] || [ "$opt_base_set" = 1 ] || [ ${#wanted[@]} -gt 0 ]; }; then
     usage_error "--list takes no other argument"
   fi
-  if [ "$opt_list" = 0 ]; then run_start=${EPOCHREALTIME//[!0-9]/}; fi
+  if [ "$opt_list" = 0 ]; then
+    now_us
+    run_start=$now
+  fi
 
   local t
   for t in git jq head tail wc mkdir rm; do
@@ -490,29 +491,28 @@ not_adopted() {
 # devenv set ASSAY_CONFIG (assay's module does) and whether it handed over, then runs the repo's own assay. Being
 # the delegating assay's own code, it works whatever version of assay the repo pins.
 # shellcheck disable=SC2016 # expanded by the bash that runs it
-delegate_sh='marks=$1
+delegate_sh='tmp=$1
 shift
 if [ -z "${ASSAY_CONFIG:-}" ]; then
-  : >"$marks/unadopted"
+  : >"$tmp/unadopted"
   exit 2
 fi
-: >"$marks/started"
+: >"$tmp/started"
 exec assay "$@"'
 
 # delegate <command> [<arg>...]: outside the repo's devenv, run `assay <command> <arg>...` inside it, from the repo
 # root, so that the version the repo pins decides. devenv runs with the caller's PATH, not assay's own tools.
 delegate() {
-  local root rc=0
-  root=$(git rev-parse --show-toplevel 2>/dev/null) || die "not in a git working tree"
+  local rc=0
+  find_repo
   [ -f "$root/devenv.nix" ] || not_adopted "$root has no devenv.nix"
   PATH=$caller_path command -v devenv >/dev/null ||
     die "cannot find devenv on the PATH, which assay needs to run inside the repo's devenv"
-  marks=$(mktemp -d) || die "cannot create a temporary directory"
-  cd "$root"
-  PATH=$caller_path devenv shell -- "$BASH" -c "$delegate_sh" assay "$marks" "$@" || rc=$?
-  if [ -e "$marks/unadopted" ]; then not_adopted "the devenv of $root does not import assay's module"; fi
+  delegate_tmp=$(mktemp -d) || die "cannot create a temporary directory"
+  PATH=$caller_path devenv shell -- "$BASH" -c "$delegate_sh" assay "$delegate_tmp" "$@" || rc=$?
+  if [ -e "$delegate_tmp/unadopted" ]; then not_adopted "the devenv of $root does not import assay's module"; fi
   # devenv itself failed (exit 1 on an evaluation error), which must not pass for a failing check.
-  [ -e "$marks/started" ] || die "devenv shell failed (exit $rc) before assay could run in the repo's devenv"
+  [ -e "$delegate_tmp/started" ] || die "devenv shell failed (exit $rc) before assay could run in the repo's devenv"
   case $rc in
     0 | 1 | 2 | 130) finish "$rc" ;;
     *) die "the repo's assay exited $rc" ;;
