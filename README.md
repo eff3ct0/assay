@@ -112,7 +112,7 @@ it, never the `assay` that delegates to the repo's devenv.
 - `check`: `mode` (`fast` or `full`), `only` (the check names given, as given; empty for all), `seconds`, `failed`
   (the failing checks' names) and `exit`.
 
-```json
+```jsonl
 {"v":1,"time":"2026-11-18T21:04:05Z","source":"check","repo":"/path/to/repo","agent":null,"mode":"fast","only":[],"seconds":0.42,"failed":["lint"],"exit":1}
 ```
 
