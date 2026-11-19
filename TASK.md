@@ -82,7 +82,11 @@ The recheck critic (the last round) found four of the critic's five failures fix
 breaking nothing; one stayed open, plus a minor finding. PR #21 is open, not to be merged by an agent.
 
 p3rkins decided: fix both, then one new critic that rechecks only those two and the fix's diff, its verdict noted on
-PR #21. Fixed in `fix: kcov expected only where nixpkgs has it…`; that critic is the remaining step:
+PR #21. Fixed in `fix: kcov expected only where nixpkgs has it…` (ee8ea20). Then main merged PR #22 (issue #12: assay
+guard, assay git-hook, the home-manager module), and the branch merged main again (52fbbc8, whose message says how each
+conflict was resolved; `devenv test` passes, bats covering 92% of the new lines against a495096). The remaining
+step: one critic over those two findings, the fix's diff and that merge's resolution; its verdict goes on PR #21, then
+wait for CI and stop, without merging.
 
 - darwin, half fixed: the flake and a consumer evaluate there now, but `nix/checks.nix`'s expectation "bash's tools
   join the devenv, kcov and diff-cover among them" requires kcov on every platform, so `checks.<darwin>.module`
