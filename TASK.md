@@ -48,10 +48,13 @@ the end, a `code-review` pass, and a commit to this branch.
 ## Remaining steps
 
 Done: the guard, the git hooks, hits, `nix/rules-check.sh`, the home-manager module, `lib.rulesCheck`, their tests and
-nix checks, README, AGENTS.md, GLOSSARY, usage text.
+nix checks, README, AGENTS.md, GLOSSARY, usage text; the full runs (`nix flake check`, `devenv shell -- assay check`,
+`nix develop -c bats test/devenv`); the `code-review` skill over `b93c455..HEAD` and its fixes (`67bdb7d`,
+`1e96d11`); the first critic (Done, Verbatim and Differential pass; Resume failed on this section, now current).
 
-1. Full runs: `nix flake check`, `devenv shell -- assay check` (the devenv's newer ast-grep), `nix develop -c bats
-   test/devenv`.
-2. The `code-review` skill over `b93c455..HEAD`; fix what it finds.
-3. The critic (`~/git/CLAUDE.md`, "Finishing a change"), then its recheck; remove this file once the last critic
-   passes.
+1. A fresh critic rechecks the Resume failure and the diff of its fix (`~/git/CLAUDE.md`, "After the critic").
+2. Once the recheck passes, remove this file in a commit of its own, push, and report to p3rkins with the open
+   decisions the critic and the code review raised: `main-checkout` cannot be limited to one directory (a path rule
+   takes a glob or the predicate, not both); tags skip the `agents-md` pre-push check; the git hooks run the
+   package's absolute path rather than a bare `assay`; the rule format is validated in three places (`assay.sh`,
+   `nix/home-manager.nix`, `nix/rules-check.sh`).
