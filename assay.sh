@@ -140,7 +140,9 @@ def validate:
   if type != "object" then fail("not a JSON object")
   elif .version != 1 then fail("unknown version \(.version | tojson)")
   elif (.checks | type) != "object" then fail("checks must be an object")
-  elif (.coverage | type) != "object" or (.coverage.newCode | percent | not) then fail("coverage.newCode must be an integer from 0 to 100")
+  elif (.coverage != null or any(.checks[]; .coverage? != null))
+    and ((.coverage | type) != "object" or (.coverage.newCode | percent | not))
+  then fail("coverage.newCode must be an integer from 0 to 100")
   elif (.loosenings | type) != "array" then fail("loosenings must be an array")
   else
     . as $c
@@ -160,7 +162,7 @@ def validate:
       "c_enable[\($n | @sh)]=\(if $c.enable then 1 else 0 end)",
       "c_requires[\($n | @sh)]=\($c.requires // "" | @sh)",
       "c_coverage[\($n | @sh)]=\($c.coverage // "" | @sh)"),
-  "new_code=\(.coverage.newCode)",
+  "new_code=\(.coverage.newCode // "")",
   (.loosenings[]
     | "loose_check+=(\(.check // "" | @sh)) loose_kind+=(\(.kind | @sh)) loose_reason+=(\(.reason | @sh))",
       "loose_value+=(\(if .kind == "new-code" then "\(.newCode) \(.default)" else "" end | @sh))"),
@@ -341,8 +343,8 @@ shell_word() {
 # stands for assay's directory, and a relative path is taken from the repo root.
 # shellcheck disable=SC2016 # the literal text $ASSAY_DIR
 report_path() {
-	local p=${1//'${ASSAY_DIR}'/$2}
-	p=${p//'$ASSAY_DIR'/$2}
+	local p=${1//'${ASSAY_DIR}'/"$2"}
+	p=${p//'$ASSAY_DIR'/"$2"}
 	if [[ $p != /* ]]; then p=$root/$p; fi
 	echo "$p"
 }

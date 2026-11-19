@@ -69,6 +69,11 @@ hits() {
   ' "$1" | LC_ALL=C sort -t: -k1,1 -k2,2n
 }
 
+# needs_kcov: skip the test where nixpkgs has no kcov (it has it for Linux only).
+needs_kcov() {
+	if ! command -v kcov >/dev/null; then skip "no kcov on this platform"; fi
+}
+
 # bash_project: scripts, tested or not, a test file, and files that are not shell scripts git sees. The test runs the
 # tool through bash: the sandbox of `nix flake check` has no /usr/bin/env.
 bash_project() {
@@ -87,9 +92,11 @@ setup() { source "$BATS_TEST_DIRNAME/../lib/greet.sh"; }
 @test "greets" { run greet you; [ "$output" = "hello you" ]; }
 @test "runs the tool" { run bash "$BATS_TEST_DIRNAME/../tool" x; [ "$output" = "tool x" ]; }
 BATS
+	git add -A
 }
 
 @test "assay-bats runs the tests under kcov; its report lists every script git sees, those no test runs too" {
+	needs_kcov
 	local_repo
 	bash_project
 	run --separate-stderr "$bin/assay-bats" .git/assay/kcov
@@ -102,12 +109,25 @@ BATS
 	[ "$output" = "$(printf '%s\n' lib/greet.sh:2:1 lib/quiet.bash:2:0 tool:2:1 tool:3:1 untested.sh:2:0 untested.sh:3:0)" ]
 }
 
+@test "assay-bats runs the tracked .bats files only" {
+	needs_kcov
+	local_repo
+	bash_project
+	printf '@test "untracked" { false; }\n' >test/untracked.bats
+	run --separate-stderr "$bin/assay-bats" .git/assay/kcov
+	echo "$output"
+	[ "$status" -eq 0 ]
+	[ "${lines[0]}" = 1..2 ]
+}
+
 @test "assay-bats fails with bats, starts from an empty report, and keeps kcov's trace noise out of its output" {
+	needs_kcov
 	local_repo
 	bash_project
 	mkdir -p .git/assay/kcov/bats
 	echo stale >.git/assay/kcov/bats/cobertura.xml
 	printf '@test "fails" { run printf "a\\nb\\n"; false; }\n' >test/b.bats
+	git add test/b.bats
 	run --separate-stderr "$bin/assay-bats" .git/assay/kcov
 	echo "$output"
 	[ "$status" -ne 0 ]
@@ -119,9 +139,10 @@ BATS
 }
 
 @test "assay-bats with no test still writes the report, every script uncovered; with no script, an empty one" {
+	needs_kcov
 	local_repo
 	bash_project
-	rm test/a.bats
+	git rm --quiet --force test/a.bats
 	run --separate-stderr "$bin/assay-bats" .git/assay/kcov
 	echo "$output"
 	[ "$status" -eq 0 ]
@@ -132,7 +153,9 @@ BATS
 	[ "$status" -eq 0 ]
 	run hits .git/assay/kcov/bats/cobertura.xml
 	[ -z "$output" ]
+	mkdir -p test
 	printf '@test "passes" { true; }\n' >test/c.bats
+	git add test/c.bats
 	run --separate-stderr "$bin/assay-bats" .git/assay/kcov
 	[ "$status" -eq 0 ]
 	[ "${lines[1]}" = "ok 1 passes" ]

@@ -32,7 +32,7 @@ nixos-config issues it links (#50, #52, #58, #56, #47). Branch `agent/nix-bash-d
 - **kcov 43 with bats 1.14 loses coverage** after every `run` (bats traces `saved_traps=$'…\'…'`, which leaves
   kcov's quote tracking in a single-quote state). Fixed upstream in SimonKagstrom/kcov#501, after v43; nixpkgs has 43.
   `nix/kcov.nix` applies that patch (`nix/kcov-ansi-c-quote.patch`); module and flake share it.
-- **Config:** `coverage: {newCode: <0-100>}` required; loosenings gain kinds `coverage` (a default check's `coverage`
+- **Config:** `coverage: {newCode: <0-100>}`, required once a check declares `coverage`; loosenings gain kinds `coverage` (a default check's `coverage`
   changed: dropped or another report; needs that check's `reason`) and `new-code` (`assay.coverage.newCode` below
   assay's default, `{kind, newCode, default, reason}`, reason from `assay.coverage.reason`). Version stays 1: module
   and CLI always ship together.
@@ -43,17 +43,20 @@ nixos-config issues it links (#50, #52, #58, #56, #47). Branch `agent/nix-bash-d
     (git glob pathspecs from the root), NUL-terminated;
   - `assay-nixf-tidy <file>...`: nixf-tidy `--variable-lookup` per file, each diagnostic as `file:line:col: severity
     sname: message`, exit 1 on any;
-  - `assay-bats <dir>`: bats over the `.bats` files git sees under kcov into `<dir>` (removed first); with no `.bats`
-    file it runs bats on an empty directory, so the report still lists every script; kcov's stderr (trace noise) goes
-    to `<dir>/kcov.stderr`.
+  - `assay-bats <dir>`: bats over the tracked `.bats` files under kcov into `<dir>` (removed first); kcov runs a
+    runner in bats' place that first names every script to kcov at line 0, so the report lists every script, those
+    kcov's walk misses included; with no `.bats` file the runner reports no test; kcov's stderr (trace noise) goes to
+    `<dir>/kcov.stderr`.
 - **Default checks** (named after their tool):
   - Nix, `languages.nix.enable`: `nixfmt`, `statix`, `deadnix`, `nixf-tidy` fast, each over `assay-files '*.nix'`;
     `nix-flake-check` (`nix flake check`, `requires = "flake.nix"`).
   - bash, `languages.shell.enable`: `shellcheck`, `shfmt` fast, over `assay-files | xargs -0 -r shfmt -f | tr '\n'
     '\0' | xargs -0 -r <tool>`; `bats` full, `assay-bats "$ASSAY_DIR/kcov"`, `coverage =
     "$ASSAY_DIR/kcov/bats/cobertura.xml"`.
-  - bats runs the `.bats` files git sees, untracked ones included (the issue says "tracked"): an agent's new test runs
-    before `git add`, as `requires` and diff-cover's `--include-untracked` already count untracked files.
+  - bats runs the tracked `.bats` files, as the issue says (the critic's finding; untracked ones ran before).
+  - kcov only where nixpkgs has it (Linux), in the module and in `nix/test-tools.nix`, so darwin still evaluates.
+  - `coverage.newCode` is required in the config only when a check declares `coverage`: a configuration of the base's
+    shape still runs.
 - **Tests:** `test/coverage.bats` (CLI, real diff-cover), `test/defaults.bats` (the helpers against fixture repos,
   real tools), `test/devenv/defaults.bats` (each default check failing on a defect and passing on its fix through
   the real devenv; coverage end to end; `newCode = 50` with and without reason), `nix/checks.nix` (module).
@@ -70,7 +73,6 @@ line 0, since kcov's walk misses a `.bash` library without "sh" in its first 80 
 Open decisions for p3rkins (not to be decided by an agent):
 - `.git-blame-ignore-revs` for the shfmt commit (`style: shfmt's reformat…`) only makes sense if the branch is not
   squash-merged.
-- bats runs untracked `.bats` files too (the issue says "tracked").
 - kcov is nixpkgs' kcov patched (`nix/kcov.nix`), so it builds from source where no cache has it.
 - `ASSAY_DIR` and the `coverage` loosening kind are interface the issue did not name.
 - With a script at the repo root, kcov's `--bash-parse-files-in-dir` walks the whole root, ignored trees included.

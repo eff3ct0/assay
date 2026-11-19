@@ -96,8 +96,10 @@ not ignored), never over `.`, so `.devenv/` and other ignored files are never re
 - Nix's checks run over the `.nix` files; `nixf-tidy` runs with `--variable-lookup` on each file, and any diagnostic
   fails it, whatever its severity. Nix has no coverage tool, so a Nix repo has no coverage check.
 - bash's checks run over the shell files `shfmt -f` finds (by extension or shebang, `.bats` files included). shfmt
-  keeps its defaults (tabs). `bats` runs the `.bats` files under kcov, whose Cobertura report,
+  keeps its defaults (tabs). `bats` runs the tracked `.bats` files under kcov, whose Cobertura report,
   `$ASSAY_DIR/kcov/bats/cobertura.xml`, lists every shell script, those no test runs included, and nothing else.
+  nixpkgs has kcov for Linux only: elsewhere `bats` fails on the missing tool until the repo turns it off with a
+  reason.
 - The commands call three helpers the module puts on the PATH (`devenv/bin`): `assay-files [<glob>...]` (the files
   git sees that exist, NUL-terminated), `assay-nixf-tidy <file>...` and `assay-bats <dir>`.
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# assay-bats <dir>: bash's test check. Runs bats over the .bats files git sees, under kcov, which writes a Cobertura
+# assay-bats <dir>: bash's test check. Runs bats over the tracked .bats files, under kcov, which writes a Cobertura
 # report to <dir>/bats/cobertura.xml. The report lists every shell script git sees (what shfmt -f finds, test files
 # aside), executed or not, and nothing else: so a new script no test runs counts as uncovered, and diff-cover counts
 # no other language's lines. With no .bats file, the report still lists every script. <dir> is emptied first, since
@@ -19,7 +19,9 @@ rm -rf "$out"
 mkdir -p "$out/empty" "$out/runner"
 
 tests=()
-while IFS= read -r -d '' f; do tests+=("$f"); done < <("$here/assay-files" '**/*.bats')
+while IFS= read -r -d '' f; do
+	if [ -f "$f" ]; then tests+=("$f"); fi
+done < <(git ls-files -z --cached --deduplicate -- ':(top,glob)**/*.bats')
 
 # kcov keeps the files under --include-path (a comma-separated list), and lists the ones nobody runs only when it
 # parses them while walking --bash-parse-files-in-dir: the top-level directories that hold the scripts, or the root

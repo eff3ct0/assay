@@ -16,7 +16,11 @@ let
     cp ${./bin}/* $out/bin/
     patchShebangs $out/bin
   '';
-  kcov = pkgs.callPackage ../nix/kcov.nix { };
+  # nixpkgs has kcov for Linux only: elsewhere bats' check fails on its missing tool (exit 127), until the repo turns
+  # it off with a reason.
+  kcov = lib.optional (lib.meta.availableOn pkgs.stdenv.hostPlatform pkgs.kcov) (
+    pkgs.callPackage ../nix/kcov.nix { }
+  );
 
   # Every tool runs over the .nix files git sees: never `.`, which would reach `.devenv/` and ignored files.
   nixFiles = "assay-files '**/*.nix' | xargs -0 -r";
@@ -87,8 +91,8 @@ lib.optionalAttrs config.languages.nix.enable {
     packages = [
       helpers
       pkgs.bats
-      kcov
       pkgs.shfmt
-    ];
+    ]
+    ++ kcov;
   };
 }

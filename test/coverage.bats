@@ -99,8 +99,9 @@ writes() { echo "mkdir -p \"\$(dirname \"$2\")\" && cp '$1' \"$2\""; }
 	check where "echo \"\$ASSAY_DIR\" >$T/dir"
 	check test "$(writes "$T/report" '$ASSAY_DIR/test/lcov.info')" --coverage '$ASSAY_DIR/test/lcov.info'
 	check braces "$(writes "$T/report" '$ASSAY_DIR/braces.info')" --coverage '${ASSAY_DIR}/braces.info'
-	git worktree add --quiet "$T/wt" -b topic
-	cd "$T/wt"
+	# A path with & in it: bash 5.2 would put the matched text there in a pattern substitution.
+	git worktree add --quiet "$T/w&t" -b topic
+	cd "$T/w&t"
 	printf 'one\n' >lib.sh
 	run --separate-stderr "$assay" check
 	echo "$output"
@@ -201,8 +202,20 @@ XML
 	[ "$status" -eq 2 ]
 	[[ $stderr == *"coverage.newCode must be an integer from 0 to 100"* ]]
 	jq 'del(.coverage)' "$ASSAY_CONFIG" >"$T/c" && mv "$T/c" "$ASSAY_CONFIG"
+	check test true --coverage lcov.info
 	run --separate-stderr "$assay" check
 	[ "$status" -eq 2 ]
+	[[ $stderr == *"coverage.newCode must be an integer from 0 to 100"* ]]
+}
+
+@test "a configuration without coverage settings still runs when no check declares coverage" {
+	local_repo
+	check lint true --fast
+	jq 'del(.coverage)' "$ASSAY_CONFIG" >"$T/c" && mv "$T/c" "$ASSAY_CONFIG"
+	run --separate-stderr "$assay" check
+	echo "$output$stderr"
+	[ "$status" -eq 0 ]
+	[[ ${lines[1]} =~ ^ok\ \ \ lint\ [0-9.]+s$ ]]
 }
 
 @test "a lower threshold and a default check's dropped coverage are loosenings, listed with their reasons" {
