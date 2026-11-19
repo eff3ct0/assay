@@ -79,10 +79,10 @@ let
     if availablePacks == [ ] then "none yet" else lib.concatStringsSep ", " availablePacks
   })";
 
-  # The languages the repo enables among assay's six, by the names ast-grep knows them by: TypeScript's checks key on
-  # languages.javascript too, and bash is devenv's shell.
+  # The languages the repo enables among assay's six, by the names ast-grep knows them by: devenv's own, but shell is
+  # bash. JavaScript and TypeScript stay two: an ast-grep rule for one does not read the other's files.
   languageNames = {
-    javascript = "typescript";
+    javascript = "javascript";
     typescript = "typescript";
     python = "python";
     rust = "rust";

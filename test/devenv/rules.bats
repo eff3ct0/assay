@@ -47,25 +47,9 @@ source "$BATS_TEST_DIRNAME/helpers.bash"
 	[ "$status" -eq 0 ]
 	[ "$(yq -o=json '.invalid[0]' rule-tests/no-eval-either-test.yml)" = '"eval \"$1\"\n"' ]
 	rm rules/no-eval-either.yml rule-tests/no-eval-either-test.yml
-	# Filled in.
-	cat >rules/no-eval.yml <<'RULE'
-id: no-eval
-language: bash
-severity: error
-message: Call the command by name, not through eval.
-note: |
-  Why: eval runs whatever its string holds.
-  Fix: call the command by name, with its arguments in an array.
-  Not a fix: `bash -c`, or eval in a function of another name.
-  If the rule is wrong here, stop and tell the user; exceptions go in the rule's own file.
-rule:
-  kind: command
-  has:
-    field: name
-    regex: ^eval$
-RULE
-	printf '%s\n' 'id: no-eval' 'invalid:' '  - eval "$cmd"' 'valid:' '  - '"'"'"$@"'"'" '  - echo eval' \
-		>rule-tests/no-eval-test.yml
+	# Filled in: test/projects/no-eval's rule and tests.
+	cp "$BATS_TEST_DIRNAME/../projects/no-eval/rules/no-eval.yml" rules/
+	cp "$BATS_TEST_DIRNAME/../projects/no-eval/rule-tests/no-eval-test.yml" rule-tests/
 	run --separate-stderr devenv shell -- assay check ast-grep oxfmt
 	echo "$output"
 	[ "$status" -eq 1 ]

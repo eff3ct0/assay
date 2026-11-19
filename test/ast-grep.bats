@@ -34,7 +34,7 @@ source "$BATS_TEST_DIRNAME/helpers.bash"
 	[ "${lines[-1]}" = "ast-grep scan found code a rule forbids: fix each finding; \`ast-grep scan -U\` applies a rule's fix:, where it has one." ]
 }
 
-@test "ast-grep-ignore outside the rule directories fails, in any file git sees, before ast-grep runs" {
+@test "ast-grep-ignore outside the rule directories fails, in any file git sees; the tests and the scan still run" {
 	local_repo
 	builtin_checks plain
 	sg_project
@@ -53,8 +53,11 @@ source "$BATS_TEST_DIRNAME/helpers.bash"
 	expected="notes.md:1:<!-- ast-grep-ignore -->
 src/tracked.sh:2:eval \"\$x\" # ast-grep-ignore
 untracked.sh:1:# ast-grep-ignore: no-eval
-3 lines with ast-grep-ignore outside the rule directories: remove each one. An exception lives in the rule's own file (its ignores, or a not: clause in its rule), where a review sees it; an ast-grep-ignore also silences a rule written to forbid it."
-	[ "$output" = "$expected" ]
+3 lines with ast-grep-ignore outside the rule directories: remove each one. An exception lives in the rule's own file (its ignores, or a not: clause in its rule), where a review sees it; an ast-grep-ignore also silences a rule written to forbid it.
+$ ast-grep test --skip-snapshot-tests --color never"
+	[ "${output%%$'\n'Running*}" = "$expected" ]
+	# The scan ran, and the ast-grep-ignore comments silenced it, as they would without the search.
+	[ "${lines[-1]}" = '$ ast-grep scan --color never' ]
 	rm untracked.sh notes.md
 	git rm --quiet src/tracked.sh
 	run --separate-stderr "$assay" builtin ast-grep
@@ -62,7 +65,7 @@ untracked.sh:1:# ast-grep-ignore: no-eval
 	[ "$status" -eq 0 ]
 }
 
-@test "a rule whose tests fail fails the check, and the scan does not run" {
+@test "a rule whose tests fail fails the check; the scan runs too" {
 	local_repo
 	sg_project
 	# A valid case the rule reports.
@@ -72,9 +75,9 @@ untracked.sh:1:# ast-grep-ignore: no-eval
 	echo "$output"
 	[ "$status" -eq 1 ]
 	[[ $output == *'$ ast-grep test --skip-snapshot-tests --color never'* ]]
-	[[ $output == *"FAIL no-eval"* ]]
-	[[ $output != *'$ ast-grep scan'* ]]
-	[ "${lines[-1]}" = "ast-grep test failed: each rule reports its invalid cases and none of its valid ones; fix the rule or its tests." ]
+	[[ $output == *"FAIL no-eval"*$'\nast-grep test failed: each rule reports its invalid cases and none of its valid ones; fix the rule or its tests.\n$ ast-grep scan --color never\n'* ]]
+	[[ $output == *"error[no-eval]"* ]]
+	[ "${lines[-1]}" = "ast-grep scan found code a rule forbids: fix each finding; \`ast-grep scan -U\` applies a rule's fix:, where it has one." ]
 }
 
 @test "an existing sgconfig.yml is respected, whatever directories it names" {
@@ -98,6 +101,23 @@ untracked.sh:1:# ast-grep-ignore: no-eval
 	run --separate-stderr "$assay" builtin ast-grep
 	[ "$status" -eq 1 ]
 	[[ $output == *"error[no-eval]"* ]]
+}
+
+@test "a rule directory outside the repo names no file of it; one at its root leaves no file to search" {
+	local_repo
+	sg_project
+	mkdir -p "$T/elsewhere"
+	echo '# ast-grep-ignore' >"$T/elsewhere/x.sh"
+	printf '%s\n' 'ruleDirs: [rules, "'"$T"'/elsewhere"]' 'testConfigs: [{testDir: rule-tests}]' >sgconfig.yml
+	echo 'echo # ast-grep-ignore' >tool.sh
+	run --separate-stderr "$assay" builtin ast-grep
+	echo "$output"
+	[ "$status" -eq 1 ]
+	[ "${lines[0]}" = "tool.sh:1:echo # ast-grep-ignore" ]
+	printf '%s\n' 'ruleDirs: [.]' >sgconfig.yml
+	run --separate-stderr "$assay" builtin ast-grep
+	echo "$output"
+	[[ $output != *"lines with ast-grep-ignore"* && $output != *"line with ast-grep-ignore"* ]]
 }
 
 @test "a placeholder of assay rule new left in the rule directories fails the check" {

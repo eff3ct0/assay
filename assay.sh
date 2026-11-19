@@ -37,7 +37,8 @@ run where they are called, over the rule list given with --rules.
 The base of the change: --base, else ASSAY_BASE, else GitHub's event (GITHUB_EVENT_PATH), else the
 fork point of HEAD from the default branch, else their merge base. assay never fetches.
 Exit codes: 0 every selected check passed, 1 at least one failed, 2 assay could not run;
-assay builtin exits 127 when the tool its check runs is missing. assay guard exits 0 with its
+assay builtin exits 127 when the tool its check runs is missing, and assay rule new 1 when a rule of
+that name already exists. assay guard exits 0 with its
 answer on stdout, and 1 on its own error, which lets the call through; assay git-hook exits 1 when
 a rule is violated or cannot be evaluated.
 EOF
@@ -984,43 +985,42 @@ builtin_suppressions() {
 	esac
 }
 
-# ast-grep: the repo's ast-grep rules (sgconfig.yml at the root, whatever directories it names) and the rule packs
-# the configuration turns on (rulePacks, each an ast-grep project of its own, scanning the repo from its root), in
-# three steps, each run only when the one before passed:
-# 1. a plain text search of the files git sees, for ast-grep-ignore outside the rule directories (a bare one on a line
-#    also silences a rule written to forbid it, so exceptions live in the rule's own file), and for the placeholders
-#    of `assay rule new` inside them (ast-grep itself takes a placeholder pattern for code);
-# 2. `ast-grep test --skip-snapshot-tests` (snapshots only restate the message, and ast-grep test fails without them);
-# 3. `ast-grep scan`, which exits 1 on an error finding.
-# ast-grep's own errors (a rule it cannot read, a missing rule directory) fail the step they happen in.
+# The marker that opens each placeholder `assay rule new` writes: "<fill in: what goes here>".
 rule_placeholder='<fill in:'
 
-# sg_dirs: the directories the root's sgconfig.yml names for rules, utilities and tests, relative to the root, into
-# sg_dir_list; one outside the repo names no file git sees and is left out. Returns 1, with yq's error in sg_error,
-# when sgconfig.yml cannot be read as YAML.
-sg_dir_list=()
+# sg_load: the root's sgconfig.yml as compact JSON, in sg_json. Returns 1, with yq's error on one line in sg_error, when
+# it cannot be read as YAML.
+sg_json=
 sg_error=
-sg_dirs() {
-	local json d abs
-	sg_dir_list=()
-	if ! json=$(yq -o=json -I=0 '.' sgconfig.yml 2>&1); then
-		sg_error=$json
+sg_load() {
+	command -v yq >/dev/null || die "cannot find yq on the PATH"
+	if ! sg_json=$(yq -o=json -I=0 '.' sgconfig.yml 2>&1); then
+		sg_error=${sg_json//$'\n'/ }
 		return 1
 	fi
+}
+
+# sg_dirs <rules|tests|all>: the directories sgconfig.yml names (sg_load first), NUL-terminated, in its order: its
+# ruleDirs, its testConfigs' testDir, or every one of those and its utilDirs.
+sg_dirs() {
 	# shellcheck disable=SC2016 # jq's program, not the shell's
-	while IFS= read -r -d '' d; do
-		abs=$(realpath -m -s -- "$d") || die "cannot resolve $d"
-		case $abs in
-		"$root") sg_dir_list+=(.) ;;
-		"$root"/*) sg_dir_list+=("${abs#"$root"/}") ;;
-		esac
-	done < <(jq -j -n '
-    def names: if type == "array" then .[] | select(type == "string" and length > 0) else empty end;
-    input
-    | ((try .ruleDirs catch null) | names),
-      ((try .utilDirs catch null) | names),
-      ((try .testConfigs catch null) | if type == "array" then [.[] | try .testDir catch null] | names else empty end)
-    | . + "\u0000"' <<<"$json" || die "cannot read the directories sgconfig.yml names")
+	jq -j -n --arg kind "$1" 'def names: if type == "array" then .[] | select(type == "string" and length > 0) else empty end;
+		input | (if $kind == "tests" then empty else (try .ruleDirs catch null) | names end),
+			(if $kind == "all" then (try .utilDirs catch null) | names else empty end),
+			(if $kind == "rules" then empty else [(try .testConfigs[] catch empty) | try .testDir catch null] | names end)
+		| . + "\u0000"' <<<"$sg_json" || die "cannot read the directories sgconfig.yml names"
+}
+
+# root_relative <path>: the path relative to the repo root (the current directory) when it lies inside the repo, else
+# absolute.
+root_relative() {
+	local abs
+	abs=$(realpath -m -s -- "$1") || die "cannot resolve $1"
+	case $abs in
+	"$root") echo . ;;
+	"$root"/*) echo "${abs#"$root"/}" ;;
+	*) echo "$abs" ;;
+	esac
 }
 
 # sg_grep <out> <pattern> <pathspec>...: the lines that hold the fixed string, in the files git sees (tracked, or
@@ -1037,18 +1037,28 @@ sg_grep() {
 	esac
 }
 
-# sg_run <ast-grep argument>...: print the command, then run it with its output on stdout; a failure joins sg_failed.
-sg_failed=()
+# sg_run <ast-grep argument>...: print the command, then run it with its output on stdout; returns its exit code.
 sg_run() {
 	local arg shown="\$ ast-grep" rc=0
 	for arg in "$@"; do shown+=" $(shell_word "$arg")"; done
 	echo "$shown"
 	ast-grep "$@" 2>&1 || rc=$?
-	if [ "$rc" -ne 0 ]; then sg_failed+=("$rc"); fi
+	return "$rc"
 }
 
+# ast-grep: the repo's ast-grep rules (sgconfig.yml at the root, whatever directories it names) and the rule packs the
+# configuration turns on (rulePacks, each an ast-grep project of its own, scanning the repo from its root), in three
+# steps, in order:
+# 1. a plain text search of the files git sees, for ast-grep-ignore outside the rule directories (a bare one on a line
+#    also silences a rule written to forbid it, so exceptions live in the rule's own file), and for the placeholders
+#    of `assay rule new` inside them;
+# 2. `ast-grep test --skip-snapshot-tests` (snapshots only restate the message, and ast-grep test fails without them);
+# 3. `ast-grep scan`, which exits 1 on an error finding.
+# Every step runs, so that one run shows every failure, but a placeholder ends the check after the first: the rule is
+# not written yet, and ast-grep would take its placeholder pattern for code. ast-grep's own errors (a rule it cannot
+# read, a missing rule directory) fail the step they happen in.
 builtin_ast_grep() {
-	local has_config=0 hits n d i bad=0
+	local has_config=0 hits dirs count d i ignores=0 placeholders=0 tests_failed=0 scan_failed=0 all_inside=0
 	local -a excluded=() inside=()
 	[ $# -eq 0 ] || usage_error "ast-grep takes no argument"
 	load_config
@@ -1060,67 +1070,66 @@ builtin_ast_grep() {
 		finish 127
 	fi
 
-	# 1. The plain text search.
+	# 1. The plain text search, outside and inside the rule directories that lie in the repo.
+	tmp_file hits
 	if [ "$has_config" = 1 ]; then
-		command -v yq >/dev/null || die "cannot find yq on the PATH"
-		if ! sg_dirs; then
-			echo "sgconfig.yml cannot be read as YAML: ${sg_error//$'\n'/ }"
+		if ! sg_load; then
+			echo "sgconfig.yml cannot be read as YAML: $sg_error"
 			finish 1
 		fi
-		for d in "${sg_dir_list[@]}"; do
+		tmp_file dirs
+		sg_dirs all >"$dirs"
+		while IFS= read -r -d '' d; do
+			d=$(root_relative "$d")
+			case $d in
+			/*) continue ;;
+			.) all_inside=1 ;;
+			esac
 			excluded+=(":(top,exclude,literal)$d")
 			inside+=(":(top,literal)$d")
-		done
+		done <"$dirs"
 	fi
-	tmp_file hits
-	if sg_grep "$hits" ast-grep-ignore . "${excluded[@]}"; then
+	if [ "$all_inside" = 0 ] && sg_grep "$hits" ast-grep-ignore . "${excluded[@]}"; then
 		cat "$hits"
-		n=$(wc -l <"$hits")
-		if [ "$n" -eq 1 ]; then echo -n "1 line with"; else echo -n "$n lines with"; fi
+		count=$(wc -l <"$hits")
+		if [ "$count" -eq 1 ]; then echo -n "1 line with"; else echo -n "$count lines with"; fi
 		echo " ast-grep-ignore outside the rule directories: remove each one. An exception lives in the rule's own file" \
 			"(its ignores, or a not: clause in its rule), where a review sees it; an ast-grep-ignore also silences a rule" \
 			"written to forbid it."
-		bad=1
+		ignores=1
 	fi
 	if [ ${#inside[@]} -gt 0 ] && sg_grep "$hits" "$rule_placeholder" "${inside[@]}"; then
 		cat "$hits"
-		n=$(wc -l <"$hits")
-		if [ "$n" -eq 1 ]; then echo -n "1 placeholder"; else echo -n "$n placeholders"; fi
+		count=$(wc -l <"$hits")
+		if [ "$count" -eq 1 ]; then echo -n "1 placeholder"; else echo -n "$count placeholders"; fi
 		echo " of assay rule new left in the rules and their tests: fill each one in, as the comment above its field says."
-		bad=1
+		placeholders=1
 	fi
-	[ "$bad" = 0 ] || finish 1
+	[ "$placeholders" = 0 ] || finish 1
 
 	# 2. The rules' tests: the repo's, then each pack's.
-	if [ "$has_config" = 1 ]; then sg_run test --skip-snapshot-tests --color never; fi
+	if [ "$has_config" = 1 ]; then sg_run test --skip-snapshot-tests --color never || tests_failed=1; fi
 	for i in "${!pack_names[@]}"; do
-		sg_run test -c "${pack_dirs[$i]}/sgconfig.yml" --skip-snapshot-tests --color never
+		sg_run test -c "${pack_dirs[$i]}/sgconfig.yml" --skip-snapshot-tests --color never || tests_failed=1
 	done
-	if [ ${#sg_failed[@]} -gt 0 ]; then
+	if [ "$tests_failed" = 1 ]; then
 		echo "ast-grep test failed: each rule reports its invalid cases and none of its valid ones; fix the rule or its tests."
-		finish 1
 	fi
 
 	# 3. The scan: the repo's rules, then each pack's.
-	if [ "$has_config" = 1 ]; then
-		sg_run scan --color never
-		if [ ${#sg_failed[@]} -gt 0 ]; then bad=1; fi
-	fi
-	local -a pack_failed=()
-	for i in "${!pack_names[@]}"; do
-		n=${#sg_failed[@]}
-		sg_run scan -c "${pack_dirs[$i]}/sgconfig.yml" --color never
-		if [ ${#sg_failed[@]} -gt "$n" ]; then pack_failed+=("$i"); fi
-	done
-	[ ${#sg_failed[@]} -gt 0 ] || finish 0
-	if [ "$bad" = 1 ]; then
+	if [ "$has_config" = 1 ] && ! sg_run scan --color never; then
 		echo "ast-grep scan found code a rule forbids: fix each finding; \`ast-grep scan -U\` applies a rule's fix:," \
 			"where it has one."
+		scan_failed=1
 	fi
-	for i in "${pack_failed[@]}"; do
-		echo "ast-grep scan found code a rule forbids: fix each finding;" \
-			"\`ast-grep scan -c $(shell_word "${pack_dirs[$i]}/sgconfig.yml") -U\` applies a pack rule's fix:, where it has one."
+	for i in "${!pack_names[@]}"; do
+		if ! sg_run scan -c "${pack_dirs[$i]}/sgconfig.yml" --color never; then
+			echo "ast-grep scan found code a rule forbids: fix each finding;" \
+				"\`ast-grep scan -c $(shell_word "${pack_dirs[$i]}/sgconfig.yml") -U\` applies a pack rule's fix:, where it has one."
+			scan_failed=1
+		fi
 	done
+	if [ "$ignores$tests_failed$scan_failed" = 000 ]; then finish 0; fi
 	finish 1
 }
 
@@ -1142,26 +1151,25 @@ cmd_builtin() {
 # check until they are filled in. Only ast-grep rules: a native rule is a line in its tool's configuration, and a
 # guard rule a Nix entry.
 
-# lang_of_file <path>: the ast-grep language of a file among assay's languages and their kin, by its extension, or by
-# a shell shebang when it has none; nothing when it is in none of them.
+# A shell script's shebang: sh, bash, dash, ksh or bats, by path or through env.
+shebang_re='^#![[:space:]]*[^[:space:]]*/(env[[:space:]]+(-[^[:space:]]+[[:space:]]+)*)?((ba|da|k)?sh|bats)([[:space:]]|$)'
+
+# lang_of_file <path>: the ast-grep language of a file, in lowercase: bash for a script whose name has no extension and
+# whose shebang names a shell, else the one ast-grep parses it as (by its extension, or the languageGlobs of the
+# sgconfig.yml it finds); nothing when it has none.
 lang_of_file() {
-	local base=${1##*/} first="" shebang='^#![[:space:]]*[^[:space:]]*/(env[[:space:]]+(-[^[:space:]]+[[:space:]]+)*)?'
-	shebang+='((ba|da|k)?sh|bats)([[:space:]]|$)'
-	if [[ $base != ?*.* ]]; then
+	local first="" out
+	if [[ ${1##*/} != ?*.* ]]; then
 		IFS= read -r first <"$1" || true
-		if [[ $first =~ $shebang ]]; then echo bash; fi
-		return 0
+		if [[ $first =~ $shebang_re ]]; then
+			echo bash
+			return 0
+		fi
 	fi
-	case ${base##*.} in
-	ts | mts | cts) echo typescript ;;
-	tsx) echo tsx ;;
-	js | mjs | cjs | jsx) echo javascript ;;
-	py | pyi) echo python ;;
-	rs) echo rust ;;
-	scala | sc | sbt) echo scala ;;
-	nix) echo nix ;;
-	sh | bash | bats) echo bash ;;
-	esac
+	# Any node matches $A, and the first match names the language; the file holds at least one non-blank line.
+	# shellcheck disable=SC2016 # ast-grep's metavariable $A, not the shell's
+	out=$(ast-grep run -p '$A' --json=stream -- "$1" 2>/dev/null | head -n 1) || true
+	jq -r '.language // empty | ascii_downcase' <<<"$out" 2>/dev/null || true
 }
 
 # from_case <file> <first> <last>: lines <first> to <last> of the file as the first item of a YAML list, indented by
@@ -1175,15 +1183,8 @@ from_case() {
     NR >= first && NR <= last { sub(/[ \t]+$/, ""); line[++n] = $0 }
     END {
       if (NR < last) { print NR; exit 3 }
-      have = 0
-      for (i = 1; i <= n; i++) {
-        if (line[i] == "") continue
-        match(line[i], /^[ \t]*/); ws = substr(line[i], 1, RLENGTH)
-        if (!have) { prefix = ws; have = 1; continue }
-        j = 0
-        while (j < length(prefix) && j < length(ws) && substr(prefix, j + 1, 1) == substr(ws, j + 1, 1)) j++
-        prefix = substr(prefix, 1, j)
-      }
+      for (i = 1; i <= n; i++) if (line[i] != "") { match(line[i], /^[ \t]*/); ws = substr(line[i], 1, RLENGTH)
+        if (!have++) prefix = ws; else { j = 0; while (j < length(prefix) && substr(prefix, j + 1, 1) == substr(ws, j + 1, 1)) j++; prefix = substr(prefix, 1, j) } }
       if (!have) exit 4
       for (i = 1; i <= n; i++) print (line[i] == "") ? "" : substr(line[i], length(prefix) + 1)
     }' "$file") || {
@@ -1206,22 +1207,22 @@ from_case() {
 	fi
 }
 
-# root_relative <path>: the path relative to the repo root (the current directory) when it lies inside the repo, else
-# absolute.
-root_relative() {
-	local abs
-	abs=$(realpath -m -s -- "$1") || die "cannot resolve $1"
-	case $abs in
-	"$root") echo . ;;
-	"$root"/*) echo "${abs#"$root"/}" ;;
-	*) echo "$abs" ;;
-	esac
+# first_dir <rules|tests>: the first directory of that kind sgconfig.yml names (sg_load first), relative to the root
+# when it lies inside the repo; nothing when it names none.
+first_dir() {
+	local list d
+	tmp_file list
+	sg_dirs "$1" >"$list"
+	if IFS= read -r -d '' d <"$list"; then root_relative "$d"; fi
 }
 
-# The text that marks a placeholder (rule_placeholder) opens each one: "<fill in: what it must hold>".
+# rule_new <argument>...: `assay rule new`. Writes the scaffold and prints the paths it created, relative to the
+# directory it was called from.
 rule_new() {
-	local name="" lang="" lang_set=0 from="" file="" first="" last="" case_file json rule_dir test_dir d f hit list
+	local name="" lang="" lang_set=0 from="" from_set=0 file="" first="" last="" case_file rule_dir test_dir d f hit list
+	local caller_dir dirs
 	local -a created=()
+	caller_dir=$(pwd -P) || die "cannot read the current directory"
 	while [ $# -gt 0 ]; do
 		case $1 in
 		--lang)
@@ -1232,10 +1233,10 @@ rule_new() {
 		--lang=*) lang=${1#--lang=} lang_set=1 ;;
 		--from)
 			[ $# -ge 2 ] || usage_error "--from needs <file>:<line>[-<line>]"
-			from=$2
+			from=$2 from_set=1
 			shift
 			;;
-		--from=*) from=${1#--from=} ;;
+		--from=*) from=${1#--from=} from_set=1 ;;
 		-h | --help)
 			usage_text
 			finish 0
@@ -1253,7 +1254,7 @@ rule_new() {
 	if [ "$lang_set" = 1 ] && ! [[ $lang =~ ^[A-Za-z][A-Za-z0-9_-]*$ ]]; then
 		usage_error "--lang: '$lang' is not the name of a language ast-grep knows"
 	fi
-	if [ -n "$from" ]; then
+	if [ "$from_set" = 1 ]; then
 		[[ $from =~ ^(.+):([1-9][0-9]*)(-([1-9][0-9]*))?$ ]] || usage_error "--from takes <file>:<line>[-<line>], not '$from'"
 		file=${BASH_REMATCH[1]} first=${BASH_REMATCH[2]} last=${BASH_REMATCH[4]:-${BASH_REMATCH[2]}}
 		[ "$first" -le "$last" ] || usage_error "--from: the range $first-$last ends before it starts"
@@ -1270,8 +1271,8 @@ rule_new() {
 	if [ -z "$lang" ] && [ ${#cfg_languages[@]} -eq 1 ]; then lang=${cfg_languages[0]}; fi
 	if [ -z "$lang" ]; then
 		local why="" of=" of assay's languages"
-		if [ -n "$from" ]; then
-			why="$file is in none of assay's languages, and "
+		if [ "$from_set" = 1 ]; then
+			why="ast-grep gives $file no language, and "
 			of=
 		fi
 		if [ ${#cfg_languages[@]} -eq 0 ]; then
@@ -1285,26 +1286,17 @@ rule_new() {
 
 	# Where the rule and its tests go: the first rule and test directories of the repo's sgconfig.yml, or the ones the
 	# sgconfig.yml written here names.
+	tmp_file dirs
 	if [ -f sgconfig.yml ]; then
-		command -v yq >/dev/null || die "cannot find yq on the PATH"
-		json=$(yq -o=json -I=0 '.' sgconfig.yml 2>&1) || die "sgconfig.yml cannot be read as YAML: ${json//$'\n'/ }"
-		# shellcheck disable=SC2016 # jq's program, not the shell's
-		rule_dir=$(jq -r -n 'input | (try .ruleDirs catch null)
-      | if type == "array" then map(select(type == "string" and length > 0))[0] // "" else "" end' <<<"$json") ||
-			die "cannot read the directories sgconfig.yml names"
-		# shellcheck disable=SC2016 # jq's program, not the shell's
-		test_dir=$(jq -r -n 'input | (try .testConfigs catch null)
-      | if type == "array" then map((try .testDir catch null) | select(type == "string" and length > 0))[0] // ""
-        else "" end' <<<"$json") || die "cannot read the directories sgconfig.yml names"
+		sg_load || die "sgconfig.yml cannot be read as YAML: $sg_error"
+		rule_dir=$(first_dir rules)
+		test_dir=$(first_dir tests)
 		[ -n "$rule_dir" ] || die "sgconfig.yml names no rule directory (ruleDirs), where the rule would go"
 		[ -n "$test_dir" ] ||
 			die "sgconfig.yml names no test directory (testConfigs: - testDir: <dir>), where the rule's tests would go"
-		rule_dir=$(root_relative "$rule_dir")
-		test_dir=$(root_relative "$test_dir")
-		sg_dirs || die "sgconfig.yml cannot be read as YAML: ${sg_error//$'\n'/ }"
+		sg_dirs all >"$dirs"
 	else
 		rule_dir=rules test_dir=rule-tests
-		sg_dir_list=()
 	fi
 	local rule_file=$rule_dir/$name.yml test_file=$test_dir/$name-test.yml
 
@@ -1315,15 +1307,16 @@ rule_new() {
 			finish 1
 		fi
 	done
-	for d in "${sg_dir_list[@]}"; do
+	while IFS= read -r -d '' d; do
+		d=$(root_relative "$d")
 		[ -d "$d" ] || continue
 		hit=$(grep -rlE --include='*.yml' --include='*.yaml' "^id:[[:space:]]*[\"']?${name}[\"']?[[:space:]]*(#.*)?$" -- "$d" |
 			LC_ALL=C sort | head -n 1) || true
 		if [ -n "$hit" ]; then
-			echo "assay: a rule named $name already exists: ${hit#./}" >&2
+			echo "assay: a rule named $name already exists: $hit" >&2
 			finish 1
 		fi
-	done
+	done <"$dirs"
 
 	if [ ! -e sgconfig.yml ]; then
 		cat >sgconfig.yml <<'EOF' || die "cannot write sgconfig.yml"
@@ -1391,7 +1384,10 @@ valid:
 EOF
 	} >"$test_file" || die "cannot write $test_file"
 	created+=("$test_file")
-	printf '%s\n' "${created[@]}"
+	# Each path as the caller names it: relative to their directory, or absolute outside the repo.
+	for f in "${created[@]}"; do
+		if [[ $f == /* ]]; then echo "$f"; else realpath -m -s --relative-to="$caller_dir" -- "$root/$f"; fi
+	done
 	finish 0
 }
 

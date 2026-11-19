@@ -7,11 +7,7 @@ source "$BATS_TEST_DIRNAME/helpers.bash"
 # ast-grep's own layout, whose placeholders fail the ast-grep check until they are filled in.
 
 # languages <language>...: the languages the configuration says the repo enables.
-languages() {
-	jq --args '.languages = $ARGS.positional' "$@" <"$ASSAY_CONFIG" >"$T/languages.json.new"
-	mv "$T/languages.json.new" "$T/languages.json"
-	export ASSAY_CONFIG=$T/languages.json
-}
+languages() { config_set '.languages = $ARGS.positional' --args "$@"; }
 
 # yaml <file> <yq expression>: the value, as compact JSON.
 yaml() { yq -o=json -I=0 "$2" "$1"; }
@@ -108,6 +104,11 @@ rust_source() {
 	printf '%s\n' '#!/usr/bin/env bash' 'eval "$1"' >run
 	printf '%s\n' 'x = 1' >tool.py
 	printf '%s\n' 'x' >notes.txt
+	printf '%s\n' 'package main' >x.go
+	printf '%s\n' 'const a = 1;' | tee c.ts y.mjs z.tsx >/dev/null
+	printf '%s\n' '{ a = 1; }' >m.nix
+	printf '%s\n' 'object A' >s.scala
+	printf '%s\n' 'echo a' >t.sh
 	languages python rust
 	run --separate-stderr "$assay" rule new a
 	[ "$status" -eq 2 ]
@@ -116,16 +117,25 @@ rust_source() {
 	[ ! -e sgconfig.yml ]
 	run --separate-stderr "$assay" rule new a --from notes.txt:1
 	[ "$status" -eq 2 ]
-	[ "$stderr" = "assay: rule new needs --lang <language>: notes.txt is in none of assay's languages, and the repo enables several (python, rust)" ]
+	[ "$stderr" = "assay: rule new needs --lang <language>: ast-grep gives notes.txt no language, and the repo enables several (python, rust)" ]
 	"$assay" rule new b --from src/a.rs:3 >/dev/null
 	"$assay" rule new c --from tool.py:1 >/dev/null
 	"$assay" rule new d --from run:2 >/dev/null
 	"$assay" rule new e --from src/a.rs:3 --lang Scala >/dev/null
 	"$assay" rule new f --lang=tsx >/dev/null
+	# ast-grep's language for the file, whichever languages the repo enables.
+	"$assay" rule new go --from x.go:1 >/dev/null
+	"$assay" rule new ts --from c.ts:1 >/dev/null
+	"$assay" rule new mjs --from y.mjs:1 >/dev/null
+	"$assay" rule new tsx --from z.tsx:1 >/dev/null
+	"$assay" rule new nix --from m.nix:1 >/dev/null
+	"$assay" rule new scala --from s.scala:1 >/dev/null
+	"$assay" rule new sh --from t.sh:1 >/dev/null
 	languages rust
 	"$assay" rule new g >/dev/null
 	"$assay" rule new h --from notes.txt:1 >/dev/null
-	for r in b:rust c:python d:bash e:Scala f:tsx g:rust h:rust; do
+	for r in b:rust c:python d:bash e:Scala f:tsx g:rust h:rust go:go ts:typescript mjs:javascript tsx:tsx nix:nix \
+		scala:scala sh:bash; do
 		[ "$(yq '.language' "rules/${r%%:*}.yml")" = "${r#*:}" ]
 	done
 	languages
@@ -142,7 +152,7 @@ rust_source() {
 		"rule new a --lang" "rule new a --lang c++" "rule new a --from" "rule new a --from src/a.rs" \
 		"rule new a --from src/a.rs:0" "rule new a --from src/a.rs:3-2" "rule new a --from src/a.rs:x" \
 		"rule new a --from src/a.rs:5" "rule new a --from src/a.rs:4-5" "rule new a --from src/b.rs:1" \
-		"rule new a --from src/a.rs:4" "rule new a --nope"; do
+		"rule new a --from src/a.rs:4" "rule new a --nope" "rule new a --from=" "rule new a --lang="; do
 		# shellcheck disable=SC2086 # each case's words
 		run --separate-stderr "$assay" $args
 		echo "$args: $status $stderr"
@@ -214,13 +224,51 @@ rust_source() {
 	[ "$status" -eq 0 ]
 }
 
-@test "--from's path is relative to the current directory" {
+@test "from a subdirectory, --from's path and the paths it prints are relative to it" {
 	local_repo
 	rust_source
 	cd src
 	run --separate-stderr "$assay" rule new no-env-var --from a.rs:3
 	[ "$status" -eq 0 ]
-	[ "$output" = "$(printf '%s\n' sgconfig.yml rules/no-env-var.yml rule-tests/no-env-var-test.yml)" ]
+	[ "$output" = "$(printf '%s\n' ../sgconfig.yml ../rules/no-env-var.yml ../rule-tests/no-env-var-test.yml)" ]
 	[ -f ../rules/no-env-var.yml ]
 	[ "$(yaml ../rule-tests/no-env-var-test.yml '.invalid[0]')" = '"let home = std::env::var(\"HOME\");\n"' ]
+	run --separate-stderr "$assay" rule new other --from=a.rs:2-3
+	[ "$status" -eq 0 ]
+	[ "$output" = "$(printf '%s\n' ../rules/other.yml ../rule-tests/other-test.yml)" ]
+	[ "$(yaml ../rule-tests/other-test.yml '.invalid[0]')" = '"let name = \"x\";\nlet home = std::env::var(\"HOME\");\n"' ]
+}
+
+@test "--help prints the usage and exits 0" {
+	local_repo
+	for args in "rule --help" "rule new --help" "rule new -h"; do
+		# shellcheck disable=SC2086 # each case's words
+		run --separate-stderr "$assay" $args
+		[ "$status" -eq 0 ]
+		[[ $output == *"assay rule new <kebab-name> [--lang <lang>] [--from <file>:<line>[-<line>]]"* ]]
+	done
+	[ ! -e sgconfig.yml ]
+}
+
+@test "an sgconfig.yml naming absolute directories: inside the repo the paths print relative, outside it absolute" {
+	local_repo
+	languages rust
+	printf '%s\n' "ruleDirs: [$PWD/lint]" "testConfigs: [{testDir: $T/elsewhere/tests}]" >sgconfig.yml
+	run --separate-stderr "$assay" rule new no-env-var
+	echo "$stderr"
+	[ "$status" -eq 0 ]
+	[ "$output" = "$(printf '%s\n' lint/no-env-var.yml "$T/elsewhere/tests/no-env-var-test.yml")" ]
+	[ -f "$T/elsewhere/tests/no-env-var-test.yml" ]
+}
+
+@test "a file it cannot write: exit 2" {
+	local_repo
+	languages rust
+	mkdir rules
+	chmod a-w rules
+	run --separate-stderr "$assay" rule new no-env-var
+	chmod u+w rules
+	[ "$status" -eq 2 ]
+	[ -z "$output" ]
+	[[ $stderr == *"assay: cannot write rules/no-env-var.yml" ]]
 }

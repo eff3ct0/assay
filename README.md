@@ -143,11 +143,13 @@ They are default checks: turning one off or redefining its `exec` is a loosening
   with the same answers.
 - `ast-grep`: the repo's [code rules](#code-rules) and the rule packs it turns on, skipped without `sgconfig.yml` at
   the root unless a pack is on: writing that configuration is the repo's opt-in, and an existing one is respected,
-  whatever directories it names. Three steps, each run only when the one before passed:
+  whatever directories it names. Three steps, in order, each run whatever the one before found, so that one run shows
+  every failure; only a placeholder ends the check after the first:
   1. a plain text search of the files git sees, which fails on any `ast-grep-ignore` outside the rule directories (the
      `ruleDirs`, `utilDirs` and test directories `sgconfig.yml` names): a bare `ast-grep-ignore` on a line also
      silences a rule written to forbid it, so exceptions live in the rule's own file. It also fails on any placeholder
-     `assay rule new` left in the rule directories, `<fill in: …>`;
+     `assay rule new` left in the rule directories, `<fill in: …>`: the rule is not written yet, and ast-grep would
+     take its placeholder pattern for code;
   2. `ast-grep test --skip-snapshot-tests`, for the repo and for each pack: snapshots only restate the message, and
      without them `ast-grep test` exits 4;
   3. `ast-grep scan`, for the repo and for each pack, which fails on a finding of an `error` rule. A pack's fix runs
@@ -279,13 +281,16 @@ configuration, and a guard rule a Nix entry, both written by hand.
   closing line), and comments saying what each field holds.
 - `rule-tests/<name>-test.yml`, whose first `invalid` case is `--from`'s lines, dedented, and whose `valid` cases wait
   for the fix and a near miss.
-- `--from`'s path is relative to the current directory. `--lang` defaults to the language of `--from`'s file (by its
-  extension, or a shell shebang: `typescript`, `tsx`, `javascript`, `python`, `rust`, `scala`, `nix`, `bash`), else to
-  the repo's single enabled language among `languages.javascript` or `typescript` (`typescript`), `python`, `rust`,
-  `scala`, `nix` and `shell` (`bash`); with neither, exit 2 asking for it.
+- `--from`'s path is relative to the current directory. `--lang` defaults to the language of `--from`'s file, the one
+  ast-grep parses it as (by its extension, or `sgconfig.yml`'s `languageGlobs`), or `bash` for a script with no
+  extension whose shebang names a shell; else to the repo's single enabled language among `languages.javascript`,
+  `typescript`, `python`, `rust`, `scala`, `nix` and `shell` (`bash`): ast-grep's languages by devenv's names, so a
+  repo that enables JavaScript for TypeScript code passes `--lang typescript` or `--from` a `.ts` file. With neither,
+  exit 2 asking for it.
 - Every value left to fill in is a placeholder, `<fill in: …>`, and the `ast-grep` check fails while one is left, so a
   half-written rule cannot be committed. The scaffold passes `oxfmt`.
-- It prints the paths it created on stdout, one per line, relative to the root. Exit `1` when a rule of that name
+- It prints the paths it created on stdout, one per line, relative to the current directory (absolute outside the
+  repo). Exit `1` when a rule of that name
   already exists (its file, its tests, or a rule file with that `id` in a directory `sgconfig.yml` names), writing
   nothing; `2` on usage, and when it cannot run.
 
@@ -303,7 +308,9 @@ in its `devenv.nix`:
 
 The `ast-grep` check then tests each pack and scans the repo with its rules, beside the repo's own, and runs even
 without `sgconfig.yml`. A name assay does not ship fails evaluation. Turning a pack on adds rules: what they find is
-cleaned up in the same change. assay ships no pack yet.
+cleaned up in the same change. A pack's rules take no exception from a repo, since they live in assay: a repo whose
+existing occurrences cannot all be cleaned up keeps its own copy of the rule, with their files in its `ignores`, and
+turns the pack on once they are gone. assay ships no pack yet.
 
 ## On a machine: the guard and the global git hooks
 

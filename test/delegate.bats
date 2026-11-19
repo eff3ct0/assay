@@ -176,7 +176,7 @@ not_adopted() {
 	run --separate-stderr "$assay" rule new no-env-var --from a.rs:2
 	echo "$stderr"
 	[ "$status" -eq 0 ]
-	[ "$output" = "$(printf '%s\n' sgconfig.yml rules/no-env-var.yml rule-tests/no-env-var-test.yml)" ]
+	[ "$output" = "$(printf '%s\n' ../sgconfig.yml ../rules/no-env-var.yml ../rule-tests/no-env-var-test.yml)" ]
 	[ "$(wc -l <"$T/devenv.calls")" -eq 1 ]
 	[[ $(cat "$T/devenv.calls") == "$(printf %q "$T/work") shell -- "* ]]
 	[ "$(yq -o=json '.invalid[0]' ../rule-tests/no-env-var-test.yml)" = '"let home = std::env::var(\"HOME\");\n"' ]

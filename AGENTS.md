@@ -75,15 +75,13 @@ repo's GitHub issues: read it, and the specifications it links, before changing 
 - `nix develop -c bats test/devenv`: the devenv module in throwaway repos that import a `git+file:` copy of this
   working tree, and assay's own adoption, through the `devenv` on the PATH (2.4.0 or later); the Nix and bash
   fixtures of the default checks in `test/devenv/defaults.bats`; a rule pack and `assay rule new` in
-  `test/devenv/rules.bats`. It needs the network the first time and takes a few
-  minutes.
+  `test/devenv/rules.bats`. It needs the network the first time and takes a few minutes.
 - `nix develop -c shellcheck assay.sh nix/rules-check.sh test/helpers.bash test/devenv/helpers.bash test/stub/devenv devenv/bin/*`
 - `nix flake check`: shellcheck, `bats test`, the CLI's build, the devenv module's evaluation against a stand-in for
   devenv's options (with `test/packs/` as its packs, and with the real `devenv/defaults.nix` and `packs/` too), and
   the home-manager module in a home built with the flake's `home-manager` input (its option checks, its git config
   driving a real commit, the skills it links, and `lib.rulesCheck` passing on the example list and failing on a broken
-  one), all in `nix/checks.nix`, in the sandbox. It does not run
-  `test/devenv`.
+  one), all in `nix/checks.nix`, in the sandbox. It does not run `test/devenv`.
 - kcov is `nix/kcov.nix`: nixpkgs' kcov 43 with upstream's fix for ANSI-C quoted strings, without which bats 1.14
   loses all coverage after its first `run`. Drop the patch once nixpkgs' kcov has it.
 

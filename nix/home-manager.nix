@@ -1,8 +1,9 @@
 # assay's home-manager module, flake.nix's homeManagerModules.default: the CLI on the user's PATH, the machine's rule
 # list (programs.assay.rules) rendered into the one JSON file that `assay guard` and `assay git-hook` read with
 # --rules, the global git hooks registered in the user's git config, the hits log's path, and assay's skills
-# (skills/) where Claude Code and OpenCode load them. assay ships no rules: a machine's live in its own configuration. A harness's hooks (Claude Code's managed settings, an OpenCode plugin)
-# call `assay guard --rules <rulesFile>`; wiring them is the machine's.
+# (skills/) where Claude Code and OpenCode load them. assay ships no rules: a machine's live in its own configuration.
+# A harness's hooks (Claude Code's managed settings, an OpenCode plugin) call `assay guard --rules <rulesFile>`;
+# wiring them is the machine's.
 self:
 {
   config,

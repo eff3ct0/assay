@@ -10,7 +10,9 @@ repo turns one on in its `devenv.nix`:
 ```
 
 The `ast-grep` check then tests the pack and scans the repo with its rules, beside the repo's own. A pack adds rules:
-what they find in the repo is cleaned up in the change that turns it on, as for a new rule.
+what they find in the repo is cleaned up in the change that turns it on, as for a new rule. Its rules take no
+exception from a repo, since they live here: a repo whose existing occurrences cannot all be cleaned up keeps its own
+copy of the rule, with their files in its `ignores`, and turns the pack on once they are gone.
 
 ## Layout
 

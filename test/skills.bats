@@ -61,8 +61,15 @@ frontmatter() { awk -v f="$2" 'NR == 1 && $0 != "---" { exit } NR > 1 && $0 == "
 	done
 }
 
-@test "a skill names no machine, person or path outside the repo" {
-	run grep -n -i -E '(^|[[:space:]`(])(/[a-z]|~/)|https?:|hefesto|p3rkins|rafafrdz|eff3ct0|nixos-config' "$skills"/*/SKILL.md
+@test "a skill names no path outside the repo, nor the machine or the user it is tested by" {
+	local word
+	run grep -n -E '(^|[[:space:]`(])(/[A-Za-z]|~/)|https?:' "$skills"/*/SKILL.md
 	echo "$output"
 	[ "$status" -eq 1 ]
+	for word in "$(uname -n)" "$(id -un)"; do
+		if [ ${#word} -lt 4 ]; then continue; fi
+		run grep -n -i -w -F -- "$word" "$skills"/*/SKILL.md
+		echo "$output"
+		[ "$status" -eq 1 ]
+	done
 }

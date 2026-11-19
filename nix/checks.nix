@@ -560,8 +560,8 @@ in
             tested: {exec: "run-tests", fast: false, enable: true, requires: null, coverage: "$ASSAY_DIR/t.xml"}},
           coverage: {newCode: 80}, loosenings: [], languages: [], rulePacks: {}}' \
           ${plain.env.ASSAY_CONFIG}
-        # The enabled languages among assay's six, by ast-grep's names, sorted, each once; Go is none of them.
-        jq -e '.languages == ["bash", "rust", "typescript"]' ${languagesOn.env.ASSAY_CONFIG}
+        # The enabled languages among assay's six, by ast-grep's names, sorted; Go is none of them.
+        jq -e '.languages == ["bash", "javascript", "rust", "typescript"]' ${languagesOn.env.ASSAY_CONFIG}
         # A pack turned on is its directory, an ast-grep project.
         demo=$(jq -r '.rulePacks.demo' ${builtinDemoPack.env.ASSAY_CONFIG})
         [ "$(jq -c '.rulePacks | keys' ${builtinDemoPack.env.ASSAY_CONFIG})" = '["demo"]' ]

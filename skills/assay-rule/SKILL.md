@@ -21,9 +21,9 @@ why and what to do instead.
    - an ast-grep rule (step 5 of the ladder): from inside the repo, run
      `assay rule new <kebab-name> [--lang <lang>] [--from <file>:<line>[-<line>]]`, with `--from` naming the corrected
      code. It writes `sgconfig.yml` when the repo has none, `rules/<name>.yml` and `rule-tests/<name>-test.yml` (into
-     the directories an existing `sgconfig.yml` names), and prints their paths. `--lang` defaults to the language of
-     `--from`'s file, else to the repo's single enabled language. Exit 1: a rule of that name exists, so extend it or
-     pick another name.
+     the directories an existing `sgconfig.yml` names), and prints their paths. `--lang` defaults to the language
+     ast-grep gives `--from`'s file, else to the repo's single enabled language. Exit 1: a rule of that name exists,
+     so extend it or pick another name.
    - a native rule (steps 2 to 4): a line in its tool's configuration, written by hand.
    - a guard or `commit-msg` rule: an entry in the machine's rule list, written by hand: `name` (its stable id), `on`
      (`command`, `path` or `commit-msg`), `match` (an ast-grep rule for bash, a glob, or a regex), `message`, `note`,
@@ -125,7 +125,9 @@ configuration.
 **Rule packs**: an opt-in pack of ast-grep rules in assay, which a repo turns on in its `devenv.nix`
 (`assay.rulePacks = [ "<name>" ];`). Enabling a pack is adding rules, so the same cleanup of existing occurrences
 applies. A rule moves into a pack when the correction says it holds for every repo of a language, or when a second repo
-needs it; the first repo then drops its copy.
+needs it; the first repo then drops its copy. A pack's rules take no exception from a repo: a repo whose existing
+occurrences cannot all be cleaned up keeps its own copy of the rule, with those files in its `ignores`, and turns the
+pack on once they are gone.
 
 A rule is born in the repo where the correction happened, and moves to a pack as above. A native rule that holds for
 every repo of a language joins that language's preset as a new version. In a repo of a shared organization, a rule is a
