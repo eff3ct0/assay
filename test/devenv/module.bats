@@ -244,8 +244,8 @@ source "$BATS_TEST_DIRNAME/helpers.bash"
 	run devenv shell -- true
 	echo "$output"
 	[ "$status" -ne 0 ]
-	[[ $output == *"a loosening of the analyzer needs a reason; set:"* ]]
-	[[ $output == *"- assay.findings.smells.function_complexity.reason: smells.function_complexity.threshold is 30, above qlty's 18"* ]]
+	[[ $output == *"assay: a loosening needs a reason:"* ]]
+	[[ $output == *"- smells.function_complexity.threshold is 30, above qlty's 18; set assay.findings.smells.function_complexity.reason"* ]]
 	devenv_nix '{
     assay.findings.smells.function_complexity = { threshold = 30; reason = "a parser"; };
     assay.findings.smells.nested_control_flow = { threshold = 7; reason = "a parser"; };
