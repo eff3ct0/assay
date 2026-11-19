@@ -16,7 +16,7 @@ fast_budget=5
 name_re='^[A-Za-z0-9][A-Za-z0-9._-]*$'
 
 usage_text() {
-  cat <<'EOF'
+	cat <<'EOF'
 usage: assay check [--fast] [--base <rev>] [<check>...]    run the repo's checks
        assay check --list                                  list them, fast ones marked
        assay builtin agents-md [<commit>]                  one of the built-in checks that are assay's own code
@@ -50,39 +50,39 @@ exiting=
 error_exit=2
 die_prefix=
 finish() {
-  exiting=1
-  log_run "$1"
-  exit "$1"
+	exiting=1
+	log_run "$1"
+	exit "$1"
 }
 die() {
-  echo "assay: $die_prefix$*" >&2
-  finish "$error_exit"
+	echo "assay: $die_prefix$*" >&2
+	finish "$error_exit"
 }
 usage() {
-  usage_text >&2
-  finish "$error_exit"
+	usage_text >&2
+	finish "$error_exit"
 }
 usage_error() {
-  echo "assay: $die_prefix$*" >&2
-  usage
+	echo "assay: $die_prefix$*" >&2
+	usage
 }
 # Temporary files and directories, removed on exit.
 tmp_paths=()
 # tmp_file <var> [-d] [<template>]: a new temporary file (or directory, with -d), removed on exit, its path in <var>.
 tmp_file() {
-  local -n tmp_var=$1
-  shift
-  tmp_var=$(mktemp "$@") || die "cannot create a temporary file"
-  tmp_paths+=("$tmp_var")
+	local -n tmp_var=$1
+	shift
+	tmp_var=$(mktemp "$@") || die "cannot create a temporary file"
+	tmp_paths+=("$tmp_var")
 }
 # shellcheck disable=SC2329 # invoked by the EXIT trap
 on_exit() {
-  local rc=$?
-  if [ ${#tmp_paths[@]} -gt 0 ]; then rm -rf -- "${tmp_paths[@]}"; fi
-  if [ -z "$exiting" ] && [ "$rc" -ne 0 ]; then
-    echo "assay: ${die_prefix}unexpected failure (exit $rc)" >&2
-    finish "$error_exit"
-  fi
+	local rc=$?
+	if [ ${#tmp_paths[@]} -gt 0 ]; then rm -rf -- "${tmp_paths[@]}"; fi
+	if [ -z "$exiting" ] && [ "$rc" -ne 0 ]; then
+		echo "assay: ${die_prefix}unexpected failure (exit $rc)" >&2
+		finish "$error_exit"
+	fi
 }
 trap on_exit EXIT
 trap 'echo >&2; finish 130' INT TERM
@@ -95,38 +95,38 @@ git() { GIT_NO_LAZY_FETCH=1 command git "$@"; }
 # the source's own, which the jq filter builds from the jq options given. Best-effort: a failure writes nothing,
 # prints nothing and changes no exit code.
 log_hit() {
-  local source=$1 filter=$2 common repo="" line
-  shift 2
-  [ -n "${ASSAY_HITS_LOG:-}" ] || return 0
-  {
-    # The main checkout, the same from any of its worktrees: the parent of the common git directory.
-    if common=$(git rev-parse --path-format=absolute --git-common-dir); then repo=${common%/.git}; fi
-    line=$(jq -nc --arg source "$source" --arg repo "$repo" --arg agent "${ASSAY_AGENT:-}" "$@" '
+	local source=$1 filter=$2 common repo="" line
+	shift 2
+	[ -n "${ASSAY_HITS_LOG:-}" ] || return 0
+	{
+		# The main checkout, the same from any of its worktrees: the parent of the common git directory.
+		if common=$(git rev-parse --path-format=absolute --git-common-dir); then repo=${common%/.git}; fi
+		line=$(jq -nc --arg source "$source" --arg repo "$repo" --arg agent "${ASSAY_AGENT:-}" "$@" '
       def text_or_null: if . == "" then null else . end;
       {v: 1, time: (now | todate), source: $source, repo: ($repo | text_or_null), agent: ($agent | text_or_null)}
       + ('"$filter"')') &&
-      mkdir -p "$(dirname "$ASSAY_HITS_LOG")" &&
-      printf '%s\n' "$line" >>"$ASSAY_HITS_LOG"
-  } 2>/dev/null || true
+			mkdir -p "$(dirname "$ASSAY_HITS_LOG")" &&
+			printf '%s\n' "$line" >>"$ASSAY_HITS_LOG"
+	} 2>/dev/null || true
 }
 
 # When `assay check` started a run: set once its arguments parsed into one (not --list). A run, passing or not,
 # writes one check line to the hits log when it exits, whatever its exit code.
 run_start=
 log_run() {
-  [ -n "$run_start" ] || return 0
-  local now secs mode=full i
-  local -a args=()
-  now_us
-  fmt_secs secs $((now - run_start))
-  run_start=
-  if [ "$opt_fast" = 1 ]; then mode=fast; fi
-  args=(--arg mode "$mode" --arg seconds "${secs%s}" --arg exit "$1")
-  # Each name goes in an option of its own, only<i> or failed<i>: the names given may hold any character.
-  for i in "${!wanted[@]}"; do args+=(--arg "only$i" "${wanted[$i]}"); done
-  for i in "${!failed[@]}"; do args+=(--arg "failed$i" "${failed[$i]}"); done
-  # shellcheck disable=SC2016 # jq's $variables, not the shell's
-  log_hit check '
+	[ -n "$run_start" ] || return 0
+	local now secs mode=full i
+	local -a args=()
+	now_us
+	fmt_secs secs $((now - run_start))
+	run_start=
+	if [ "$opt_fast" = 1 ]; then mode=fast; fi
+	args=(--arg mode "$mode" --arg seconds "${secs%s}" --arg exit "$1")
+	# Each name goes in an option of its own, only<i> or failed<i>: the names given may hold any character.
+	for i in "${!wanted[@]}"; do args+=(--arg "only$i" "${wanted[$i]}"); done
+	for i in "${!failed[@]}"; do args+=(--arg "failed$i" "${failed[$i]}"); done
+	# shellcheck disable=SC2016 # jq's $variables, not the shell's
+	log_hit check '
     def names($list):
       [$ARGS.named | to_entries[] | {i: (.key | capture("^\($list)(?<i>[0-9]+)$").i | tonumber), value}]
       | sort_by(.i) | map(.value);
@@ -140,23 +140,32 @@ log_run() {
 config_jq='
 def fail($m): "\($m)\n" | halt_error(1);
 def text: type == "string" and length > 0;
+def percent: type == "number" and . == floor and . >= 0 and . <= 100;
 def check_ok($n):
   if type != "object" then fail("check \($n): not an object")
   elif (.exec | text | not) then fail("check \($n): exec must be a non-empty string")
   elif (.fast | type) != "boolean" then fail("check \($n): fast must be true or false")
   elif (.enable | type) != "boolean" then fail("check \($n): enable must be true or false")
   elif .requires != null and (.requires | text | not) then fail("check \($n): requires must be null or a non-empty string")
+  elif .coverage != null and (.coverage | text | not) then fail("check \($n): coverage must be null or a non-empty string")
   else . end;
 def loosening_ok($checks):
   if type != "object" then fail("a loosening is not an object")
+  elif .kind == "new-code" then
+    if (.newCode | percent | not) or (.default | percent | not) then fail("loosening of new code: newCode and default must be integers from 0 to 100")
+    elif (.reason | text | not) then fail("loosening of new code has no reason")
+    else . end
   elif (.check | type) != "string" or (.check as $k | $checks | has($k) | not) then fail("loosening of an unknown check \(.check | tojson)")
-  elif (.kind | IN("off", "exec") | not) then fail("loosening of \(.check): unknown kind \(.kind | tojson)")
+  elif (.kind | IN("off", "exec", "coverage") | not) then fail("loosening of \(.check): unknown kind \(.kind | tojson)")
   elif (.reason | text | not) then fail("loosening of \(.check) has no reason")
   else . end;
 def validate:
   if type != "object" then fail("not a JSON object")
   elif .version != 1 then fail("unknown version \(.version | tojson)")
   elif (.checks | type) != "object" then fail("checks must be an object")
+  elif (.coverage != null or any(.checks[]; .coverage? != null))
+    and ((.coverage | type) != "object" or (.coverage.newCode | percent | not))
+  then fail("coverage.newCode must be an integer from 0 to 100")
   elif (.loosenings | type) != "array" then fail("loosenings must be an array")
   else
     . as $c
@@ -174,35 +183,43 @@ def validate:
       "c_exec[\($n | @sh)]=\($c.exec | @sh)",
       "c_fast[\($n | @sh)]=\(if $c.fast then 1 else 0 end)",
       "c_enable[\($n | @sh)]=\(if $c.enable then 1 else 0 end)",
-      "c_requires[\($n | @sh)]=\($c.requires // "" | @sh)"),
-  (.loosenings[] | "loose_check+=(\(.check | @sh)) loose_kind+=(\(.kind | @sh)) loose_reason+=(\(.reason | @sh))"),
+      "c_requires[\($n | @sh)]=\($c.requires // "" | @sh)",
+      "c_coverage[\($n | @sh)]=\($c.coverage // "" | @sh)"),
+  "new_code=\(.coverage.newCode // "")",
+  (.loosenings[]
+    | "loose_check+=(\(.check // "" | @sh)) loose_kind+=(\(.kind | @sh)) loose_reason+=(\(.reason | @sh))",
+      "loose_value+=(\(if .kind == "new-code" then "\(.newCode) \(.default)" else "" end | @sh))"),
   "config_loaded=1"
 '
 
 names=()
-declare -A c_exec=() c_fast=() c_enable=() c_requires=()
+declare -A c_exec=() c_fast=() c_enable=() c_requires=() c_coverage=()
+# The percentage of the new lines a coverage report can cover that must be covered.
+new_code=
 loose_check=()
 loose_kind=()
 loose_reason=()
+# A new-code loosening's threshold and assay's default, "<newCode> <default>"; empty for the others.
+loose_value=()
 config_loaded=0
 
 # Only ever called with ASSAY_CONFIG set: without it, main delegates.
 load_config() {
-  local cfg=$ASSAY_CONFIG out
-  if [ ! -f "$cfg" ] || [ ! -r "$cfg" ]; then die "cannot read the configuration $cfg (ASSAY_CONFIG)"; fi
-  if ! out=$(jq -n -r --arg name_re "$name_re" "$config_jq" "$cfg" 2>&1); then
-    die "invalid configuration $cfg: $out"
-  fi
-  eval "$out"
-  [ "$config_loaded" = 1 ] || die "invalid configuration $cfg: incomplete"
+	local cfg=$ASSAY_CONFIG out
+	if [ ! -f "$cfg" ] || [ ! -r "$cfg" ]; then die "cannot read the configuration $cfg (ASSAY_CONFIG)"; fi
+	if ! out=$(jq -n -r --arg name_re "$name_re" "$config_jq" "$cfg" 2>&1); then
+		die "invalid configuration $cfg: $out"
+	fi
+	eval "$out"
+	[ "$config_loaded" = 1 ] || die "invalid configuration $cfg: incomplete"
 }
 
 list_checks() {
-  local n
-  for n in "${names[@]}"; do
-    if [ "${c_enable[$n]}" != 1 ]; then continue; fi
-    if [ "${c_fast[$n]}" = 1 ]; then echo "$n (fast)"; else echo "$n"; fi
-  done
+	local n
+	for n in "${names[@]}"; do
+		if [ "${c_enable[$n]}" != 1 ]; then continue; fi
+		if [ "${c_fast[$n]}" = 1 ]; then echo "$n (fast)"; else echo "$n"; fi
+	done
 }
 
 opt_fast=0
@@ -215,33 +232,33 @@ failed=()
 
 # The checks to run, in name order: the named ones, or every enabled one; with --fast, only fast ones.
 select_checks() {
-  local n w
-  declare -A want=()
-  for w in "${wanted[@]}"; do
-    if ! [[ $w =~ $name_re ]] || [ -z "${c_exec[$w]+set}" ]; then
-      die "no check named '$w' (assay check --list shows them)"
-    fi
-    if [ "${c_enable[$w]}" != 1 ]; then die "check '$w' is off in this repo"; fi
-    if [ "$opt_fast" = 1 ] && [ "${c_fast[$w]}" != 1 ]; then die "check '$w' is not fast"; fi
-    want[$w]=1
-  done
-  for n in "${names[@]}"; do
-    if [ ${#wanted[@]} -gt 0 ]; then
-      if [ -z "${want[$n]:-}" ]; then continue; fi
-    else
-      if [ "${c_enable[$n]}" != 1 ]; then continue; fi
-      if [ "$opt_fast" = 1 ] && [ "${c_fast[$n]}" != 1 ]; then continue; fi
-    fi
-    selected+=("$n")
-  done
+	local n w
+	declare -A want=()
+	for w in "${wanted[@]}"; do
+		if ! [[ $w =~ $name_re ]] || [ -z "${c_exec[$w]+set}" ]; then
+			die "no check named '$w' (assay check --list shows them)"
+		fi
+		if [ "${c_enable[$w]}" != 1 ]; then die "check '$w' is off in this repo"; fi
+		if [ "$opt_fast" = 1 ] && [ "${c_fast[$w]}" != 1 ]; then die "check '$w' is not fast"; fi
+		want[$w]=1
+	done
+	for n in "${names[@]}"; do
+		if [ ${#wanted[@]} -gt 0 ]; then
+			if [ -z "${want[$n]:-}" ]; then continue; fi
+		else
+			if [ "${c_enable[$n]}" != 1 ]; then continue; fi
+			if [ "$opt_fast" = 1 ] && [ "${c_fast[$n]}" != 1 ]; then continue; fi
+		fi
+		selected+=("$n")
+	done
 }
 
 root=
 gitdir=
 find_repo() {
-  root=$(git rev-parse --show-toplevel 2>/dev/null) || die "not in a git working tree"
-  gitdir=$(git rev-parse --absolute-git-dir) || die "cannot find the git directory"
-  cd "$root"
+	root=$(git rev-parse --show-toplevel 2>/dev/null) || die "not in a git working tree"
+	gitdir=$(git rev-parse --absolute-git-dir) || die "cannot find the git directory"
+	cd "$root"
 }
 
 base_sha=
@@ -251,86 +268,86 @@ event_rev=
 
 # The default branch: origin/HEAD's target, else origin/main, origin/master, main, master.
 default_ref() {
-  local r
-  if r=$(git symbolic-ref -q refs/remotes/origin/HEAD) && git rev-parse -q --verify "$r^{commit}" >/dev/null; then
-    echo "$r"
-    return 0
-  fi
-  for r in refs/remotes/origin/main refs/remotes/origin/master refs/heads/main refs/heads/master; do
-    if git rev-parse -q --verify "$r^{commit}" >/dev/null; then
-      echo "$r"
-      return 0
-    fi
-  done
-  return 1
+	local r
+	if r=$(git symbolic-ref -q refs/remotes/origin/HEAD) && git rev-parse -q --verify "$r^{commit}" >/dev/null; then
+		echo "$r"
+		return 0
+	fi
+	for r in refs/remotes/origin/main refs/remotes/origin/master refs/heads/main refs/heads/master; do
+		if git rev-parse -q --verify "$r^{commit}" >/dev/null; then
+			echo "$r"
+			return 0
+		fi
+	done
+	return 1
 }
 
 # GitHub's event: the pull request's base, or the commit before a push. Returns 1 when the event gives none (another
 # event, or a push that created the branch, whose `before` is all zeros).
 github_event_base() {
-  local ev=$GITHUB_EVENT_PATH out
-  if [ ! -f "$ev" ] || [ ! -r "$ev" ]; then die "cannot read GitHub's event $ev (GITHUB_EVENT_PATH)"; fi
-  if ! out=$(jq -n -r 'input
+	local ev=$GITHUB_EVENT_PATH out
+	if [ ! -f "$ev" ] || [ ! -r "$ev" ]; then die "cannot read GitHub's event $ev (GITHUB_EVENT_PATH)"; fi
+	if ! out=$(jq -n -r 'input
       | (try .pull_request.base.sha catch null) as $pr
       | (try .before catch null) as $before
       | if ($pr | type) == "string" then "pull_request \($pr)"
         elif ($before | type) == "string" then "push \($before)"
         else "none" end' "$ev" 2>&1); then
-    die "cannot read GitHub's event $ev: $out"
-  fi
-  case $out in
-    "pull_request "*)
-      event_rev=${out#* }
-      base_source="pull_request event"
-      ;;
-    "push "*)
-      event_rev=${out#* }
-      if [[ $event_rev =~ ^0+$ ]]; then return 1; fi
-      base_source="push event"
-      ;;
-    *) return 1 ;;
-  esac
+		die "cannot read GitHub's event $ev: $out"
+	fi
+	case $out in
+	"pull_request "*)
+		event_rev=${out#* }
+		base_source="pull_request event"
+		;;
+	"push "*)
+		event_rev=${out#* }
+		if [[ $event_rev =~ ^0+$ ]]; then return 1; fi
+		base_source="push event"
+		;;
+	*) return 1 ;;
+	esac
 }
 
 resolve_base() {
-  local rev="" ref
-  if [ "$opt_base_set" = 1 ]; then
-    rev=$opt_base base_label=$opt_base base_source=--base
-  elif [ -n "${ASSAY_BASE:-}" ]; then
-    rev=$ASSAY_BASE base_label=$ASSAY_BASE base_source=ASSAY_BASE
-  elif [ -n "${GITHUB_EVENT_PATH:-}" ] && github_event_base; then
-    rev=$event_rev base_label=$event_rev
-  fi
-  if [ -n "$rev" ]; then
-    base_sha=$(git rev-parse -q --verify --end-of-options "$rev^{commit}") ||
-      die "base '$rev' (from $base_source) is not a commit in this clone, and assay never fetches:" \
-        "fetch it first (in CI, actions/checkout with fetch-depth: 0)"
-    return 0
-  fi
-  ref=$(default_ref) ||
-    die "no base for the change: none of origin/HEAD, origin/main, origin/master, main or master exists;" \
-      "pass --base <rev>"
-  base_label=${ref#refs/remotes/}
-  base_label=${base_label#refs/heads/}
-  if base_sha=$(git merge-base --fork-point "$ref" HEAD 2>/dev/null); then
-    base_source=fork-point
-  elif base_sha=$(git merge-base "$ref" HEAD 2>/dev/null); then
-    base_source=merge-base
-  else
-    die "no base for the change: HEAD shares no commit with $base_label; pass --base <rev>"
-  fi
+	local rev="" ref
+	if [ "$opt_base_set" = 1 ]; then
+		rev=$opt_base base_label=$opt_base base_source=--base
+	elif [ -n "${ASSAY_BASE:-}" ]; then
+		rev=$ASSAY_BASE base_label=$ASSAY_BASE base_source=ASSAY_BASE
+	elif [ -n "${GITHUB_EVENT_PATH:-}" ] && github_event_base; then
+		rev=$event_rev base_label=$event_rev
+	fi
+	if [ -n "$rev" ]; then
+		base_sha=$(git rev-parse -q --verify --end-of-options "$rev^{commit}") ||
+			die "base '$rev' (from $base_source) is not a commit in this clone, and assay never fetches:" \
+				"fetch it first (in CI, actions/checkout with fetch-depth: 0)"
+		return 0
+	fi
+	ref=$(default_ref) ||
+		die "no base for the change: none of origin/HEAD, origin/main, origin/master, main or master exists;" \
+			"pass --base <rev>"
+	base_label=${ref#refs/remotes/}
+	base_label=${base_label#refs/heads/}
+	if base_sha=$(git merge-base --fork-point "$ref" HEAD 2>/dev/null); then
+		base_source=fork-point
+	elif base_sha=$(git merge-base "$ref" HEAD 2>/dev/null); then
+		base_source=merge-base
+	else
+		die "no base for the change: HEAD shares no commit with $base_label; pass --base <rev>"
+	fi
 }
 
 # requires_met <glob>: some file git sees in the working tree (tracked or untracked, not ignored) matches the glob,
 # relative to the repo root.
 requires_met() {
-  local f list=$gitdir/assay/requires.tmp
-  git ls-files -z --cached --others --exclude-standard -- ":(top,glob)$1" >"$list" ||
-    die "cannot match '$1' against the working tree"
-  while IFS= read -r -d '' f; do
-    if [ -e "$f" ] || [ -L "$f" ]; then return 0; fi
-  done <"$list"
-  return 1
+	local f list=$gitdir/assay/requires.tmp
+	git ls-files -z --cached --others --exclude-standard -- ":(top,glob)$1" >"$list" ||
+		die "cannot match '$1' against the working tree"
+	while IFS= read -r -d '' f; do
+		if [ -e "$f" ] || [ -L "$f" ]; then return 0; fi
+	done <"$list"
+	return 1
 }
 
 # New code: the lines a change adds or modifies, from the base's tree to the working tree, untracked files included.
@@ -342,23 +359,23 @@ requires_met() {
 # without git's limit on their number), so that the same tree and base give the same diff anywhere. A path is
 # quoted, C-style, only when it holds a control character, `"` or `\`.
 change_diff() {
-  local index untracked objects store
-  tmp_file index
-  tmp_file untracked
-  # Intent-to-add writes the empty blob: objects git writes go to a throwaway store, the repo's own an alternate.
-  tmp_file objects -d
-  store=$(git rev-parse --path-format=absolute --git-path objects) || die "cannot find the object store"
-  cp -- "$(git rev-parse --git-path index)" "$index" 2>/dev/null || rm -f -- "$index"
-  git ls-files -z --others --exclude-standard >"$untracked" || die "cannot list the untracked files"
-  if [ -s "$untracked" ]; then
-    GIT_INDEX_FILE=$index GIT_OBJECT_DIRECTORY=$objects GIT_ALTERNATE_OBJECT_DIRECTORIES=$store \
-      git --literal-pathspecs add --intent-to-add --pathspec-from-file="$untracked" --pathspec-file-nul ||
-      die "cannot add the untracked files to a copy of the index"
-  fi
-  GIT_INDEX_FILE=$index GIT_OBJECT_DIRECTORY=$objects GIT_ALTERNATE_OBJECT_DIRECTORIES=$store \
-    git -c core.quotePath=false diff -U0 --inter-hunk-context=0 --histogram -M -l0 -O/dev/null --no-relative \
-    --no-color --no-ext-diff --no-textconv --ignore-submodules=all --src-prefix=a/ --dst-prefix=b/ "$1" ||
-    die "cannot diff the working tree against the base $1"
+	local index untracked objects store
+	tmp_file index
+	tmp_file untracked
+	# Intent-to-add writes the empty blob: objects git writes go to a throwaway store, the repo's own an alternate.
+	tmp_file objects -d
+	store=$(git rev-parse --path-format=absolute --git-path objects) || die "cannot find the object store"
+	cp -- "$(git rev-parse --git-path index)" "$index" 2>/dev/null || rm -f -- "$index"
+	git ls-files -z --others --exclude-standard >"$untracked" || die "cannot list the untracked files"
+	if [ -s "$untracked" ]; then
+		GIT_INDEX_FILE=$index GIT_OBJECT_DIRECTORY=$objects GIT_ALTERNATE_OBJECT_DIRECTORIES=$store \
+			git --literal-pathspecs add --intent-to-add --pathspec-from-file="$untracked" --pathspec-file-nul ||
+			die "cannot add the untracked files to a copy of the index"
+	fi
+	GIT_INDEX_FILE=$index GIT_OBJECT_DIRECTORY=$objects GIT_ALTERNATE_OBJECT_DIRECTORIES=$store \
+		git -c core.quotePath=false diff -U0 --inter-hunk-context=0 --histogram -M -l0 -O/dev/null --no-relative \
+		--no-color --no-ext-diff --no-textconv --ignore-submodules=all --src-prefix=a/ --dst-prefix=b/ "$1" ||
+		die "cannot diff the working tree against the base $1"
 }
 
 # Reads change_diff's output. Prints "<first>\t<last>\t<path>" for each hunk that adds lines (the path as git prints
@@ -394,28 +411,28 @@ old > 0 || new > 0 {
 # then the first and the last line of one of its ranges. A file's ranges come in order. With a second file, the
 # lines the change removes are written there too, as diff_awk writes them.
 new_code() {
-  local first last path
-  LC_ALL=C awk -v removed="${2:-}" "$diff_awk" "$1" | while IFS=$'\t' read -r first last path; do
-    if [[ $path == \"*\" ]]; then
-      path=${path:1:${#path}-2}
-      path=${path//%/%%}
-      # shellcheck disable=SC2059 # the format decodes git's C-style quoting
-      printf -v path -- "$path"
-    fi
-    printf '%s\0%s\0%s\0' "$path" "$first" "$last"
-  done
+	local first last path
+	LC_ALL=C awk -v removed="${2:-}" "$diff_awk" "$1" | while IFS=$'\t' read -r first last path; do
+		if [[ $path == \"*\" ]]; then
+			path=${path:1:${#path}-2}
+			path=${path//%/%%}
+			# shellcheck disable=SC2059 # the format decodes git's C-style quoting
+			printf -v path -- "$path"
+		fi
+		printf '%s\0%s\0%s\0' "$path" "$first" "$last"
+	done
 }
 
 cmd_new_code() {
-  parse_base_option new-code "$@"
-  find_repo
-  resolve_base
-  local diff
-  tmp_file diff
-  change_diff "$base_sha" >"$diff"
-  new_code "$diff" | jq -S -R -s 'split("\u0000") | .[:-1] as $f
+	parse_base_option new-code "$@"
+	find_repo
+	resolve_base
+	local diff
+	tmp_file diff
+	change_diff "$base_sha" >"$diff"
+	new_code "$diff" | jq -S -R -s 'split("\u0000") | .[:-1] as $f
     | reduce range(0; $f | length; 3) as $i ({}; .[$f[$i]] += [[($f[$i + 1] | tonumber), ($f[$i + 2] | tonumber)]])'
-  finish 0
+	finish 0
 }
 
 # The built-in checks that are assay's own code, run as `assay builtin <check>`.
@@ -423,48 +440,48 @@ cmd_new_code() {
 # root_entry <commit> <name>: one entry at the repo root, from the working tree (<commit> empty) or from a commit's
 # tree. Sets entry_type (missing, file, symlink or other) and entry_content (a file's bytes, a symlink's target).
 root_entry() {
-  local rev=$1 name=$2 line mode oid
-  entry_type=missing entry_content=
-  if [ -z "$rev" ]; then
-    if [ -L "$name" ]; then
-      entry_type=symlink
-      entry_content=$(readlink -- "$name") || die "cannot read the symlink $name"
-    elif [ -f "$name" ]; then
-      entry_type="file"
-      entry_content=$(cat -- "$name" && echo .) || die "cannot read $name"
-      entry_content=${entry_content%.}
-    elif [ -e "$name" ]; then
-      entry_type=other
-    fi
-    return 0
-  fi
-  line=$(git ls-tree --full-tree "$rev" -- "$name") || die "cannot read the tree of $rev"
-  [ -n "$line" ] || return 0
-  mode=${line%% *}
-  oid=${line#* * }
-  oid=${oid%%$'\t'*}
-  case $mode in
-    100644 | 100755)
-      entry_type="file"
-      entry_content=$(git cat-file blob "$oid" && echo .) || die "cannot read $name in $rev"
-      entry_content=${entry_content%.}
-      ;;
-    120000)
-      entry_type=symlink
-      entry_content=$(git cat-file blob "$oid") || die "cannot read $name in $rev"
-      ;;
-    *) entry_type=other ;;
-  esac
+	local rev=$1 name=$2 line mode oid
+	entry_type=missing entry_content=
+	if [ -z "$rev" ]; then
+		if [ -L "$name" ]; then
+			entry_type=symlink
+			entry_content=$(readlink -- "$name") || die "cannot read the symlink $name"
+		elif [ -f "$name" ]; then
+			entry_type="file"
+			entry_content=$(cat -- "$name" && echo .) || die "cannot read $name"
+			entry_content=${entry_content%.}
+		elif [ -e "$name" ]; then
+			entry_type=other
+		fi
+		return 0
+	fi
+	line=$(git ls-tree --full-tree "$rev" -- "$name") || die "cannot read the tree of $rev"
+	[ -n "$line" ] || return 0
+	mode=${line%% *}
+	oid=${line#* * }
+	oid=${oid%%$'\t'*}
+	case $mode in
+	100644 | 100755)
+		entry_type="file"
+		entry_content=$(git cat-file blob "$oid" && echo .) || die "cannot read $name in $rev"
+		entry_content=${entry_content%.}
+		;;
+	120000)
+		entry_type=symlink
+		entry_content=$(git cat-file blob "$oid") || die "cannot read $name in $rev"
+		;;
+	*) entry_type=other ;;
+	esac
 }
 
 # has_related_repos <markdown>: the text has a "Related repos" heading, of any level and case, outside fenced code.
 has_related_repos() {
-  local line fenced=0
-  while IFS= read -r line; do
-    if [[ $line =~ ^\ {0,3}('```'|'~~~') ]]; then fenced=$((1 - fenced)); fi
-    if [ "$fenced" = 0 ] && [[ ${line,,} =~ ^#{1,6}[[:space:]]+related[[:space:]]+repos[[:space:]#]*$ ]]; then return 0; fi
-  done <<<"$1"
-  return 1
+	local line fenced=0
+	while IFS= read -r line; do
+		if [[ $line =~ ^\ {0,3}('```'|'~~~') ]]; then fenced=$((1 - fenced)); fi
+		if [ "$fenced" = 0 ] && [[ ${line,,} =~ ^#{1,6}[[:space:]]+related[[:space:]]+repos[[:space:]#]*$ ]]; then return 0; fi
+	done <<<"$1"
+	return 1
 }
 
 # agents_md_problems [<commit>]: the AGENTS.md / CLAUDE.md shape at the repo root (the current directory), in the
@@ -472,85 +489,85 @@ has_related_repos() {
 # instructions, with a "Related repos" section, and CLAUDE.md is the single line @AGENTS.md; or either file is a
 # symlink to the other, which holds them. Prints one line per problem and returns 1 when there is any.
 agents_md_problems() {
-  local rev=${1:-} a_type a_content c_type c_content a_to_c=0 c_to_a=0 instructions="" text
-  local -a problems=()
-  root_entry "$rev" AGENTS.md
-  a_type=$entry_type a_content=$entry_content
-  root_entry "$rev" CLAUDE.md
-  c_type=$entry_type c_content=$entry_content
-  if [ "$a_type" = symlink ]; then case $a_content in CLAUDE.md | ./CLAUDE.md) a_to_c=1 ;; esac; fi
-  if [ "$c_type" = symlink ]; then case $c_content in AGENTS.md | ./AGENTS.md) c_to_a=1 ;; esac; fi
+	local rev=${1:-} a_type a_content c_type c_content a_to_c=0 c_to_a=0 instructions="" text
+	local -a problems=()
+	root_entry "$rev" AGENTS.md
+	a_type=$entry_type a_content=$entry_content
+	root_entry "$rev" CLAUDE.md
+	c_type=$entry_type c_content=$entry_content
+	if [ "$a_type" = symlink ]; then case $a_content in CLAUDE.md | ./CLAUDE.md) a_to_c=1 ;; esac fi
+	if [ "$c_type" = symlink ]; then case $c_content in AGENTS.md | ./AGENTS.md) c_to_a=1 ;; esac fi
 
-  case $a_type in
-    missing) problems+=("AGENTS.md is missing: it holds the repo's instructions for every agent") ;;
-    other) problems+=("AGENTS.md is not a file: it holds the repo's instructions for every agent") ;;
-  esac
-  case $c_type in
-    missing) problems+=("CLAUDE.md is missing: make it the single line @AGENTS.md") ;;
-    other) problems+=("CLAUDE.md is not a file: make it the single line @AGENTS.md") ;;
-  esac
-  if [ "$a_to_c" = 1 ] && [ "$c_to_a" = 1 ]; then
-    problems+=("AGENTS.md and CLAUDE.md are symlinks to each other: AGENTS.md holds the instructions, and CLAUDE.md is the single line @AGENTS.md")
-  elif [ "$a_to_c" = 1 ]; then
-    case $c_type in
-      file) instructions=CLAUDE.md text=$c_content ;;
-      symlink) problems+=("CLAUDE.md is a symlink to $c_content, and AGENTS.md a symlink to CLAUDE.md: CLAUDE.md holds the instructions itself") ;;
-    esac
-  elif [ "$a_type" = symlink ]; then
-    problems+=("AGENTS.md is a symlink to $a_content: it holds the instructions itself, or is a symlink to CLAUDE.md")
-  elif [ "$a_type" = file ]; then
-    instructions=AGENTS.md text=$a_content
-    if [ "$c_type" = symlink ] && [ "$c_to_a" = 0 ]; then
-      problems+=("CLAUDE.md is a symlink to $c_content: make it the single line @AGENTS.md, or a symlink to AGENTS.md")
-    elif [ "$c_type" = file ] && [ "$c_content" != @AGENTS.md ] && [ "$c_content" != $'@AGENTS.md\n' ] &&
-      [ "$c_content" != $'@AGENTS.md\r\n' ]; then
-      if [ "$c_content" = "$a_content" ]; then
-        problems+=("CLAUDE.md copies AGENTS.md: a copy falls short, even an identical one; make CLAUDE.md the single line @AGENTS.md")
-      else
-        problems+=("CLAUDE.md is neither the single line @AGENTS.md nor a symlink to AGENTS.md: move its instructions into AGENTS.md, then make it the single line @AGENTS.md")
-      fi
-    fi
-  fi
-  if [ -n "$instructions" ] && ! has_related_repos "$text"; then
-    problems+=("$instructions has no \"Related repos\" section: add one naming the repos this one depends on and the repos that depend on it, with what passes between them, or saying there are none")
-  fi
-  [ ${#problems[@]} -gt 0 ] || return 0
-  printf '%s\n' "${problems[@]}"
-  return 1
+	case $a_type in
+	missing) problems+=("AGENTS.md is missing: it holds the repo's instructions for every agent") ;;
+	other) problems+=("AGENTS.md is not a file: it holds the repo's instructions for every agent") ;;
+	esac
+	case $c_type in
+	missing) problems+=("CLAUDE.md is missing: make it the single line @AGENTS.md") ;;
+	other) problems+=("CLAUDE.md is not a file: make it the single line @AGENTS.md") ;;
+	esac
+	if [ "$a_to_c" = 1 ] && [ "$c_to_a" = 1 ]; then
+		problems+=("AGENTS.md and CLAUDE.md are symlinks to each other: AGENTS.md holds the instructions, and CLAUDE.md is the single line @AGENTS.md")
+	elif [ "$a_to_c" = 1 ]; then
+		case $c_type in
+		file) instructions=CLAUDE.md text=$c_content ;;
+		symlink) problems+=("CLAUDE.md is a symlink to $c_content, and AGENTS.md a symlink to CLAUDE.md: CLAUDE.md holds the instructions itself") ;;
+		esac
+	elif [ "$a_type" = symlink ]; then
+		problems+=("AGENTS.md is a symlink to $a_content: it holds the instructions itself, or is a symlink to CLAUDE.md")
+	elif [ "$a_type" = file ]; then
+		instructions=AGENTS.md text=$a_content
+		if [ "$c_type" = symlink ] && [ "$c_to_a" = 0 ]; then
+			problems+=("CLAUDE.md is a symlink to $c_content: make it the single line @AGENTS.md, or a symlink to AGENTS.md")
+		elif [ "$c_type" = file ] && [ "$c_content" != @AGENTS.md ] && [ "$c_content" != $'@AGENTS.md\n' ] &&
+			[ "$c_content" != $'@AGENTS.md\r\n' ]; then
+			if [ "$c_content" = "$a_content" ]; then
+				problems+=("CLAUDE.md copies AGENTS.md: a copy falls short, even an identical one; make CLAUDE.md the single line @AGENTS.md")
+			else
+				problems+=("CLAUDE.md is neither the single line @AGENTS.md nor a symlink to AGENTS.md: move its instructions into AGENTS.md, then make it the single line @AGENTS.md")
+			fi
+		fi
+	fi
+	if [ -n "$instructions" ] && ! has_related_repos "$text"; then
+		problems+=("$instructions has no \"Related repos\" section: add one naming the repos this one depends on and the repos that depend on it, with what passes between them, or saying there are none")
+	fi
+	[ ${#problems[@]} -gt 0 ] || return 0
+	printf '%s\n' "${problems[@]}"
+	return 1
 }
 
 builtin_agents_md() {
-  local rev=
-  [ $# -le 1 ] || usage_error "agents-md takes at most one commit"
-  find_repo
-  if [ $# -eq 1 ]; then
-    rev=$(git rev-parse -q --verify --end-of-options "$1^{commit}") || die "agents-md: '$1' is not a commit"
-  fi
-  if agents_md_problems "$rev"; then finish 0; fi
-  finish 1
+	local rev=
+	[ $# -le 1 ] || usage_error "agents-md takes at most one commit"
+	find_repo
+	if [ $# -eq 1 ]; then
+		rev=$(git rev-parse -q --verify --end-of-options "$1^{commit}") || die "agents-md: '$1' is not a commit"
+	fi
+	if agents_md_problems "$rev"; then finish 0; fi
+	finish 1
 }
 
 # commit-trailers: no commit in base..HEAD carries a Co-Authored-By trailer, matched case-insensitively on any line
 # of its message, as GitHub reads one.
 builtin_commit_trailers() {
-  local re='^[[:space:]]*co-authored-by[[:space:]]*:' list commit subject line base_short
-  parse_base_option commit-trailers "$@"
-  find_repo
-  resolve_base
-  list=$(git log --no-show-signature -i -E --grep="$re" --format='%H %h %s' "$base_sha..HEAD") ||
-    die "cannot read the commits in $base_sha..HEAD"
-  [ -n "$list" ] || finish 0
-  base_short=$(git rev-parse --short "$base_sha")
-  echo "Co-Authored-By trailers in $base_short..HEAD:"
-  while IFS=' ' read -r commit subject; do
-    echo "  $subject"
-    while IFS= read -r line; do
-      if [[ ${line,,} =~ $re ]]; then echo "      ${line#"${line%%[![:space:]]*}"}"; fi
-    done < <(git log -1 --no-show-signature --format=%B "$commit")
-  done <<<"$list"
-  echo "A commit names no co-author: reword each of these without its trailer (git rebase -i $base_short)," \
-    "and push with --force-with-lease where they were pushed."
-  finish 1
+	local re='^[[:space:]]*co-authored-by[[:space:]]*:' list commit subject line base_short
+	parse_base_option commit-trailers "$@"
+	find_repo
+	resolve_base
+	list=$(git log --no-show-signature -i -E --grep="$re" --format='%H %h %s' "$base_sha..HEAD") ||
+		die "cannot read the commits in $base_sha..HEAD"
+	[ -n "$list" ] || finish 0
+	base_short=$(git rev-parse --short "$base_sha")
+	echo "Co-Authored-By trailers in $base_short..HEAD:"
+	while IFS=' ' read -r commit subject; do
+		echo "  $subject"
+		while IFS= read -r line; do
+			if [[ ${line,,} =~ $re ]]; then echo "      ${line#"${line%%[![:space:]]*}"}"; fi
+		done < <(git log -1 --no-show-signature --format=%B "$commit")
+	done <<<"$list"
+	echo "A commit names no co-author: reword each of these without its trailer (git rebase -i $base_short)," \
+		"and push with --force-with-lease where they were pushed."
+	finish 1
 }
 
 # gitleaks: gitleaks over the files git sees in the working tree (tracked, or untracked but not ignored), not over
@@ -558,47 +575,47 @@ builtin_commit_trailers() {
 # files git sees (a plain copy where hard links fail), from that copy's root: the paths it reports, the fingerprints
 # in .gitleaksignore and the repo's .gitleaks.toml work as from the repo root. Secrets are redacted.
 builtin_gitleaks() {
-  local copy list report f i rc=0 count
-  local -a files=()
-  [ $# -eq 0 ] || usage_error "gitleaks takes no argument"
-  find_repo
-  if ! command -v gitleaks >/dev/null; then
-    echo "assay: cannot find gitleaks on the PATH" >&2
-    finish 127
-  fi
-  mkdir -p "$gitdir/assay" || die "cannot create $gitdir/assay"
-  tmp_file copy -d "$gitdir/assay/gitleaks.XXXXXX"
-  tmp_file list
-  tmp_file report
-  git ls-files -z --cached --others --exclude-standard --deduplicate >"$list" || die "cannot list the working tree"
-  while IFS= read -r -d '' f; do
-    # A deleted tracked file is gone, and a directory is a submodule or a nested repo.
-    if [ -L "$f" ] || [ -f "$f" ]; then files+=("$root/$f"); fi
-  done <"$list"
-  [ ${#files[@]} -gt 0 ] || finish 0
-  # copy_files <cp option>...: every file at its absolute path under the copy, symlinks as symlinks.
-  copy_files() {
-    for ((i = 0; i < ${#files[@]}; i += 1000)); do
-      cp "$@" -P --parents -t "$copy" -- "${files[@]:i:1000}" || return 1
-    done
-  }
-  if ! copy_files --link 2>/dev/null; then
-    { rm -rf "$copy" && mkdir "$copy"; } || die "cannot recreate $copy"
-    copy_files --reflink=auto || die "cannot copy the working tree's files to $copy"
-  fi
-  (cd "$copy$root" && gitleaks dir --no-banner --no-color --redact --log-level error --exit-code 0 \
-    --report-format json --report-path "$report" .) || rc=$?
-  if [ "$rc" -ne 0 ]; then
-    die "gitleaks failed (exit $rc)"
-  fi
-  count=$(jq length "$report") || die "cannot read gitleaks's report"
-  [ "$count" -gt 0 ] || finish 0
-  jq -r 'sort_by(.File, .StartLine, .RuleID)[] | "\(.File):\(.StartLine): \(.RuleID) (fingerprint \(.Fingerprint))"' \
-    "$report"
-  if [ "$count" -eq 1 ]; then echo -n "gitleaks found 1 secret"; else echo -n "gitleaks found $count secrets"; fi
-  echo " in the working tree: remove each one, and rotate it if it ever left this machine; a false positive's" \
-    "fingerprint goes in .gitleaksignore."
-  finish 1
+	local copy list report f i rc=0 count
+	local -a files=()
+	[ $# -eq 0 ] || usage_error "gitleaks takes no argument"
+	find_repo
+	if ! command -v gitleaks >/dev/null; then
+		echo "assay: cannot find gitleaks on the PATH" >&2
+		finish 127
+	fi
+	mkdir -p "$gitdir/assay" || die "cannot create $gitdir/assay"
+	tmp_file copy -d "$gitdir/assay/gitleaks.XXXXXX"
+	tmp_file list
+	tmp_file report
+	git ls-files -z --cached --others --exclude-standard --deduplicate >"$list" || die "cannot list the working tree"
+	while IFS= read -r -d '' f; do
+		# A deleted tracked file is gone, and a directory is a submodule or a nested repo.
+		if [ -L "$f" ] || [ -f "$f" ]; then files+=("$root/$f"); fi
+	done <"$list"
+	[ ${#files[@]} -gt 0 ] || finish 0
+	# copy_files <cp option>...: every file at its absolute path under the copy, symlinks as symlinks.
+	copy_files() {
+		for ((i = 0; i < ${#files[@]}; i += 1000)); do
+			cp "$@" -P --parents -t "$copy" -- "${files[@]:i:1000}" || return 1
+		done
+	}
+	if ! copy_files --link 2>/dev/null; then
+		{ rm -rf "$copy" && mkdir "$copy"; } || die "cannot recreate $copy"
+		copy_files --reflink=auto || die "cannot copy the working tree's files to $copy"
+	fi
+	(cd "$copy$root" && gitleaks dir --no-banner --no-color --redact --log-level error --exit-code 0 \
+		--report-format json --report-path "$report" .) || rc=$?
+	if [ "$rc" -ne 0 ]; then
+		die "gitleaks failed (exit $rc)"
+	fi
+	count=$(jq length "$report") || die "cannot read gitleaks's report"
+	[ "$count" -gt 0 ] || finish 0
+	jq -r 'sort_by(.File, .StartLine, .RuleID)[] | "\(.File):\(.StartLine): \(.RuleID) (fingerprint \(.Fingerprint))"' \
+		"$report"
+	if [ "$count" -eq 1 ]; then echo -n "gitleaks found 1 secret"; else echo -n "gitleaks found $count secrets"; fi
+	echo " in the working tree: remove each one, and rotate it if it ever left this machine; a false positive's" \
+		"fingerprint goes in .gitleaksignore."
+	finish 1
 }
 
 # suppressions: a new suppression on new code names the rule it silences and gives a reason. The markers are known
@@ -925,63 +942,63 @@ END {
 '
 
 builtin_suppressions() {
-  local diff removed ranges path first last n=0 rc=0
-  local -a files=()
-  local -A position=()
-  parse_base_option suppressions "$@"
-  find_repo
-  resolve_base
-  tmp_file diff
-  tmp_file removed
-  tmp_file ranges
-  change_diff "$base_sha" >"$diff"
-  while IFS= read -r -d '' path && IFS= read -r -d '' first && IFS= read -r -d '' last; do
-    if [ -z "${position[$path]+set}" ]; then
-      if [ -L "$path" ] || [ ! -f "$path" ]; then continue; fi
-      n=$((n + 1))
-      position[$path]=$n
-      files+=("./$path")
-    fi
-    printf '%s\t%s\t%s\n' "${position[$path]}" "$first" "$last"
-  done < <(new_code "$diff" "$removed") >"$ranges"
-  [ "$n" -gt 0 ] || finish 0
-  LC_ALL=C awk "$suppressions_awk" "$removed" "$ranges" "${files[@]}" || rc=$?
-  case $rc in
-    0 | 1) finish "$rc" ;;
-    *) die "cannot read the files that hold new code (awk exit $rc)" ;;
-  esac
+	local diff removed ranges path first last n=0 rc=0
+	local -a files=()
+	local -A position=()
+	parse_base_option suppressions "$@"
+	find_repo
+	resolve_base
+	tmp_file diff
+	tmp_file removed
+	tmp_file ranges
+	change_diff "$base_sha" >"$diff"
+	while IFS= read -r -d '' path && IFS= read -r -d '' first && IFS= read -r -d '' last; do
+		if [ -z "${position[$path]+set}" ]; then
+			if [ -L "$path" ] || [ ! -f "$path" ]; then continue; fi
+			n=$((n + 1))
+			position[$path]=$n
+			files+=("./$path")
+		fi
+		printf '%s\t%s\t%s\n' "${position[$path]}" "$first" "$last"
+	done < <(new_code "$diff" "$removed") >"$ranges"
+	[ "$n" -gt 0 ] || finish 0
+	LC_ALL=C awk "$suppressions_awk" "$removed" "$ranges" "${files[@]}" || rc=$?
+	case $rc in
+	0 | 1) finish "$rc" ;;
+	*) die "cannot read the files that hold new code (awk exit $rc)" ;;
+	esac
 }
 
 cmd_builtin() {
-  [ $# -ge 1 ] || usage_error "builtin needs the name of a built-in check"
-  local check=$1
-  shift
-  case $check in
-    agents-md) builtin_agents_md "$@" ;;
-    commit-trailers) builtin_commit_trailers "$@" ;;
-    gitleaks) builtin_gitleaks "$@" ;;
-    suppressions) builtin_suppressions "$@" ;;
-    *) usage_error "no built-in check named '$check'" ;;
-  esac
+	[ $# -ge 1 ] || usage_error "builtin needs the name of a built-in check"
+	local check=$1
+	shift
+	case $check in
+	agents-md) builtin_agents_md "$@" ;;
+	commit-trailers) builtin_commit_trailers "$@" ;;
+	gitleaks) builtin_gitleaks "$@" ;;
+	suppressions) builtin_suppressions "$@" ;;
+	*) usage_error "no built-in check named '$check'" ;;
+	esac
 }
 
 # parse_base_option <command> [--base <rev>]: the arguments of a command whose only option is --base.
 parse_base_option() {
-  local command=$1
-  shift
-  while [ $# -gt 0 ]; do
-    case $1 in
-      --base)
-        [ $# -ge 2 ] || usage_error "--base needs a revision"
-        opt_base=$2 opt_base_set=1
-        shift
-        ;;
-      --base=*) opt_base=${1#--base=} opt_base_set=1 ;;
-      *) usage_error "$command: unexpected argument '$1'" ;;
-    esac
-    shift
-  done
-  if [ "$opt_base_set" = 1 ] && [ -z "$opt_base" ]; then usage_error "--base needs a revision"; fi
+	local command=$1
+	shift
+	while [ $# -gt 0 ]; do
+		case $1 in
+		--base)
+			[ $# -ge 2 ] || usage_error "--base needs a revision"
+			opt_base=$2 opt_base_set=1
+			shift
+			;;
+		--base=*) opt_base=${1#--base=} opt_base_set=1 ;;
+		*) usage_error "$command: unexpected argument '$1'" ;;
+		esac
+		shift
+	done
+	if [ "$opt_base_set" = 1 ] && [ -z "$opt_base" ]; then usage_error "--base needs a revision"; fi
 }
 
 now_us() { now=${EPOCHREALTIME//[!0-9]/}; }
@@ -992,173 +1009,272 @@ plural() { if [ "$1" -eq 1 ]; then echo "$1 check"; else echo "$1 checks"; fi; }
 
 # shell_word <string>: the string as one word for bash and zsh alike, quoted only when it needs it.
 shell_word() {
-  local q="'\\''"
-  if [[ $1 =~ ^[A-Za-z0-9._/@:+=-]+$ ]]; then echo "$1"; else echo "'${1//\'/$q}'"; fi
+	local q="'\\''"
+	if [[ $1 =~ ^[A-Za-z0-9._/@:+=-]+$ ]]; then echo "$1"; else echo "'${1//\'/$q}'"; fi
+}
+
+# report_path <coverage> <assay dir>: the path of a check's coverage report. $ASSAY_DIR (or ${ASSAY_DIR}) in it
+# stands for assay's directory, and a relative path is taken from the repo root.
+# shellcheck disable=SC2016 # the literal text $ASSAY_DIR
+report_path() {
+	local p=${1//'${ASSAY_DIR}'/"$2"}
+	p=${p//'$ASSAY_DIR'/"$2"}
+	if [[ $p != /* ]]; then p=$root/$p; fi
+	echo "$p"
+}
+
+# measure <check> <report> <dir>: coverage of new code, for a check that passed. Runs diff-cover on the report
+# against the base, with the PATH assay was called with, writing its console report to <dir>/<check>.txt. Sets note
+# to what the check's line says about it, and returns 1 when the check fails on it: the new lines the report can
+# cover are under new_code percent covered, the report is missing, or diff-cover cannot run.
+measure() {
+	local n=$1 report=$2 dir=$3 rc=0 total missed covered
+	if [ ! -f "$report" ]; then
+		note="no coverage report at $report"
+		return 1
+	fi
+	if ! mkdir -p "$dir"; then
+		note="cannot create $dir"
+		return 1
+	fi
+	{
+		echo "\$ diff-cover $(shell_word "$report") --compare-branch=$base_sha --diff-range-notation=.. --include-untracked"
+		PATH=$caller_path diff-cover "$report" --compare-branch="$base_sha" --diff-range-notation=.. \
+			--include-untracked --format "json:$dir/$n.json" </dev/null 2>&1 || rc=$?
+	} >"$dir/$n.txt"
+	if [ "$rc" -eq 127 ]; then
+		note="diff-cover not found"
+		return 1
+	elif [ "$rc" -ne 0 ]; then
+		note="diff-cover exit $rc"
+		return 1
+	fi
+	if ! read -r total missed < <(jq -r '"\(.total_num_lines) \(.total_num_violations)"' "$dir/$n.json" 2>/dev/null) ||
+		! [[ $total =~ ^[0-9]+$ && $missed =~ ^[0-9]+$ ]]; then
+		note="cannot read diff-cover's report $dir/$n.json"
+		return 1
+	fi
+	if [ "$total" -eq 0 ]; then
+		note="new code: no lines to cover"
+		return 0
+	fi
+	covered=$((total - missed))
+	note="new code: $covered of $total lines covered"
+	# Exact: covered / total >= new_code / 100, without rounding.
+	if [ $((covered * 100)) -ge $((new_code * total)) ]; then return 0; fi
+	note+=", $((covered * 100 / total))%, under $new_code%"
+	return 1
+}
+
+# print_head <file>: the first 100 lines of a file, ending in a newline, and how many more it has.
+print_head() {
+	local lines
+	lines=$(wc -l <"$1")
+	if [ -n "$(tail -c 1 "$1")" ]; then lines=$((lines + 1)); fi
+	if [ "$lines" -eq 0 ]; then
+		echo "(no output)"
+		return 0
+	fi
+	head -n 100 "$1"
+	if [ -n "$(tail -c 1 "$1")" ] && [ "$lines" -le 100 ]; then echo; fi
+	if [ "$lines" -gt 100 ]; then echo "[$((lines - 100)) more lines in the log]"; fi
 }
 
 run_checks() {
-  local logdir=$gitdir/assay n log rc t0 now secs start i shown what
-  local -a skipped=()
-  declare -A is_skipped=() code=()
-  mkdir -p "$logdir" 2>/dev/null || die "cannot create $logdir"
-  [ -w "$logdir" ] || die "cannot write to $logdir"
+	local logdir=$gitdir/assay n log rc t0 now secs start i shown what lowered default note report
+	local covdir=$gitdir/assay/coverage.tmp
+	local -a skipped=()
+	# why: what a failing check's lines say in parentheses; detail: the file its failure section shows instead of its
+	# log (diff-cover's report).
+	declare -A is_skipped=() why=() detail=()
+	mkdir -p "$logdir" 2>/dev/null || die "cannot create $logdir"
+	[ -w "$logdir" ] || die "cannot write to $logdir"
+	rm -rf "$covdir"
 
-  for n in "${selected[@]}"; do
-    if [ -n "${c_requires[$n]}" ] && ! requires_met "${c_requires[$n]}"; then
-      skipped+=("$n")
-      is_skipped[$n]=1
-    fi
-  done
-  rm -f "$logdir/requires.tmp"
+	for n in "${selected[@]}"; do
+		if [ -n "${c_requires[$n]}" ] && ! requires_met "${c_requires[$n]}"; then
+			skipped+=("$n")
+			is_skipped[$n]=1
+		fi
+	done
+	rm -f "$logdir/requires.tmp"
 
-  # Header: the mode and the base, then the loosenings and the skipped checks.
-  local mode="assay check"
-  if [ "$opt_fast" = 1 ]; then mode+=" --fast"; fi
-  if [ ${#wanted[@]} -gt 0 ]; then mode+=" ${selected[*]}"; fi
-  base_short=$(git rev-parse --short "$base_sha")
-  if [[ $base_sha == "$base_label"* ]]; then shown=$base_short; else shown=$base_label@$base_short; fi
-  echo "$mode · base $shown ($base_source)"
-  for i in "${!loose_check[@]}"; do
-    case ${loose_kind[$i]} in
-      off) what="is off" ;;
-      exec) what="runs the repo's own exec" ;;
-    esac
-    echo "  loosening: ${loose_check[$i]} $what: ${loose_reason[$i]//$'\n'/ }"
-  done
-  for n in "${skipped[@]}"; do
-    echo "  skipped: $n (no ${c_requires[$n]})"
-  done
+	# Header: the mode and the base, then the loosenings and the skipped checks.
+	local mode="assay check"
+	if [ "$opt_fast" = 1 ]; then mode+=" --fast"; fi
+	if [ ${#wanted[@]} -gt 0 ]; then mode+=" ${selected[*]}"; fi
+	base_short=$(git rev-parse --short "$base_sha")
+	if [[ $base_sha == "$base_label"* ]]; then shown=$base_short; else shown=$base_label@$base_short; fi
+	echo "$mode · base $shown ($base_source)"
+	for i in "${!loose_kind[@]}"; do
+		n=${loose_check[$i]}
+		case ${loose_kind[$i]} in
+		off) what="$n is off" ;;
+		exec) what="$n runs the repo's own exec" ;;
+		coverage)
+			if [ -z "${c_coverage[$n]}" ]; then
+				what="$n measures no coverage of new code"
+			else
+				what="$n reads another coverage report, ${c_coverage[$n]}"
+			fi
+			;;
+		new-code)
+			read -r lowered default <<<"${loose_value[$i]}"
+			what="new code needs $lowered% coverage, not assay's $default%"
+			;;
+		esac
+		echo "  loosening: $what: ${loose_reason[$i]//$'\n'/ }"
+	done
+	for n in "${skipped[@]}"; do
+		echo "  skipped: $n (no ${c_requires[$n]})"
+	done
 
-  now_us
-  start=$now
-  for n in "${selected[@]}"; do
-    log=$logdir/$n.log
-    if [ -n "${is_skipped[$n]:-}" ]; then
-      rm -f "$log"
-      echo "skip $n (no ${c_requires[$n]})"
-      continue
-    fi
-    now_us
-    t0=$now
-    rc=0
-    PATH=$caller_path ASSAY_BASE=$base_sha "$BASH" -c "${c_exec[$n]}" </dev/null >"$log" 2>&1 || rc=$?
-    now_us
-    fmt_secs secs $((now - t0))
-    if [ "$rc" -eq 0 ]; then
-      echo "ok   $n $secs"
-    else
-      failed+=("$n")
-      code[$n]=$rc
-      if [ "$rc" -eq 127 ]; then
-        echo "FAIL $n $secs (exit 127: tool not found)"
-      else
-        echo "FAIL $n $secs (exit $rc)"
-      fi
-    fi
-  done
-  now_us
-  fmt_secs secs $((now - start))
+	now_us
+	start=$now
+	for n in "${selected[@]}"; do
+		log=$logdir/$n.log
+		if [ -n "${is_skipped[$n]:-}" ]; then
+			rm -f "$log"
+			echo "skip $n (no ${c_requires[$n]})"
+			continue
+		fi
+		now_us
+		t0=$now
+		rc=0
+		report=
+		# A report left by an earlier run never counts.
+		if [ -n "${c_coverage[$n]}" ]; then
+			report=$(report_path "${c_coverage[$n]}" "$logdir")
+			rm -f "$report"
+		fi
+		PATH=$caller_path ASSAY_BASE=$base_sha ASSAY_DIR=$logdir "$BASH" -c "${c_exec[$n]}" </dev/null >"$log" 2>&1 ||
+			rc=$?
+		note=
+		if [ "$rc" -eq 0 ] && [ -n "$report" ]; then
+			if ! measure "$n" "$report" "$covdir"; then
+				failed+=("$n")
+				why[$n]=$note
+			fi
+			if [ -f "$covdir/$n.txt" ]; then
+				{
+					echo
+					cat "$covdir/$n.txt"
+				} >>"$log"
+				detail[$n]=$covdir/$n.txt
+			fi
+		fi
+		now_us
+		fmt_secs secs $((now - t0))
+		if [ "$rc" -eq 0 ] && [ -z "${why[$n]:-}" ]; then
+			echo "ok   $n $secs${note:+ ($note)}"
+		elif [ "$rc" -eq 0 ]; then
+			echo "FAIL $n $secs (${why[$n]})"
+		else
+			failed+=("$n")
+			why[$n]="exit $rc"
+			if [ "$rc" -eq 127 ]; then
+				echo "FAIL $n $secs (exit 127: tool not found)"
+			else
+				echo "FAIL $n $secs (exit $rc)"
+			fi
+		fi
+	done
+	now_us
+	fmt_secs secs $((now - start))
 
-  # Each failure: its command, the first 100 lines of its output, and the path of its full log.
-  local lines
-  for n in "${failed[@]}"; do
-    log=$logdir/$n.log
-    lines=$(wc -l <"$log")
-    if [ -n "$(tail -c 1 "$log")" ]; then lines=$((lines + 1)); fi
-    echo
-    echo "--- FAIL $n (exit ${code[$n]})"
-    echo "\$ ${c_exec[$n]}"
-    if [ "$lines" -eq 0 ]; then
-      echo "(no output)"
-    else
-      head -n 100 "$log"
-      if [ -n "$(tail -c 1 "$log")" ] && [ "$lines" -le 100 ]; then echo; fi
-      if [ "$lines" -gt 100 ]; then echo "[$((lines - 100)) more lines in the log]"; fi
-    fi
-    echo "log: $log"
-  done
+	# Each failure: its command, the first 100 lines of its output (of diff-cover's report, when it failed on
+	# coverage), and the path of its full log.
+	for n in "${failed[@]}"; do
+		log=$logdir/$n.log
+		echo
+		echo "--- FAIL $n (${why[$n]})"
+		echo "\$ ${c_exec[$n]}"
+		print_head "${detail[$n]:-$log}"
+		echo "log: $log"
+	done
+	rm -rf "$covdir"
 
-  # The last line: the count, and the command that reruns the failures.
-  local last rerun
-  if [ ${#failed[@]} -gt 0 ]; then
-    rerun="assay check"
-    if [ "$opt_base_set" = 1 ]; then rerun+=" --base $(shell_word "$opt_base")"; fi
-    rerun+=" ${failed[*]}"
-    last="${#failed[@]} of $(plural ${#selected[@]}) failed in $secs; rerun: $rerun"
-    echo
-  elif [ ${#selected[@]} -eq 0 ]; then
-    last="no checks to run"
-  else
-    last="$(plural ${#selected[@]}) passed"
-    if [ ${#skipped[@]} -gt 0 ]; then last+=" (${#skipped[@]} skipped)"; fi
-    last+=" in $secs"
-  fi
-  if [ "$opt_fast" = 1 ] && [ $((now - start)) -gt $((fast_budget * 1000000)) ]; then
-    last+=" (over the fast set's ${fast_budget}s budget)"
-  fi
-  echo "$last"
-  if [ ${#failed[@]} -gt 0 ]; then finish 1; fi
-  finish 0
+	# The last line: the count, and the command that reruns the failures.
+	local last rerun
+	if [ ${#failed[@]} -gt 0 ]; then
+		rerun="assay check"
+		if [ "$opt_base_set" = 1 ]; then rerun+=" --base $(shell_word "$opt_base")"; fi
+		rerun+=" ${failed[*]}"
+		last="${#failed[@]} of $(plural ${#selected[@]}) failed in $secs; rerun: $rerun"
+		echo
+	elif [ ${#selected[@]} -eq 0 ]; then
+		last="no checks to run"
+	else
+		last="$(plural ${#selected[@]}) passed"
+		if [ ${#skipped[@]} -gt 0 ]; then last+=" (${#skipped[@]} skipped)"; fi
+		last+=" in $secs"
+	fi
+	if [ "$opt_fast" = 1 ] && [ $((now - start)) -gt $((fast_budget * 1000000)) ]; then
+		last+=" (over the fast set's ${fast_budget}s budget)"
+	fi
+	echo "$last"
+	if [ ${#failed[@]} -gt 0 ]; then finish 1; fi
+	finish 0
 }
 
 cmd_check() {
-  while [ $# -gt 0 ]; do
-    case $1 in
-      --fast) opt_fast=1 ;;
-      --list) opt_list=1 ;;
-      --base)
-        [ $# -ge 2 ] || usage_error "--base needs a revision"
-        opt_base=$2 opt_base_set=1
-        shift
-        ;;
-      --base=*) opt_base=${1#--base=} opt_base_set=1 ;;
-      -h | --help)
-        usage_text
-        finish 0
-        ;;
-      --)
-        shift
-        wanted+=("$@")
-        break
-        ;;
-      -*) usage_error "unknown option '$1'" ;;
-      *) wanted+=("$1") ;;
-    esac
-    shift
-  done
-  if [ "$opt_base_set" = 1 ] && [ -z "$opt_base" ]; then usage_error "--base needs a revision"; fi
-  if [ "$opt_list" = 1 ] && { [ "$opt_fast" = 1 ] || [ "$opt_base_set" = 1 ] || [ ${#wanted[@]} -gt 0 ]; }; then
-    usage_error "--list takes no other argument"
-  fi
-  if [ "$opt_list" = 0 ]; then
-    now_us
-    run_start=$now
-  fi
+	while [ $# -gt 0 ]; do
+		case $1 in
+		--fast) opt_fast=1 ;;
+		--list) opt_list=1 ;;
+		--base)
+			[ $# -ge 2 ] || usage_error "--base needs a revision"
+			opt_base=$2 opt_base_set=1
+			shift
+			;;
+		--base=*) opt_base=${1#--base=} opt_base_set=1 ;;
+		-h | --help)
+			usage_text
+			finish 0
+			;;
+		--)
+			shift
+			wanted+=("$@")
+			break
+			;;
+		-*) usage_error "unknown option '$1'" ;;
+		*) wanted+=("$1") ;;
+		esac
+		shift
+	done
+	if [ "$opt_base_set" = 1 ] && [ -z "$opt_base" ]; then usage_error "--base needs a revision"; fi
+	if [ "$opt_list" = 1 ] && { [ "$opt_fast" = 1 ] || [ "$opt_base_set" = 1 ] || [ ${#wanted[@]} -gt 0 ]; }; then
+		usage_error "--list takes no other argument"
+	fi
+	if [ "$opt_list" = 0 ]; then
+		now_us
+		run_start=$now
+	fi
 
-  local t
-  for t in git jq head tail wc mkdir rm; do
-    command -v "$t" >/dev/null || die "cannot find $t on the PATH"
-  done
-  load_config
-  if [ "$opt_list" = 1 ]; then
-    list_checks
-    finish 0
-  fi
-  select_checks
-  find_repo
-  resolve_base
-  run_checks
+	local t
+	for t in git jq head tail wc mkdir rm; do
+		command -v "$t" >/dev/null || die "cannot find $t on the PATH"
+	done
+	load_config
+	if [ "$opt_list" = 1 ]; then
+		list_checks
+		finish 0
+	fi
+	select_checks
+	find_repo
+	resolve_base
+	run_checks
 }
 
 # not_adopted <why>: exit 2 for a repo that has not adopted assay, naming the procedure.
 not_adopted() {
-  {
-    echo "assay: this repo has not adopted assay: $*"
-    echo "assay: adopting it is a change of its own, on its own branch and pull request, made before any other" \
-      "work in the repo; tell the user about it before starting"
-    echo "assay: the procedure: $adoption_doc"
-  } >&2
-  finish 2
+	{
+		echo "assay: this repo has not adopted assay: $*"
+		echo "assay: adopting it is a change of its own, on its own branch and pull request, made before any other" \
+			"work in the repo; tell the user about it before starting"
+		echo "assay: the procedure: $adoption_doc"
+	} >&2
+	finish 2
 }
 
 # What the delegating assay runs inside the repo's devenv: it records in the directory given first whether the
@@ -1177,21 +1293,21 @@ exec assay "$@"'
 # delegate <command> [<arg>...]: outside the repo's devenv, run `assay <command> <arg>...` inside it, from the repo
 # root, so that the version the repo pins decides. devenv runs with the caller's PATH, not assay's own tools.
 delegate() {
-  local rc=0
-  find_repo
-  [ -f "$root/devenv.nix" ] || not_adopted "$root has no devenv.nix"
-  PATH=$caller_path command -v devenv >/dev/null ||
-    die "cannot find devenv on the PATH, which assay needs to run inside the repo's devenv"
-  local delegate_tmp
-  tmp_file delegate_tmp -d
-  PATH=$caller_path devenv shell -- "$BASH" -c "$delegate_sh" assay "$delegate_tmp" "$@" || rc=$?
-  if [ -e "$delegate_tmp/unadopted" ]; then not_adopted "the devenv of $root does not import assay's module"; fi
-  # devenv itself failed (exit 1 on an evaluation error), which must not pass for a failing check.
-  [ -e "$delegate_tmp/started" ] || die "devenv shell failed (exit $rc) before assay could run in the repo's devenv"
-  case $rc in
-    0 | 1 | 2 | 130) finish "$rc" ;;
-    *) die "the repo's assay exited $rc" ;;
-  esac
+	local rc=0
+	find_repo
+	[ -f "$root/devenv.nix" ] || not_adopted "$root has no devenv.nix"
+	PATH=$caller_path command -v devenv >/dev/null ||
+		die "cannot find devenv on the PATH, which assay needs to run inside the repo's devenv"
+	local delegate_tmp
+	tmp_file delegate_tmp -d
+	PATH=$caller_path devenv shell -- "$BASH" -c "$delegate_sh" assay "$delegate_tmp" "$@" || rc=$?
+	if [ -e "$delegate_tmp/unadopted" ]; then not_adopted "the devenv of $root does not import assay's module"; fi
+	# devenv itself failed (exit 1 on an evaluation error), which must not pass for a failing check.
+	[ -e "$delegate_tmp/started" ] || die "devenv shell failed (exit $rc) before assay could run in the repo's devenv"
+	case $rc in
+	0 | 1 | 2 | 130) finish "$rc" ;;
+	*) die "the repo's assay exited $rc" ;;
+	esac
 }
 
 # The machine-level entrypoints: the agent guard and the global git hooks. They run outside any devenv, never
@@ -1263,32 +1379,32 @@ rules_file=
 # rest_args to the arguments after it.
 rest_args=()
 parse_rules_option() {
-  local command=$1
-  shift
-  case ${1:-} in
-    --rules)
-      [ $# -ge 2 ] || usage_error "$command: --rules needs a file"
-      rules_file=$2
-      shift 2
-      ;;
-    --rules=*)
-      rules_file=${1#--rules=}
-      shift
-      ;;
-    *) usage_error "$command needs --rules <file>" ;;
-  esac
-  [ -n "$rules_file" ] || usage_error "$command: --rules needs a file"
-  rest_args=("$@")
+	local command=$1
+	shift
+	case ${1:-} in
+	--rules)
+		[ $# -ge 2 ] || usage_error "$command: --rules needs a file"
+		rules_file=$2
+		shift 2
+		;;
+	--rules=*)
+		rules_file=${1#--rules=}
+		shift
+		;;
+	*) usage_error "$command needs --rules <file>" ;;
+	esac
+	[ -n "$rules_file" ] || usage_error "$command: --rules needs a file"
+	rest_args=("$@")
 }
 
 load_rules() {
-  local out
-  if [ ! -f "$rules_file" ] || [ ! -r "$rules_file" ]; then die "cannot read the rule list $rules_file"; fi
-  if ! out=$(jq -n -r --arg name_re "$name_re" "$rules_jq" "$rules_file" 2>&1); then
-    die "invalid rule list $rules_file: $out"
-  fi
-  eval "$out"
-  [ "$rules_loaded" = 1 ] || die "invalid rule list $rules_file: incomplete"
+	local out
+	if [ ! -f "$rules_file" ] || [ ! -r "$rules_file" ]; then die "cannot read the rule list $rules_file"; fi
+	if ! out=$(jq -n -r --arg name_re "$name_re" "$rules_jq" "$rules_file" 2>&1); then
+		die "invalid rule list $rules_file: $out"
+	fi
+	eval "$out"
+	[ "$rules_loaded" = 1 ] || die "invalid rule list $rules_file: incomplete"
 }
 
 # rule_runs <i>: rule <i> runs in this session: it binds everyone, or it binds agents and the agent marker is set.
@@ -1297,21 +1413,21 @@ rule_runs() { [ "${r_who[$1]}" = everyone ] || [ -n "${ASSAY_AGENT:-}" ]; }
 # active_rules <on>: the indices of the rules on <on> that run in this session, in the list's order, in active.
 active=()
 active_rules() {
-  local i
-  active=()
-  for i in "${!r_name[@]}"; do
-    if [ "${r_on[$i]}" = "$1" ] && rule_runs "$i"; then active+=("$i"); fi
-  done
+	local i
+	active=()
+	for i in "${!r_name[@]}"; do
+		if [ "${r_on[$i]}" = "$1" ] && rule_runs "$i"; then active+=("$i"); fi
+	done
 }
 
 # rule_text <i> [<detail>...]: what a violated rule says: its message, the details indented under it, then its note
 # after a blank line.
 rule_text() {
-  local i=$1 d
-  shift
-  printf '%s\n' "${r_message[$i]}"
-  for d in "$@"; do printf '  %s\n' "$d"; done
-  if [ -n "${r_note[$i]}" ]; then printf '\n%s\n' "${r_note[$i]}"; fi
+	local i=$1 d
+	shift
+	printf '%s\n' "${r_message[$i]}"
+	for d in "$@"; do printf '  %s\n' "$d"; done
+	if [ -n "${r_note[$i]}" ]; then printf '\n%s\n' "${r_note[$i]}"; fi
 }
 
 # The violated rules, in the list's order, each with its text.
@@ -1319,18 +1435,18 @@ violated=()
 declare -A violated_text=()
 # violate <i> [<detail>...]
 violate() {
-  local i=$1
-  shift
-  if [ -z "${violated_text[$i]+set}" ]; then violated+=("$i"); fi
-  violated_text[$i]=$(rule_text "$i" "$@")
+	local i=$1
+	shift
+	if [ -z "${violated_text[$i]+set}" ]; then violated+=("$i"); fi
+	violated_text[$i]=$(rule_text "$i" "$@")
 }
 # violated_texts: every violated rule's text, a blank line between two.
 violated_texts() {
-  local i sep=
-  for i in "${violated[@]}"; do
-    printf '%s%s\n' "$sep" "${violated_text[$i]}"
-    sep=$'\n'
-  done
+	local i sep=
+	for i in "${violated[@]}"; do
+		printf '%s%s\n' "$sep" "${violated_text[$i]}"
+		sep=$'\n'
+	done
 }
 
 # The guard. The event, in Claude Code's hook JSON, emitted as shell assignments.
@@ -1359,51 +1475,51 @@ event_loaded=0
 # class (`[!...]` negated), and `\` makes the next character plain. A glob with no `/` matches the path's last
 # component, one that starts with `/` the whole path, any other the path's end at a component boundary.
 glob_matches() {
-  local g=$1 path=$2 re="" c i j n=${#1} class
-  for ((i = 0; i < n; i++)); do
-    c=${g:i:1}
-    case $c in
-      '*')
-        if [ "${g:i+1:1}" != '*' ]; then
-          re+='[^/]*'
-        elif [ "${g:i+2:1}" = / ]; then
-          re+='(.*/)?'
-          i=$((i + 2))
-        else
-          re+='.*'
-          i=$((i + 1))
-        fi
-        ;;
-      '?') re+='[^/]' ;;
-      '[')
-        # The class ends at the first `]` after its first character.
-        j=$((i + 2))
-        while [ "$j" -lt "$n" ] && [ "${g:j:1}" != ']' ]; do j=$((j + 1)); done
-        if [ "$j" -ge "$n" ]; then
-          re+='\['
-        else
-          class=${g:i+1:j-i-1}
-          if [[ $class == '!'* ]]; then class="^${class:1}"; fi
-          re+="[$class]"
-          i=$j
-        fi
-        ;;
-      \\)
-        i=$((i + 1))
-        c=${g:i:1}
-        if [ -n "$c" ]; then re+="\\$c"; fi
-        ;;
-      [.^\$+\(\)\{\}\|]) re+="\\$c" ;;
-      *) re+=$c ;;
-    esac
-  done
-  if [[ $g != */* ]]; then
-    [[ ${path##*/} =~ ^$re$ ]]
-  elif [[ $g == /* ]]; then
-    [[ $path =~ ^$re$ ]]
-  else
-    [[ $path =~ (^|/)$re$ ]]
-  fi
+	local g=$1 path=$2 re="" c i j n=${#1} class
+	for ((i = 0; i < n; i++)); do
+		c=${g:i:1}
+		case $c in
+		'*')
+			if [ "${g:i+1:1}" != '*' ]; then
+				re+='[^/]*'
+			elif [ "${g:i+2:1}" = / ]; then
+				re+='(.*/)?'
+				i=$((i + 2))
+			else
+				re+='.*'
+				i=$((i + 1))
+			fi
+			;;
+		'?') re+='[^/]' ;;
+		'[')
+			# The class ends at the first `]` after its first character.
+			j=$((i + 2))
+			while [ "$j" -lt "$n" ] && [ "${g:j:1}" != ']' ]; do j=$((j + 1)); done
+			if [ "$j" -ge "$n" ]; then
+				re+='\['
+			else
+				class=${g:i+1:j-i-1}
+				if [[ $class == '!'* ]]; then class="^${class:1}"; fi
+				re+="[$class]"
+				i=$j
+			fi
+			;;
+		\\)
+			i=$((i + 1))
+			c=${g:i:1}
+			if [ -n "$c" ]; then re+="\\$c"; fi
+			;;
+		[.^\$+\(\)\{\}\|]) re+="\\$c" ;;
+		*) re+=$c ;;
+		esac
+	done
+	if [[ $g != */* ]]; then
+		[[ ${path##*/} =~ ^$re$ ]]
+	elif [[ $g == /* ]]; then
+		[[ $path =~ ^$re$ ]]
+	else
+		[[ $path =~ (^|/)$re$ ]]
+	fi
 }
 
 # in_main_checkout <absolute path>: the path is inside a main checkout: in its working tree, whose git dir is its
@@ -1412,195 +1528,195 @@ glob_matches() {
 # checkout's top level.
 checkout_root=
 in_main_checkout() {
-  local d=$1 out in_tree in_git_dir bare git_dir common_dir
-  while [ ! -d "$d" ]; do
-    d=${d%/*}
-    if [ -z "$d" ]; then d=/; fi
-  done
-  out=$(git -C "$d" rev-parse --path-format=absolute --is-inside-work-tree --is-inside-git-dir \
-    --is-bare-repository --git-dir --git-common-dir 2>/dev/null) || return 1
-  { read -r in_tree && read -r in_git_dir && read -r bare && read -r git_dir && read -r common_dir; } <<<"$out" ||
-    return 1
-  if [ "$in_tree" = true ]; then
-    [ "$git_dir" = "$common_dir" ] || return 1
-    checkout_root=$(git -C "$d" rev-parse --show-toplevel 2>/dev/null) || return 1
-  elif [ "$in_git_dir" = true ] && [ "$bare" = false ]; then
-    checkout_root=${common_dir%/*}
-  else
-    return 1
-  fi
+	local d=$1 out in_tree in_git_dir bare git_dir common_dir
+	while [ ! -d "$d" ]; do
+		d=${d%/*}
+		if [ -z "$d" ]; then d=/; fi
+	done
+	out=$(git -C "$d" rev-parse --path-format=absolute --is-inside-work-tree --is-inside-git-dir \
+		--is-bare-repository --git-dir --git-common-dir 2>/dev/null) || return 1
+	{ read -r in_tree && read -r in_git_dir && read -r bare && read -r git_dir && read -r common_dir; } <<<"$out" ||
+		return 1
+	if [ "$in_tree" = true ]; then
+		[ "$git_dir" = "$common_dir" ] || return 1
+		checkout_root=$(git -C "$d" rev-parse --show-toplevel 2>/dev/null) || return 1
+	elif [ "$in_git_dir" = true ] && [ "$bare" = false ]; then
+		checkout_root=${common_dir%/*}
+	else
+		return 1
+	fi
 }
 
 # path_matches <glob or main-checkout> <path>: a path rule's match, or a command rule's cwd.
 path_matches() {
-  local abs
-  [ -n "$2" ] || return 1
-  abs=$(realpath -m -s -- "$2") || die "cannot resolve the path $2"
-  if [ "$1" = main-checkout ]; then in_main_checkout "$abs"; else glob_matches "$1" "$abs"; fi
+	local abs
+	[ -n "$2" ] || return 1
+	abs=$(realpath -m -s -- "$2") || die "cannot resolve the path $2"
+	if [ "$1" = main-checkout ]; then in_main_checkout "$abs"; else glob_matches "$1" "$abs"; fi
 }
 
 # guard_answer <decision>: print the answer for the violated rules, log one hit per rule, and exit 0.
 guard_answer() {
-  local decision=$1 reason i
-  reason=$(violated_texts)
-  case $decision in
-    deny)
-      jq -nc --arg r "$reason" \
-        '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: $r}}'
-      ;;
-    block) jq -nc --arg r "$reason" '{decision: "block", reason: $r}' ;;
-  esac
-  for i in "${violated[@]}"; do
-    # shellcheck disable=SC2016 # jq's $variables, not the shell's
-    log_hit guard '{event: $event, tool: (if $tool == "" then null else $tool end), rule: $rule, decision: $decision}' \
-      --arg event "$ev_name" --arg tool "$ev_tool" --arg rule "${r_name[$i]}" --arg decision "$decision"
-  done
-  finish 0
+	local decision=$1 reason i
+	reason=$(violated_texts)
+	case $decision in
+	deny)
+		jq -nc --arg r "$reason" \
+			'{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: $r}}'
+		;;
+	block) jq -nc --arg r "$reason" '{decision: "block", reason: $r}' ;;
+	esac
+	for i in "${violated[@]}"; do
+		# shellcheck disable=SC2016 # jq's $variables, not the shell's
+		log_hit guard '{event: $event, tool: (if $tool == "" then null else $tool end), rule: $rule, decision: $decision}' \
+			--arg event "$ev_name" --arg tool "$ev_tool" --arg rule "${r_name[$i]}" --arg decision "$decision"
+	done
+	finish 0
 }
 
 # unquote_word <word>: a shell word as the shell would pass it, for the simple forms: quotes around it removed, a
 # leading --option= cut off, and a leading ~/ expanded.
 unquote_word() {
-  local w=$1
-  strip_quotes() {
-    if [ ${#w} -ge 2 ] && { [[ $w == \"*\" ]] || [[ $w == \'*\' ]]; }; then w=${w:1:${#w}-2}; fi
-  }
-  strip_quotes
-  if [[ $w == -*=* ]]; then
-    w=${w#*=}
-    strip_quotes
-  fi
-  if [[ $w == \~/* ]]; then w=$HOME/${w#\~/}; fi
-  printf '%s' "$w"
+	local w=$1
+	strip_quotes() {
+		if [ ${#w} -ge 2 ] && { [[ $w == \"*\" ]] || [[ $w == \'*\' ]]; }; then w=${w:1:${#w}-2}; fi
+	}
+	strip_quotes
+	if [[ $w == -*=* ]]; then
+		w=${w#*=}
+		strip_quotes
+	fi
+	if [[ $w == \~/* ]]; then w=$HOME/${w#\~/}; fi
+	printf '%s' "$w"
 }
 
 # file_holds <word> <regex>: the file a command names with <word> holds text matching the regex. A file that cannot
 # be read (missing, standard input, a variable) holds nothing.
 file_holds() {
-  local f rc=0
-  f=$(unquote_word "$1")
-  if [ -z "$f" ] || [ "$f" = - ] || [ ! -f "$f" ] || [ ! -r "$f" ]; then return 1; fi
-  jq -n -e --rawfile text "$f" --arg re "$2" '$text | test($re)' >/dev/null 2>&1 || rc=$?
-  case $rc in
-    0) return 0 ;;
-    1) return 1 ;;
-    *) die "cannot match $f against the regex $2" ;;
-  esac
+	local f rc=0
+	f=$(unquote_word "$1")
+	if [ -z "$f" ] || [ "$f" = - ] || [ ! -f "$f" ] || [ ! -r "$f" ]; then return 1; fi
+	jq -n -e --rawfile text "$f" --arg re "$2" '$text | test($re)' >/dev/null 2>&1 || rc=$?
+	case $rc in
+	0) return 0 ;;
+	1) return 1 ;;
+	*) die "cannot match $f against the regex $2" ;;
+	esac
 }
 
 # guard_command: the command rules over the Bash tool's command, all at once through ast-grep.
 guard_command() {
-  local i inline="" sep="" out err file bound
-  local -a matched=()
-  active_rules command
-  for i in "${active[@]}"; do
-    if [ -n "${r_cwd[$i]}" ] && ! path_matches "${r_cwd[$i]}" "$ev_cwd"; then continue; fi
-    # r_match holds a rule file's body, an object: the id, the language and the severity go first.
-    inline+="$sep{\"id\": \"r$i\", \"language\": \"bash\", \"severity\": \"hint\", ${r_match[$i]:1}"
-    sep=$'\n---\n'
-  done
-  if [ -z "$inline" ] || [ -z "$ev_command" ]; then finish 0; fi
-  command -v ast-grep >/dev/null || die "cannot find ast-grep on the PATH"
-  tmp_file err
-  # From the root: ast-grep would read a project's sgconfig.yml in the cwd.
-  out=$(cd / && printf '%s' "$ev_command" | ast-grep scan --inline-rules "$inline" --stdin --json=stream 2>"$err") ||
-    die "ast-grep cannot match the command rules: $(cat "$err")"
-  # One record per match: the rule's index, whether it binds $FILE, and what.
-  while IFS= read -r -d '' i && IFS= read -r -d '' bound && IFS= read -r -d '' file; do
-    if [ -n "${r_file_content[$i]}" ] && [ "$bound" = 1 ] && ! file_holds "$file" "${r_file_content[$i]}"; then continue; fi
-    matched[i]=1
-  done < <(jq -j '(.metaVariables.single.FILE // null) as $f
+	local i inline="" sep="" out err file bound
+	local -a matched=()
+	active_rules command
+	for i in "${active[@]}"; do
+		if [ -n "${r_cwd[$i]}" ] && ! path_matches "${r_cwd[$i]}" "$ev_cwd"; then continue; fi
+		# r_match holds a rule file's body, an object: the id, the language and the severity go first.
+		inline+="$sep{\"id\": \"r$i\", \"language\": \"bash\", \"severity\": \"hint\", ${r_match[$i]:1}"
+		sep=$'\n---\n'
+	done
+	if [ -z "$inline" ] || [ -z "$ev_command" ]; then finish 0; fi
+	command -v ast-grep >/dev/null || die "cannot find ast-grep on the PATH"
+	tmp_file err
+	# From the root: ast-grep would read a project's sgconfig.yml in the cwd.
+	out=$(cd / && printf '%s' "$ev_command" | ast-grep scan --inline-rules "$inline" --stdin --json=stream 2>"$err") ||
+		die "ast-grep cannot match the command rules: $(cat "$err")"
+	# One record per match: the rule's index, whether it binds $FILE, and what.
+	while IFS= read -r -d '' i && IFS= read -r -d '' bound && IFS= read -r -d '' file; do
+		if [ -n "${r_file_content[$i]}" ] && [ "$bound" = 1 ] && ! file_holds "$file" "${r_file_content[$i]}"; then continue; fi
+		matched[i]=1
+	done < <(jq -j '(.metaVariables.single.FILE // null) as $f
     | "\(.ruleId[1:])\u0000\(if $f then 1 else 0 end)\u0000\($f.text // "")\u0000"' <<<"$out")
-  for i in "${!matched[@]}"; do violate "$i"; done
-  if [ ${#violated[@]} -gt 0 ]; then guard_answer deny; fi
-  finish 0
+	for i in "${!matched[@]}"; do violate "$i"; done
+	if [ ${#violated[@]} -gt 0 ]; then guard_answer deny; fi
+	finish 0
 }
 
 # guard_path: the path rules over the path an Edit, Write or NotebookEdit writes, relative to the cwd if it is not
 # absolute.
 guard_path() {
-  local i abs
-  [ -n "$ev_path" ] || finish 0
-  abs=$(realpath -m -s -- "$ev_path") || die "cannot resolve the path $ev_path"
-  active_rules path
-  for i in "${active[@]}"; do
-    if path_matches "${r_match[$i]}" "$abs"; then
-      if [ "${r_match[$i]}" = main-checkout ]; then
-        violate "$i" "$abs is in the main checkout $checkout_root"
-      else
-        violate "$i" "$abs"
-      fi
-    fi
-  done
-  if [ ${#violated[@]} -gt 0 ]; then guard_answer deny; fi
-  finish 0
+	local i abs
+	[ -n "$ev_path" ] || finish 0
+	abs=$(realpath -m -s -- "$ev_path") || die "cannot resolve the path $ev_path"
+	active_rules path
+	for i in "${active[@]}"; do
+		if path_matches "${r_match[$i]}" "$abs"; then
+			if [ "${r_match[$i]}" = main-checkout ]; then
+				violate "$i" "$abs is in the main checkout $checkout_root"
+			else
+				violate "$i" "$abs"
+			fi
+		fi
+	done
+	if [ ${#violated[@]} -gt 0 ]; then guard_answer deny; fi
+	finish 0
 }
 
 # unsaved_work: the cwd is in a worktree with uncommitted changes (untracked files included) or, when the repo has a
 # remote, commits on no remote-tracking branch. Sets unsaved to what is unsaved, with the worktree's top level.
 unsaved=
 unsaved_work() {
-  local top status n
-  local -a what=()
-  [ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" = true ] || return 1
-  top=$(git rev-parse --show-toplevel) || die "cannot find the top level of $PWD"
-  # No optional locks: the guard runs beside the agent's own git commands.
-  status=$(git --no-optional-locks status --porcelain --untracked-files=normal) ||
-    die "cannot read the status of $top"
-  if [ -n "$status" ]; then what+=("uncommitted changes"); fi
-  if [ -n "$(git remote)" ] && git rev-parse -q --verify HEAD >/dev/null; then
-    n=$(git rev-list --count HEAD --not --remotes) || die "cannot count the unpushed commits of $top"
-    if [ "$n" -eq 1 ]; then
-      what+=("1 commit on no remote")
-    elif [ "$n" -gt 1 ]; then
-      what+=("$n commits on no remote")
-    fi
-  fi
-  [ ${#what[@]} -gt 0 ] || return 1
-  unsaved="$top: ${what[0]}"
-  if [ ${#what[@]} -gt 1 ]; then unsaved+=" and ${what[1]}"; fi
+	local top status n
+	local -a what=()
+	[ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" = true ] || return 1
+	top=$(git rev-parse --show-toplevel) || die "cannot find the top level of $PWD"
+	# No optional locks: the guard runs beside the agent's own git commands.
+	status=$(git --no-optional-locks status --porcelain --untracked-files=normal) ||
+		die "cannot read the status of $top"
+	if [ -n "$status" ]; then what+=("uncommitted changes"); fi
+	if [ -n "$(git remote)" ] && git rev-parse -q --verify HEAD >/dev/null; then
+		n=$(git rev-list --count HEAD --not --remotes) || die "cannot count the unpushed commits of $top"
+		if [ "$n" -eq 1 ]; then
+			what+=("1 commit on no remote")
+		elif [ "$n" -gt 1 ]; then
+			what+=("$n commits on no remote")
+		fi
+	fi
+	[ ${#what[@]} -gt 0 ] || return 1
+	unsaved="$top: ${what[0]}"
+	if [ ${#what[@]} -gt 1 ]; then unsaved+=" and ${what[1]}"; fi
 }
 
 # guard_stop: the stop rules over the session's cwd, once per turn: Claude Code sets stop_hook_active when a Stop hook
 # already kept the turn going.
 guard_stop() {
-  local i
-  [ "$ev_stop_active" = 0 ] || finish 0
-  [ -n "$ev_cwd" ] && [ -d "$ev_cwd" ] || finish 0
-  active_rules stop
-  for i in "${active[@]}"; do
-    # unsaved-work, the only stop match.
-    if unsaved_work; then violate "$i" "$unsaved"; fi
-  done
-  if [ ${#violated[@]} -gt 0 ]; then guard_answer block; fi
-  finish 0
+	local i
+	[ "$ev_stop_active" = 0 ] || finish 0
+	[ -n "$ev_cwd" ] && [ -d "$ev_cwd" ] || finish 0
+	active_rules stop
+	for i in "${active[@]}"; do
+		# unsaved-work, the only stop match.
+		if unsaved_work; then violate "$i" "$unsaved"; fi
+	done
+	if [ ${#violated[@]} -gt 0 ]; then guard_answer block; fi
+	finish 0
 }
 
 cmd_guard() {
-  # The guard fails open: on its own error, exit 1, which Claude Code shows without blocking. Never 2, which blocks.
-  error_exit=1
-  local event
-  parse_rules_option guard "$@"
-  [ ${#rest_args[@]} -eq 0 ] || usage_error "guard: unexpected argument '${rest_args[0]}'"
-  load_rules
-  event=$(cat) || die "cannot read the event on stdin"
-  local out
-  out=$(jq -n -r "$event_jq" <<<"$event" 2>&1) || die "invalid event: $out"
-  eval "$out"
-  [ "$event_loaded" = 1 ] || die "invalid event: incomplete"
-  # Paths and git's answers are the session's: its cwd, and no repository forced through the environment.
-  unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE
-  if [ -n "$ev_cwd" ] && [ -d "$ev_cwd" ]; then cd "$ev_cwd" || die "cannot enter $ev_cwd"; fi
-  case $ev_name in
-    PreToolUse)
-      case $ev_tool in
-        Bash) guard_command ;;
-        Edit | Write | NotebookEdit) guard_path ;;
-      esac
-      ;;
-    Stop) guard_stop ;;
-  esac
-  finish 0
+	# The guard fails open: on its own error, exit 1, which Claude Code shows without blocking. Never 2, which blocks.
+	error_exit=1
+	local event
+	parse_rules_option guard "$@"
+	[ ${#rest_args[@]} -eq 0 ] || usage_error "guard: unexpected argument '${rest_args[0]}'"
+	load_rules
+	event=$(cat) || die "cannot read the event on stdin"
+	local out
+	out=$(jq -n -r "$event_jq" <<<"$event" 2>&1) || die "invalid event: $out"
+	eval "$out"
+	[ "$event_loaded" = 1 ] || die "invalid event: incomplete"
+	# Paths and git's answers are the session's: its cwd, and no repository forced through the environment.
+	unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE
+	if [ -n "$ev_cwd" ] && [ -d "$ev_cwd" ]; then cd "$ev_cwd" || die "cannot enter $ev_cwd"; fi
+	case $ev_name in
+	PreToolUse)
+		case $ev_tool in
+		Bash) guard_command ;;
+		Edit | Write | NotebookEdit) guard_path ;;
+		esac
+		;;
+	Stop) guard_stop ;;
+	esac
+	finish 0
 }
 
 # The global git hooks. Git appends the hook's own arguments to the command it is registered with, and runs it from
@@ -1608,39 +1724,39 @@ cmd_guard() {
 
 # hook_reject <hook>: print every violated rule on stderr, log one hit each, and exit 1.
 hook_reject() {
-  local hook=$1 i sep=
-  for i in "${violated[@]}"; do
-    printf '%sassay: %s: %s\n' "$sep" "${r_name[$i]}" "${violated_text[$i]}" >&2
-    sep=$'\n'
-  done
-  for i in "${violated[@]}"; do
-    # shellcheck disable=SC2016 # jq's $variables, not the shell's
-    log_hit git-hook '{hook: $hook, rule: $rule}' --arg hook "$hook" --arg rule "${r_name[$i]}"
-  done
-  finish 1
+	local hook=$1 i sep=
+	for i in "${violated[@]}"; do
+		printf '%sassay: %s: %s\n' "$sep" "${r_name[$i]}" "${violated_text[$i]}" >&2
+		sep=$'\n'
+	done
+	for i in "${violated[@]}"; do
+		# shellcheck disable=SC2016 # jq's $variables, not the shell's
+		log_hit git-hook '{hook: $hook, rule: $rule}' --arg hook "$hook" --arg rule "${r_name[$i]}"
+	done
+	finish 1
 }
 
 # hook_commit_msg <message file>: the commit-msg rules' regexes over the message as git stores it: what follows the
 # scissors line of `git commit --verbose` cut off, comments stripped.
 hook_commit_msg() {
-  [ $# -eq 1 ] || die "commit-msg takes the message file"
-  local file=$1 msg i rc out
-  active_rules commit-msg
-  [ ${#active[@]} -gt 0 ] || finish 0
-  if [ ! -f "$file" ] || [ ! -r "$file" ]; then die "cannot read the message $file"; fi
-  msg=$(awk 'index($0, "------------------------ >8 ------------------------") { exit } { print }' "$file" |
-    git stripspace --strip-comments) || die "cannot read the message $file"
-  for i in "${active[@]}"; do
-    rc=0
-    out=$(jq -n -e --arg msg "$msg" --arg re "${r_match[$i]}" '$msg | test($re)' 2>&1) || rc=$?
-    case $rc in
-      0) violate "$i" ;;
-      1) ;;
-      *) die "rule ${r_name[$i]}'s regex cannot be used: $out" ;;
-    esac
-  done
-  if [ ${#violated[@]} -gt 0 ]; then hook_reject commit-msg; fi
-  finish 0
+	[ $# -eq 1 ] || die "commit-msg takes the message file"
+	local file=$1 msg i rc out
+	active_rules commit-msg
+	[ ${#active[@]} -gt 0 ] || finish 0
+	if [ ! -f "$file" ] || [ ! -r "$file" ]; then die "cannot read the message $file"; fi
+	msg=$(awk 'index($0, "------------------------ >8 ------------------------") { exit } { print }' "$file" |
+		git stripspace --strip-comments) || die "cannot read the message $file"
+	for i in "${active[@]}"; do
+		rc=0
+		out=$(jq -n -e --arg msg "$msg" --arg re "${r_match[$i]}" '$msg | test($re)' 2>&1) || rc=$?
+		case $rc in
+		0) violate "$i" ;;
+		1) ;;
+		*) die "rule ${r_name[$i]}'s regex cannot be used: $out" ;;
+		esac
+	done
+	if [ ${#violated[@]} -gt 0 ]; then hook_reject commit-msg; fi
+	finish 0
 }
 
 # remote_default_branch <remote> <url>: the remote's default branch, in remote_default: its HEAD as the last fetch
@@ -1649,18 +1765,18 @@ hook_commit_msg() {
 remote_default=
 remote_default_known=0
 remote_default_branch() {
-  local ref out re=$'(^|\n)ref: refs/heads/([^\t]+)\tHEAD(\n|$)'
-  [ "$remote_default_known" = 0 ] || return 0
-  if ref=$(git symbolic-ref -q "refs/remotes/$1/HEAD" 2>/dev/null); then
-    remote_default=${ref#"refs/remotes/$1/"}
-  elif ! out=$(git ls-remote --symref "$2" HEAD 2>&1); then
-    die "cannot find the default branch of $1: ${out//$'\n'/ }"
-  elif [[ $out =~ $re ]]; then
-    remote_default=${BASH_REMATCH[2]}
-  elif ! out=$(git ls-remote --heads "$2" 2>&1) || [ -n "$out" ]; then
-    die "cannot find the default branch of $1: it names no HEAD"
-  fi
-  remote_default_known=1
+	local ref out re=$'(^|\n)ref: refs/heads/([^\t]+)\tHEAD(\n|$)'
+	[ "$remote_default_known" = 0 ] || return 0
+	if ref=$(git symbolic-ref -q "refs/remotes/$1/HEAD" 2>/dev/null); then
+		remote_default=${ref#"refs/remotes/$1/"}
+	elif ! out=$(git ls-remote --symref "$2" HEAD 2>&1); then
+		die "cannot find the default branch of $1: ${out//$'\n'/ }"
+	elif [[ $out =~ $re ]]; then
+		remote_default=${BASH_REMATCH[2]}
+	elif ! out=$(git ls-remote --heads "$2" 2>&1) || [ -n "$out" ]; then
+		die "cannot find the default branch of $1: it names no HEAD"
+	fi
+	remote_default_known=1
 }
 
 # hook_pre_push <remote> <url>: the pre-push rules over the refs git pushes, given on stdin as
@@ -1669,104 +1785,104 @@ remote_default_branch() {
 #   refs pass.
 # - agents-md: every pushed branch tip's tree has the AGENTS.md / CLAUDE.md shape (agents_md_problems).
 hook_pre_push() {
-  [ $# -ge 1 ] && [ $# -le 2 ] || die "pre-push takes the remote's name and URL"
-  local remote=$1 url=${2:-$1} lref loid rref i pushed problem problems
-  local -a lines=() details=()
-  active_rules pre-push
-  [ ${#active[@]} -gt 0 ] || finish 0
-  tmp_file problems
-  while read -r lref loid rref _ || [ -n "$lref" ]; do
-    if [ -n "$rref" ]; then lines+=("$loid $rref"); fi
-  done
-  for i in "${active[@]}"; do
-    details=()
-    for pushed in "${lines[@]}"; do
-      loid=${pushed%% *} rref=${pushed#* }
-      [[ $rref == refs/heads/* ]] || continue
-      case ${r_match[$i]} in
-        agent-branch)
-          if [[ $rref == refs/heads/agent/* ]]; then continue; fi
-          remote_default_branch "$remote" "$url"
-          if [ -z "$remote_default" ] || [ "$rref" = "refs/heads/$remote_default" ]; then continue; fi
-          details+=("$rref")
-          ;;
-        agents-md)
-          if [[ $loid =~ ^0+$ ]]; then continue; fi
-          # In this shell, so that a tree it cannot read stops the hook.
-          agents_md_problems "$loid" >"$problems" || true
-          while IFS= read -r problem; do
-            details+=("$rref: $problem")
-          done <"$problems"
-          ;;
-      esac
-    done
-    if [ ${#details[@]} -gt 0 ]; then violate "$i" "${details[@]}"; fi
-  done
-  if [ ${#violated[@]} -gt 0 ]; then hook_reject pre-push; fi
-  finish 0
+	[ $# -ge 1 ] && [ $# -le 2 ] || die "pre-push takes the remote's name and URL"
+	local remote=$1 url=${2:-$1} lref loid rref i pushed problem problems
+	local -a lines=() details=()
+	active_rules pre-push
+	[ ${#active[@]} -gt 0 ] || finish 0
+	tmp_file problems
+	while read -r lref loid rref _ || [ -n "$lref" ]; do
+		if [ -n "$rref" ]; then lines+=("$loid $rref"); fi
+	done
+	for i in "${active[@]}"; do
+		details=()
+		for pushed in "${lines[@]}"; do
+			loid=${pushed%% *} rref=${pushed#* }
+			[[ $rref == refs/heads/* ]] || continue
+			case ${r_match[$i]} in
+			agent-branch)
+				if [[ $rref == refs/heads/agent/* ]]; then continue; fi
+				remote_default_branch "$remote" "$url"
+				if [ -z "$remote_default" ] || [ "$rref" = "refs/heads/$remote_default" ]; then continue; fi
+				details+=("$rref")
+				;;
+			agents-md)
+				if [[ $loid =~ ^0+$ ]]; then continue; fi
+				# In this shell, so that a tree it cannot read stops the hook.
+				agents_md_problems "$loid" >"$problems" || true
+				while IFS= read -r problem; do
+					details+=("$rref: $problem")
+				done <"$problems"
+				;;
+			esac
+		done
+		if [ ${#details[@]} -gt 0 ]; then violate "$i" "${details[@]}"; fi
+	done
+	if [ ${#violated[@]} -gt 0 ]; then hook_reject pre-push; fi
+	finish 0
 }
 
 cmd_git_hook() {
-  # The git hooks fail closed: when they cannot evaluate their rules they exit 1, as for a violated rule. They stand
-  # only in front of commits and pushes, and a person can still bypass them.
-  error_exit=1
-  die_prefix="cannot evaluate rules: "
-  parse_rules_option git-hook "$@"
-  set -- "${rest_args[@]}"
-  [ $# -ge 1 ] || usage_error "git-hook needs the hook's name"
-  local hook=$1
-  shift
-  case $hook in
-    commit-msg | pre-push) ;;
-    *) die "no hook named '$hook' (commit-msg or pre-push)" ;;
-  esac
-  load_rules
-  case $hook in
-    commit-msg) hook_commit_msg "$@" ;;
-    pre-push) hook_pre_push "$@" ;;
-  esac
+	# The git hooks fail closed: when they cannot evaluate their rules they exit 1, as for a violated rule. They stand
+	# only in front of commits and pushes, and a person can still bypass them.
+	error_exit=1
+	die_prefix="cannot evaluate rules: "
+	parse_rules_option git-hook "$@"
+	set -- "${rest_args[@]}"
+	[ $# -ge 1 ] || usage_error "git-hook needs the hook's name"
+	local hook=$1
+	shift
+	case $hook in
+	commit-msg | pre-push) ;;
+	*) die "no hook named '$hook' (commit-msg or pre-push)" ;;
+	esac
+	load_rules
+	case $hook in
+	commit-msg) hook_commit_msg "$@" ;;
+	pre-push) hook_pre_push "$@" ;;
+	esac
 }
 
 # not_yet <command> <usage>: a subcommand a later version implements.
 not_yet() {
-  echo "usage: assay $1 $2" >&2
-  die "$1 is not implemented yet"
+	echo "usage: assay $1 $2" >&2
+	die "$1 is not implemented yet"
 }
 
 main() {
-  [ $# -ge 1 ] || usage
-  case $1 in
-    check)
-      shift
-      if [ -z "${ASSAY_CONFIG:-}" ]; then delegate check "$@"; fi
-      cmd_check "$@"
-      ;;
-    builtin)
-      shift
-      if [ -z "${ASSAY_CONFIG:-}" ]; then delegate builtin "$@"; fi
-      cmd_builtin "$@"
-      ;;
-    new-code)
-      shift
-      if [ -z "${ASSAY_CONFIG:-}" ]; then delegate new-code "$@"; fi
-      cmd_new_code "$@"
-      ;;
-    # The machine-level subcommands run outside any devenv and never delegate.
-    guard)
-      shift
-      cmd_guard "$@"
-      ;;
-    git-hook)
-      shift
-      cmd_git_hook "$@"
-      ;;
-    collect) not_yet collect "--db <file>    the nightly collector" ;;
-    -h | --help | help)
-      usage_text
-      finish 0
-      ;;
-    *) usage_error "unknown command '$1'" ;;
-  esac
+	[ $# -ge 1 ] || usage
+	case $1 in
+	check)
+		shift
+		if [ -z "${ASSAY_CONFIG:-}" ]; then delegate check "$@"; fi
+		cmd_check "$@"
+		;;
+	builtin)
+		shift
+		if [ -z "${ASSAY_CONFIG:-}" ]; then delegate builtin "$@"; fi
+		cmd_builtin "$@"
+		;;
+	new-code)
+		shift
+		if [ -z "${ASSAY_CONFIG:-}" ]; then delegate new-code "$@"; fi
+		cmd_new_code "$@"
+		;;
+	# The machine-level subcommands run outside any devenv and never delegate.
+	guard)
+		shift
+		cmd_guard "$@"
+		;;
+	git-hook)
+		shift
+		cmd_git_hook "$@"
+		;;
+	collect) not_yet collect "--db <file>    the nightly collector" ;;
+	-h | --help | help)
+		usage_text
+		finish 0
+		;;
+	*) usage_error "unknown command '$1'" ;;
+	esac
 }
 
 main "$@"

@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# assay-bats <dir>: bash's test check. Runs bats over the tracked .bats files, under kcov, which writes a Cobertura
+# report to <dir>/bats/cobertura.xml. The report lists every shell script git sees (what shfmt -f finds, test files
+# aside), executed or not, and nothing else: so a new script no test runs counts as uncovered, and diff-cover counts
+# no other language's lines. With no .bats file, the report still lists every script. <dir> is emptied first, since
+# kcov adds to what it finds there. kcov's standard error, which mixes bats'
+# own with the continuation lines of multi-line commands it traced, goes to <dir>/kcov.stderr.
+set -euo pipefail
+
+if [ $# -ne 1 ]; then
+	echo "usage: assay-bats <dir>" >&2
+	exit 2
+fi
+out=$(realpath -m "$1")
+here=$(dirname "${BASH_SOURCE[0]}")
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+rm -rf "$out"
+mkdir -p "$out/empty" "$out/runner"
+
+tests=()
+while IFS= read -r -d '' f; do
+	if [ -f "$f" ]; then tests+=("$f"); fi
+done < <(git ls-files -z --cached --deduplicate -- ':(top,glob)**/*.bats')
+
+# kcov keeps the files under --include-path (a comma-separated list), and lists the ones nobody runs only when it
+# parses them while walking --bash-parse-files-in-dir: the top-level directories that hold the scripts, or the root
+# when one sits there. With no script, the include path is a directory that holds none.
+include=()
+declare -A dirs=()
+while IFS= read -r f; do
+	if [[ $f == *.bats ]]; then continue; fi
+	include+=("$root/$f")
+	dir=$root
+	if [[ $f == */* ]]; then dir=$root/${f%%/*}; fi
+	dirs[$dir]=1
+done < <("$here/assay-files" | xargs -0 -r shfmt -f)
+if [ -n "${dirs[$root]:-}" ]; then dirs=([$root]=1); fi
+: >"$out/runner/scripts"
+if [ ${#include[@]} -gt 0 ]; then printf '%s\n' "${include[@]}" >"$out/runner/scripts"; fi
+if [ ${#include[@]} -eq 0 ]; then include=("$out/empty/none"); fi
+
+# kcov runs this in bats' place (named bats, so that the report lands in <dir>/bats/). The walk above misses a script
+# kcov does not take for one (no .sh, and no "sh" in its first 80 bytes, as a sourced .bash library), so the runner
+# first names every script to kcov the way bash's trace does, at line 0, which no script has: kcov then lists it with
+# its lines unrun until a test runs them. Then it runs bats, or, with no .bats file, reports no test.
+# shellcheck disable=SC2016 # the runner's own $f, $KCOV_BASH_XTRACEFD and $@
+{
+	printf '#!%s\n' "$(command -v bash)"
+	printf 'while IFS= read -r f; do printf "kcov@%%s@0@\\n" "$f" >&"$KCOV_BASH_XTRACEFD"; done <%q\n' \
+		"$out/runner/scripts"
+	if [ ${#tests[@]} -eq 0 ]; then echo 'echo 1..0'; else echo 'exec bats "$@"'; fi
+} >"$out/runner/bats"
+chmod +x "$out/runner/bats"
+
+args=(--bash-parser="$(command -v bash)" --include-path="$(
+	IFS=,
+	echo "${include[*]}"
+)")
+if [ ${#dirs[@]} -gt 0 ]; then
+	args+=(--bash-parse-files-in-dir="$(
+		IFS=,
+		echo "${!dirs[*]}"
+	)")
+fi
+rc=0
+kcov "${args[@]}" "$out" "$out/runner/bats" "${tests[@]}" 2>"$out/kcov.stderr" || rc=$?
+if [ "$rc" -ne 0 ]; then
+	echo "assay-bats: kcov's and bats' standard error: $1/kcov.stderr"
+fi
+exit "$rc"

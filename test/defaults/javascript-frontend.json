@@ -5,38 +5,47 @@
       "exec": "actionlint",
       "fast": true,
       "enable": true,
-      "requires": ".github/workflows/*"
+      "requires": ".github/workflows/*",
+      "coverage": null
     },
     "agents-md": {
       "exec": "assay builtin agents-md",
       "fast": true,
       "enable": true,
-      "requires": null
+      "requires": null,
+      "coverage": null
     },
     "commit-trailers": {
       "exec": "assay builtin commit-trailers",
       "fast": true,
       "enable": true,
-      "requires": null
+      "requires": null,
+      "coverage": null
     },
     "gitleaks": {
       "exec": "assay builtin gitleaks",
       "fast": true,
       "enable": true,
-      "requires": null
+      "requires": null,
+      "coverage": null
     },
     "oxfmt": {
       "exec": "oxfmt --check --no-error-on-unmatched-pattern '**/*.{md,mdx,yml,yaml}' 'frontend/**/*.{js,jsx,mjs,cjs,ts,tsx,mts,cts,json,jsonc,json5,css,scss,less,html,vue}'",
       "fast": true,
       "enable": true,
-      "requires": null
+      "requires": null,
+      "coverage": null
     },
     "suppressions": {
       "exec": "assay builtin suppressions",
       "fast": true,
       "enable": true,
-      "requires": null
+      "requires": null,
+      "coverage": null
     }
   },
-  "loosenings": []
+  "loosenings": [],
+  "coverage": {
+    "newCode": 80
+  }
 }

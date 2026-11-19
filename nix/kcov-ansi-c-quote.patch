@@ -1,0 +1,27 @@
+kcov 43's bash engine tracks single quotes across trace lines, but not the escaped quotes of ANSI-C quoted strings
+($'...\'...'), which bash's xtrace prints for values holding quotes or newlines. bats 1.14's `run` traces
+`saved_traps=$(trap -p INT ERR DEBUG)` that way, after which kcov takes every later trace line for the inside of a
+string and records no coverage. Upstream fix: https://github.com/SimonKagstrom/kcov/pull/501 (merged after v43).
+
+diff --git a/src/engines/bash-engine.cc b/src/engines/bash-engine.cc
+index d116dc0c..af2829b7 100644
+--- a/src/engines/bash-engine.cc
++++ b/src/engines/bash-engine.cc
+@@ -551,6 +551,17 @@ class BashEngine : public ScriptEngineBase
+ 		for(std::string::size_type i = 0; i < str.size(); ++i) {
+ 			if (str[i] == '\\' && out == INPUT_NORMAL)
+ 				i++;
++			else if (str[i] == '$' && out == INPUT_NORMAL &&
++					i + 1 < str.size() && str[i + 1] == '\'') {
++				// ANSI-C quoted $'...' strings may contain escaped single
++				// quotes (\'). Bash produces these with ansic_quote(), so
++				// they never span lines and every embedded quote is
++				// escaped. Skip ahead to the closing quote.
++				for (i += 2; i < str.size() && str[i] != '\''; ++i) {
++					if (str[i] == '\\')
++						i++;
++				}
++			}
+ 			else if (str[i] == '\'')
+ 				out = (out == INPUT_NORMAL ? INPUT_SINGLE_QUOTE : INPUT_NORMAL);
+ 		}

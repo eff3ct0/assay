@@ -1,10 +1,11 @@
 # assay's default checks, as a function of { config, lib, pkgs } returning
-# { <name> = { exec; fast; enable ? true; requires ? null; packages ? [ ]; }; }. The module sets each check field with
-# lib.mkDefault, so a plain definition in the repo overrides it; turning one off or redefining its exec is a
-# loosening, which needs `assay.checks.<name>.reason`. `packages` are the tools the check runs, which join the repo's
-# devenv whether the check is on or not. test/defaults/*.json hold the configuration these give, which
-# nix/checks.nix compares with the module's and the bats suite runs. The per-language defaults join here later.
-{
+# { <name> = { exec; fast; enable ? true; requires ? null; coverage ? null; packages ? [ ]; }; }. The module sets each
+# check field with lib.mkDefault, so a plain definition in the repo overrides it; turning one off, redefining its exec
+# or changing its coverage is a loosening, which needs `assay.checks.<name>.reason`. `packages` are the tools the
+# check runs, which join the repo's devenv whether the check is on or not. test/defaults/*.json hold the configuration
+# these give, which nix/checks.nix compares with the module's and the bats suite runs. The built-in checks, which
+# every repo runs, are here; each language's, on when the repo enables the language, in languages/.
+args@{
   config,
   lib,
   pkgs,
@@ -73,3 +74,5 @@ in
     fast = true;
   };
 }
+// import ./languages/nix.nix args
+// import ./languages/bash.nix args

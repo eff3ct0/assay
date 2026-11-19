@@ -57,20 +57,7 @@
 
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {
-          packages = with pkgs; [
-            bats
-            shellcheck
-            nixfmt
-            jq
-            git
-            gawk
-            # The guard's command rules run through it; the package brings it on its own.
-            ast-grep
-            # The built-in checks' tools, which assay's devenv module adds to every repo's devenv.
-            actionlint
-            gitleaks
-            oxfmt
-          ];
+          packages = import ./nix/test-tools.nix { inherit pkgs; };
         };
       });
 
