@@ -62,13 +62,15 @@ nixos-config issues it links (#50, #52, #58, #56, #47). Branch `agent/nix-bash-d
 
 ## Remaining steps
 
-Done: steps 1-5 (CLI coverage, module, helpers, kcov patch, defaults, devenv fixtures, assay's adoption with its
-shellcheck and shfmt cleanup commits). `devenv test` passes (bats: 436 of 480 new lines covered); `nix flake check`
-passed before the reformat; `bats test/devenv` passes inside the bats check.
+Done: steps 1-6 and the code review (its fixes in `fix: review findings…`: assay-bats names every script to kcov at
+line 0, since kcov's walk misses a `.bash` library without "sh" in its first 80 bytes).
 
-1. Docs: README.md (`coverage`, `assay.coverage.newCode`/`reason`, `ASSAY_DIR`, the Nix and bash defaults and their
-   helpers, the new loosening kinds), AGENTS.md (bats check runs test/devenv too; `nix/test-tools.nix`), GLOSSARY.md
-   if a term is missing, docs/adoption.md if needed.
-2. Re-run `nix flake check` after the reformat.
-3. `.git-blame-ignore-revs` for the shfmt commit only if p3rkins merges without squashing (ask).
-4. code-review skill, critic, recheck critic; push; p3rkins decides on the PR.
+1. Critic, then one recheck critic on its failures.
+
+Open decisions for p3rkins (not to be decided by an agent):
+- `.git-blame-ignore-revs` for the shfmt commit (`style: shfmt's reformat…`) only makes sense if the branch is not
+  squash-merged.
+- bats runs untracked `.bats` files too (the issue says "tracked").
+- kcov is nixpkgs' kcov patched (`nix/kcov.nix`), so it builds from source where no cache has it.
+- `ASSAY_DIR` and the `coverage` loosening kind are interface the issue did not name.
+- With a script at the repo root, kcov's `--bash-parse-files-in-dir` walks the whole root, ignored trees included.
