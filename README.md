@@ -378,10 +378,11 @@ after their tool, and bring their tools into the devenv. They are default checks
 not ignored), though `bats` runs only the tracked `.bats` files as tests; none runs over `.`, so `.devenv/` and other
 ignored files are never read; with nothing to check, it passes.
 
-| Language                       | `--fast`                                   | full run only                                               |
-| ------------------------------ | ------------------------------------------ | ----------------------------------------------------------- |
-| Nix, `languages.nix.enable`    | `nixfmt`, `statix`, `deadnix`, `nixf-tidy` | `nix-flake-check` (`nix flake check`), requires `flake.nix` |
-| bash, `languages.shell.enable` | `shellcheck`, `shfmt`                      | `bats`, with `coverage`                                     |
+| Language                        | `--fast`                                   | full run only                                               |
+| ------------------------------- | ------------------------------------------ | ----------------------------------------------------------- |
+| Nix, `languages.nix.enable`     | `nixfmt`, `statix`, `deadnix`, `nixf-tidy` | `nix-flake-check` (`nix flake check`), requires `flake.nix` |
+| bash, `languages.shell.enable`  | `shellcheck`, `shfmt`                      | `bats`, with `coverage`                                     |
+| Scala, `languages.scala.enable` | `scalafmt`                                 | `scala-compile`, `scalafix`, `scala-test` with `coverage`   |
 
 - Nix's checks run over the `.nix` files; `nixf-tidy` runs with `--variable-lookup` on each file, and any diagnostic
   fails it, whatever its severity. Nix has no coverage tool, so a Nix repo has no coverage check.
@@ -392,6 +393,8 @@ ignored files are never read; with nothing to check, it passes.
   `$ASSAY_DIR/kcov/bats/cobertura.xml`, lists every shell script, those no test runs included, and nothing else.
   nixpkgs has kcov for Linux only: elsewhere `bats` fails on the missing tool until the repo turns it off with a
   reason.
+- Scala checks require `build.sbt`; a scala-cli project without one skips all four. `assay preset scala` supplies the
+  [sbt plugins and linter settings](preset/README.md#scala). There is no on-change advisory check for sbt.
 - The commands call three helpers the module puts on the PATH (`devenv/bin`): `assay-files [<glob>...]` (the files
   git sees that exist, NUL-terminated), `assay-nixf-tidy <file>...` and `assay-bats <dir>`.
 

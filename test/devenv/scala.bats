@@ -77,7 +77,7 @@ scala_check() {
 	cmp "$T/before" "$report"
 	sed -i '/object Calc {/a\  def triple(n: Int): Int = n * 3' "$src"
 	scala_check 1 scala-test
-	[[ $output == *"new code: 0%"* ]]
+	[[ $output == *"new code: 0 of 1 lines covered, 0%, under 80%"* ]]
 	sed -i '/assertEquals/a\    assertEquals(Calc.triple(2), 6)' "$suite"
 	scala_check 0 scala-test
 }

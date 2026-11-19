@@ -51,3 +51,20 @@ Version 1:
 - `.shellcheckrc`: `enable=check-extra-masked-returns,check-set-e-suppressed,check-unassigned-uppercase`, the
   optional checks that find defects rather than set style.
 - No `.editorconfig`: shfmt keeps its defaults (tabs).
+
+## Scala
+
+Version 1 applies with `languages.scala.enable` and a root `build.sbt`. The project keeps its own sbt pin and test
+framework. `project/plugins.sbt` pins the four sbt 2 plugins; `lint.sbt` enables SemanticDB and WartRemover's unsafe
+set. DisableSyntax also rejects `finalize` overrides and `final val` definitions (inlined constants can leave
+downstream bytecode stale). It does not repeat the compiler's unused checks.
+
+`assay preset scala` fills `.scalafmt.conf` from `scalafmt --version`. A merge renders the old and new templates with
+the same CLI version, so local edits stay local. When only the CLI changes, update the project's `version` as the
+fast check directs. A mismatch stops at scalafmt's version check, before it can invoke the downloading runner.
+
+`test/devenv/scala.bats` prints timings. On the Scala 3.10.1 fixture (sbt 2.0.12, scalafmt 3.11.5, warm dependencies),
+scalafmt took 0.53 s, within the fast set's 5 s budget. Compilation took 4.00 s, scalafix 2.99 s, and tests with
+coverage 5.78 s (5.06 s on repeat). The coverage run disables sbt's task cache: after `clean`, restoring instrumented
+classes alone cannot restore their scoverage metadata. It runs `testFull` and maps each Cobertura class through the
+report's real source roots before diff-cover measures it.

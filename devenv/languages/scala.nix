@@ -21,7 +21,7 @@ lib.optionalAttrs (config.languages.scala.enable or false) (
       exec = ''
         set -o pipefail
         env -u SBT_TPOLECAT_DEV sbt --server --batch --no-colors \
-          ';set Global / cacheStores := Seq.empty;coverage;testFull;coverageReport' | tee "$ASSAY_DIR/sbt-coverage.log" &&
+          ';set Global / cacheStores := Seq(new sbt.util.InMemoryActionCacheStore);coverage;testFull;coverageReport' | tee "$ASSAY_DIR/sbt-coverage.log" &&
         ${pkgs.python3}/bin/python ${./scala-coverage.py} "$ASSAY_DIR"
       '';
       coverage = "$ASSAY_DIR/scala-cobertura.xml";
