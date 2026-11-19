@@ -59,6 +59,10 @@ Whole-tree checks fail on day one wherever the tree already breaks them.
 
 - Each check's cleanup goes in its own commit.
 - A formatter's whole-tree reformat goes in its own commit, listed in `.git-blame-ignore-revs`.
+- The built-in checks hold from the adoption on, whatever the repo's languages: the shape of `AGENTS.md` and
+  `CLAUDE.md` (below), no secret in the tree, and `oxfmt` over Markdown and YAML, whose first run is such a reformat. A
+  tool-written file of a type `oxfmt` checks (a sops file, say) goes in the repo's `.oxfmtrc.json` under
+  `ignorePatterns`, which is no loosening.
 - What cannot be cleaned is held as a loosening whose reason names an issue in that repo; `assay check` lists it on
   every run, and that issue removes the loosening when it clears the debt.
 
@@ -67,6 +71,8 @@ Whole-tree checks fail on day one wherever the tree already breaks them.
 "Related repos" names `eff3ct0/assay` (its devenv module, through the devenv input `assay`), and the run and test
 instructions name `assay check`: `devenv test` runs every check, as CI does, and while working
 `devenv shell -- assay check [--fast] [<check>...]` (or plain `assay check`, which runs itself inside the devenv).
+`CLAUDE.md` is the single line `@AGENTS.md` (or either file a symlink to the other), as the built-in `agents-md`
+check asks.
 
 ## Keeping assay current
 

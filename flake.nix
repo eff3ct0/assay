@@ -42,6 +42,11 @@
             nixfmt
             jq
             git
+            gawk
+            # The built-in checks' tools, which assay's devenv module adds to every repo's devenv.
+            actionlint
+            gitleaks
+            oxfmt
           ];
         };
       });

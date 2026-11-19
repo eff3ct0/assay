@@ -138,3 +138,18 @@ not_adopted() {
   [ "$status" -eq 2 ]
   [ "$stderr" = "assay: the repo's assay exited 7" ]
 }
+
+@test "outside the devenv, assay builtin and assay new-code re-execute themselves through devenv shell" {
+  local_repo
+  devenv_files yes
+  outside_devenv
+  run --separate-stderr "$assay" builtin agents-md
+  [ "$status" -eq 1 ]
+  [[ $output == "AGENTS.md is missing"* ]]
+  run --separate-stderr "$assay" new-code --base HEAD
+  [ "$status" -eq 0 ]
+  [ "$output" = '{}' ]
+  [ "$(wc -l <"$T/devenv.calls")" -eq 2 ]
+  [[ $(sed -n 1p "$T/devenv.calls") == *" builtin agents-md" ]]
+  [[ $(sed -n 2p "$T/devenv.calls") == *" new-code --base HEAD" ]]
+}

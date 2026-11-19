@@ -24,6 +24,9 @@ _Avoid_: marker (for the required file; the agent marker is another thing)
 **Loosening**:
 An override that makes one of assay's default checks less strict than the default.
 
+**Built-in check**:
+One of assay's default checks that every repo importing its devenv module runs, whatever the repo's languages.
+
 **Base**:
 The commit a change is measured against; the change is everything between it and the working tree.
 
