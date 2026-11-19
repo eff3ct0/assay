@@ -506,6 +506,25 @@ let
       rules = [ (rule // { name = "s"; }) ];
     };
   };
+  scopedCommand = rule // {
+    cwd = "main-checkout";
+    workspaceRoot = "/workspace";
+  };
+  scopedPath = rule // {
+    name = "p";
+    on = "path";
+    match = "main-checkout";
+    workspaceRoot = "/workspace";
+  };
+  scopedHome = homeWith {
+    programs.assay = {
+      enable = true;
+      rules = [
+        scopedCommand
+        scopedPath
+      ];
+    };
+  };
   withoutGit = homeWith {
     programs.git.enable = lib.mkForce false;
     programs.assay.enable = true;
@@ -513,6 +532,10 @@ let
   disabled = homeWith { programs.assay.rules = [ rule ]; };
 
   homeExpectations = {
+    "a relative workspaceRoot fails evaluation" =
+      !rulesEvaluate [ (scopedPath // { workspaceRoot = "relative"; }) ];
+    "a scoped path glob fails evaluation" = !rulesEvaluate [ (scopedPath // { match = "*"; }) ];
+    "a scoped cwd glob fails evaluation" = !rulesEvaluate [ (scopedCommand // { cwd = "*"; }) ];
     "a home with one rule of each on evaluates" = rulesEvaluate exampleRules;
     "a rule lacking a deny example fails evaluation" = !rulesEvaluate [ (removeAttrs rule [ "deny" ]) ];
     "an empty allow list fails evaluation" = !rulesEvaluate [ (rule // { allow = [ ]; }) ];
@@ -729,6 +752,8 @@ in
         ${lib.optionalString (homeFailed != [ ]) "exit 1"}
         # The rendered list is the one the bats suite reads.
         jq -S . ${rulesFile} >rendered.json
+        jq -e '[.rules[] | [.on, .workspaceRoot]] == [["command", "/workspace"], ["path", "/workspace"]]' \
+          ${scopedHome.config.programs.assay.rulesFile}
         jq -S . ${../test/rules/example.json} >example.json
         diff rendered.json example.json || {
           echo "FAIL: the rendered rules differ from test/rules/example.json" >&2

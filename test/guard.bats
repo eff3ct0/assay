@@ -314,6 +314,20 @@ fails_open() {
 	[[ $stderr == *"$1"* ]]
 }
 
+@test "workspaceRoot requires an absolute string and a main-checkout predicate" {
+	RULES=$T/rules.json
+	event=$(edit_event "README.md" "$T")
+	for fields in \
+		'{"on":"path","match":"main-checkout","workspaceRoot":42}' \
+		'{"on":"path","match":"main-checkout","workspaceRoot":"relative"}' \
+		'{"on":"path","match":"*.md","workspaceRoot":"/workspace"}' \
+		'{"on":"command","match":{"kind":"command"},"cwd":"*","workspaceRoot":"/workspace"}'; do
+		jq '{version: 1, rules: [. + {name: "scoped", message: "m"}]}' <<<"$fields" >"$RULES"
+		guard "$event"
+		fails_open "rule scoped: workspaceRoot needs an absolute path and a main-checkout predicate"
+	done
+}
+
 @test "the guard fails open: exit 1, never 2, on its own error" {
 	cd "$T"
 	export ASSAY_AGENT=claude-code

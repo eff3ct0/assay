@@ -2538,8 +2538,7 @@ delegate() {
 
 # The rule list, validated whole and emitted as shell assignments (strings quoted with @sh) that end with
 # rules_loaded=1. A rule's examples (deny, allow) are the check builder's: the entrypoints do not read them.
-# shellcheck disable=SC2016 # jq's $variables, not the shell's
-rules_jq='
+IFS= read -r -d '' rules_jq <<'JQ' || true
 def fail($m): "\($m)\n" | halt_error(1);
 def text: type == "string" and length > 0;
 def line: text and (test("\n") | not);
@@ -2589,7 +2588,7 @@ def rule_ok($i):
       "r_workspace+=(\(.workspaceRoot // "" | @sh))",
       "r_cwd+=(\(.cwd // "" | @sh)) r_file_content+=(\(.fileContent // "" | @sh))"),
   "rules_loaded=1"
-'
+JQ
 
 r_name=()
 r_on=()
