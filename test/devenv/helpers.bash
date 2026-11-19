@@ -58,6 +58,12 @@ EOF
 	echo 'args: import ./languages/nix.nix args // import ./languages/bash.nix args' \
 		>"$ASSAY_LANGUAGES/devenv/defaults.nix"
 	git -C "$ASSAY_LANGUAGES" commit --quiet -am "the languages' default checks alone"
+	# The same module shipping the rule pack of assay's tests, demo, as a pack of its own.
+	export ASSAY_WITH_PACK=$BATS_FILE_TMPDIR/assay-with-pack
+	copy_assay "$ASSAY_WITH_PACK"
+	cp -r "$ASSAY_WITH_PACK/test/packs/demo" "$ASSAY_WITH_PACK/packs/demo"
+	git -C "$ASSAY_WITH_PACK" add packs
+	git -C "$ASSAY_WITH_PACK" commit --quiet -m "a rule pack"
 }
 
 setup() {
