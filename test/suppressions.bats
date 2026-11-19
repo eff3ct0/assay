@@ -1,7 +1,7 @@
 # shellcheck disable=SC2016 # the fixtures' code is literal text
 bats_require_minimum_version 1.5.0
 # shellcheck source=test/helpers.bash
-source "$BATS_TEST_DIRNAME/helpers.bash"
+source "${BATS_TEST_DIRNAME:?}/helpers.bash"
 
 # suppressions: a new suppression on new code names the rule it silences and gives a reason. A marker with a reason
 # field gives it there; one without takes a comment on the same line or the line above.
@@ -181,7 +181,9 @@ web.ts:8: Stryker disable names no rule
 web.ts:9: Stryker disable gives no reason
 web.ts:10: qlty-ignore names no rule
 web.ts:11: oxlint-disable gives no reason"
-	diff <(echo "$expected") <(problems | sed -E 's/[;,] (write|name|give|fix|use) .*//; s/ is not allowed.*/ is not allowed/')
+	found=$(problems)
+	actual=$(sed -E 's/[;,] (write|name|give|fix|use) .*//; s/ is not allowed.*/ is not allowed/' <<<"$found")
+	diff <(echo "$expected") <(echo "$actual")
 }
 
 @test "a suppression already present at the base never fails, even on a line the change modifies" {
@@ -197,12 +199,14 @@ web.ts:11: oxlint-disable gives no reason"
 	printf '%s\n' 'a = 10  # noqa' 'b = 20' 'c = g()  # type: ignore[call-arg]' >app.py
 	sup
 	[ "$status" -eq 1 ]
-	[ "$(problems)" = "app.py:3: type: ignore gives no reason; give one, like: # type: ignore[attr-defined]  # <why> (or in a comment on the line above)" ]
+	found=$(problems)
+	[ "$found" = "app.py:3: type: ignore gives no reason; give one, like: # type: ignore[attr-defined]  # <why> (or in a comment on the line above)" ]
 	# One old blanket noqa does not let a second one in.
 	printf '%s\n' 'a = 10  # noqa' 'b = 20  # noqa' 'c = g()  # type: ignore' >app.py
 	sup
 	[ "$status" -eq 1 ]
-	[[ $(problems) == "app.py:"[12]": noqa names no rule and gives no reason"* ]]
+	found=$(problems)
+	[[ $found == "app.py:"[12]": noqa names no rule and gives no reason"* ]]
 }
 
 @test "a reason on the line above counts only for markers without a reason field" {
@@ -212,7 +216,10 @@ web.ts:11: oxlint-disable gives no reason"
 	printf '%s\n' '// The lines are counted by the parser.' '#[allow(clippy::too_many_lines)]' 'fn f() {}' >lib.rs
 	sup
 	[ "$status" -eq 1 ]
-	[ "$(problems | cut -d' ' -f1-2)" = "$(printf '%s\n' 'lib.rs:2: #[allow]' 'web.ts:2: eslint-disable-next-line')" ]
+	found=$(problems)
+	actual=$(cut -d' ' -f1-2 <<<"$found")
+	expected=$(printf '%s\n' 'lib.rs:2: #[allow]' 'web.ts:2: eslint-disable-next-line')
+	[ "$actual" = "$expected" ]
 }
 
 @test "a comment above that is itself a suppression is no reason" {
@@ -220,7 +227,9 @@ web.ts:11: oxlint-disable gives no reason"
 	printf '%s\n' '# noqa: F401' 'y = 2  # noqa: E501' >app.py
 	sup
 	[ "$status" -eq 1 ]
-	[ "$(problems | wc -l)" -eq 2 ]
+	found=$(problems)
+	n=$(wc -l <<<"$found")
+	[ "$n" -eq 2 ]
 }
 
 @test "markers count only in their language: by extension, and by shebang for a shell script without one" {
@@ -231,7 +240,8 @@ web.ts:11: oxlint-disable gives no reason"
 	printf '%s\n' '#!/usr/bin/env python3' "# $sc disable=SC2086" >tool.py-script
 	sup
 	[ "$status" -eq 1 ]
-	[ "$(problems)" = "tool:2: $sc disable gives no reason; give one, like: # $sc disable=SC2086 # <why> (or in a comment on the line above)" ]
+	found=$(problems)
+	[ "$found" = "tool:2: $sc disable gives no reason; give one, like: # $sc disable=SC2086 # <why> (or in a comment on the line above)" ]
 }
 
 @test "only new code is read: a suppression on an unchanged line of a changed file passes" {
@@ -246,7 +256,8 @@ web.ts:11: oxlint-disable gives no reason"
 	echo '// @ts-ignore' >>web.ts
 	sup
 	[ "$status" -eq 1 ]
-	[[ $(problems) == "web.ts:4: @ts-ignore is not allowed"* ]]
+	found=$(problems)
+	[[ $found == "web.ts:4: @ts-ignore is not allowed"* ]]
 }
 
 @test "a multi-line attribute is new when any of its lines is" {
@@ -258,7 +269,8 @@ web.ts:11: oxlint-disable gives no reason"
 	printf '%s\n' '#[expect(' '    dead_code,' '    unused_variables,' ')]' 'fn f() {}' >lib.rs
 	sup
 	[ "$status" -eq 1 ]
-	[[ $(problems) == "lib.rs:1: #[expect] gives no reason"* ]]
+	found=$(problems)
+	[[ $found == "lib.rs:1: #[expect] gives no reason"* ]]
 }
 
 @test "the base comes from ASSAY_BASE, as assay check exports it" {
@@ -297,7 +309,10 @@ web.ts:11: oxlint-disable gives no reason"
 	sed -i '1s/.*/y = 10  # noqa/' new.py
 	sup
 	[ "$status" -eq 1 ]
-	[ "$(problems | cut -d: -f1-2)" = "$(printf '%s\n' b.py:1 b.ts:1)" ]
+	found=$(problems)
+	actual=$(cut -d: -f1-2 <<<"$found")
+	expected=$(printf '%s\n' b.py:1 b.ts:1)
+	[ "$actual" = "$expected" ]
 }
 
 @test "in a file whose name git quotes, a suppression the change keeps on a modified line passes" {

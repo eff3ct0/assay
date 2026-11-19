@@ -7,7 +7,7 @@
 set -euo pipefail
 
 call=$(printf '%q ' "$PWD" "$@")
-echo "${call% }" >>"$DEVENV_STUB_CALLS"
+echo "${call% }" >>"${DEVENV_STUB_CALLS?}"
 if [ "${1:-}" != shell ] || [ "${2:-}" != -- ] || [ $# -lt 3 ]; then
 	echo "devenv stub: unexpected arguments: $*" >&2
 	exit 64
@@ -18,7 +18,7 @@ if [ -n "${DEVENV_STUB_FAIL:-}" ]; then
 	exit 1
 fi
 if [ -f devenv.yaml ] && grep -qx '  - assay/devenv' devenv.yaml; then
-	export ASSAY_CONFIG=$DEVENV_STUB_CONFIG
-	PATH=$DEVENV_STUB_PROFILE:$PATH
+	export ASSAY_CONFIG=${DEVENV_STUB_CONFIG?}
+	PATH=${DEVENV_STUB_PROFILE?}:$PATH
 fi
 exec "$@"

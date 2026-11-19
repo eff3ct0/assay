@@ -1,6 +1,6 @@
 bats_require_minimum_version 1.5.0
 # shellcheck source=test/helpers.bash
-source "$BATS_TEST_DIRNAME/helpers.bash"
+source "${BATS_TEST_DIRNAME:?}/helpers.bash"
 
 # Coverage of new code: a check declares the report it writes (`coverage`); when the check passes, assay measures
 # the change's new lines against it with diff-cover.
@@ -23,7 +23,8 @@ writes() { echo "mkdir -p \"\$(dirname \"$2\")\" && cp '$1' \"$2\""; }
 	local_repo
 	printf 'one\ntwo\n' >lib.sh
 	lcov "$T/report" lib.sh 1:3 2:1
-	check test "$(writes "$T/report" coverage/lcov.info)" --coverage coverage/lcov.info
+	copy=$(writes "$T/report" coverage/lcov.info)
+	check test "$copy" --coverage coverage/lcov.info
 	run --separate-stderr "$assay" check
 	echo "$output"
 	[ "$status" -eq 0 ]
@@ -35,20 +36,23 @@ writes() { echo "mkdir -p \"\$(dirname \"$2\")\" && cp '$1' \"$2\""; }
 	printf 'one\ntwo\nthree\nfour\nfive\n' >lib.sh
 	lcov "$T/report" lib.sh 1:1 2:1 3:1 4:1 5:0
 	new_code 81
-	check test "echo tests passed; $(writes "$T/report" coverage/lcov.info)" --coverage coverage/lcov.info
+	copy=$(writes "$T/report" coverage/lcov.info)
+	check test "echo tests passed; $copy" --coverage coverage/lcov.info
 	run --separate-stderr "$assay" check
 	echo "$output"
 	[ "$status" -eq 1 ]
 	[[ ${lines[1]} =~ ^FAIL\ test\ [0-9.]+s\ \(new\ code:\ 4\ of\ 5\ lines\ covered,\ 80%,\ under\ 81%\)$ ]]
 	[ "${lines[2]}" = "--- FAIL test (new code: 4 of 5 lines covered, 80%, under 81%)" ]
 	[[ ${lines[3]} == "\$ echo tests passed; "* ]]
-	[ "${lines[4]}" = "\$ diff-cover $PWD/coverage/lcov.info --compare-branch=$(sha HEAD) --diff-range-notation=.. --include-untracked" ]
+	head_sha=$(sha HEAD)
+	[ "${lines[4]}" = "\$ diff-cover $PWD/coverage/lcov.info --compare-branch=$head_sha --diff-range-notation=.. --include-untracked" ]
 	[[ $output == *"lib.sh (80.0%): Missing lines 5"* ]]
 	[[ $output != *"tests passed"$'\n'* ]]
 	[[ $output == *$'\nlog: '"$PWD/.git/assay/test.log"$'\n'* ]]
 	[[ ${lines[-1]} == "1 of 1 check failed in "*"; rerun: assay check test" ]]
 	# The log holds the check's output, then diff-cover's.
-	[ "$(head -n 1 .git/assay/test.log)" = "tests passed" ]
+	first=$(head -n 1 .git/assay/test.log)
+	[ "$first" = "tests passed" ]
 	grep -q 'Missing lines 5' .git/assay/test.log
 }
 
@@ -56,7 +60,8 @@ writes() { echo "mkdir -p \"\$(dirname \"$2\")\" && cp '$1' \"$2\""; }
 	local_repo
 	printf 'one\ntwo\nthree\nfour\nfive\n' >lib.sh
 	lcov "$T/report" lib.sh 1:1 2:1 3:1 4:1 5:0
-	check test "$(writes "$T/report" coverage/lcov.info)" --coverage coverage/lcov.info
+	copy=$(writes "$T/report" coverage/lcov.info)
+	check test "$copy" --coverage coverage/lcov.info
 	run --separate-stderr "$assay" check
 	[ "$status" -eq 0 ]
 	[[ ${lines[1]} == *"(new code: 4 of 5 lines covered)" ]]
@@ -66,7 +71,8 @@ writes() { echo "mkdir -p \"\$(dirname \"$2\")\" && cp '$1' \"$2\""; }
 	local_repo
 	printf 'one\n' >lib.sh
 	lcov "$T/report" lib.sh 1:0
-	check test "$(writes "$T/report" coverage/lcov.info); echo tests failed; exit 3" --coverage coverage/lcov.info
+	copy=$(writes "$T/report" coverage/lcov.info)
+	check test "$copy; echo tests failed; exit 3" --coverage coverage/lcov.info
 	run --separate-stderr "$assay" check
 	[ "$status" -eq 1 ]
 	[[ ${lines[1]} =~ ^FAIL\ test\ [0-9.]+s\ \(exit\ 3\)$ ]]
@@ -78,7 +84,8 @@ writes() { echo "mkdir -p \"\$(dirname \"$2\")\" && cp '$1' \"$2\""; }
 	local_repo
 	printf 'one\n' >lib.sh
 	lcov "$T/report" lib.sh 1:1
-	check test "$(writes "$T/report" coverage/lcov.info)" --coverage coverage/lcov.info
+	copy=$(writes "$T/report" coverage/lcov.info)
+	check test "$copy" --coverage coverage/lcov.info
 	"$assay" check >/dev/null
 	[ -f coverage/lcov.info ]
 	check test "echo no report" --coverage coverage/lcov.info
@@ -97,8 +104,10 @@ writes() { echo "mkdir -p \"\$(dirname \"$2\")\" && cp '$1' \"$2\""; }
 	printf 'one\n' >lib.sh
 	lcov "$T/report" lib.sh 1:1
 	check where "echo \"\$ASSAY_DIR\" >$T/dir"
-	check test "$(writes "$T/report" '$ASSAY_DIR/test/lcov.info')" --coverage '$ASSAY_DIR/test/lcov.info'
-	check braces "$(writes "$T/report" '$ASSAY_DIR/braces.info')" --coverage '${ASSAY_DIR}/braces.info'
+	copy=$(writes "$T/report" '$ASSAY_DIR/test/lcov.info')
+	check test "$copy" --coverage '$ASSAY_DIR/test/lcov.info'
+	copy=$(writes "$T/report" '$ASSAY_DIR/braces.info')
+	check braces "$copy" --coverage '${ASSAY_DIR}/braces.info'
 	# A path with & in it: bash 5.2 would put the matched text there in a pattern substitution.
 	git worktree add --quiet "$T/w&t" -b topic
 	cd "$T/w&t"
@@ -107,7 +116,7 @@ writes() { echo "mkdir -p \"\$(dirname \"$2\")\" && cp '$1' \"$2\""; }
 	echo "$output"
 	[ "$status" -eq 0 ]
 	dir=$(git rev-parse --absolute-git-dir)/assay
-	[ "$(cat "$T/dir")" = "$dir" ]
+	holds "$T/dir" "$dir"
 	[ -f "$dir/test/lcov.info" ]
 	[[ ${lines[2]} == "ok   test "*"(new code: 1 of 1 lines covered)" ]]
 	[[ ${lines[1]} == "ok   braces "*"(new code: 1 of 1 lines covered)" ]]
@@ -129,7 +138,8 @@ writes() { echo "mkdir -p \"\$(dirname \"$2\")\" && cp '$1' \"$2\""; }
 	lcov "$T/b" staged.sh 1:1
 	lcov "$T/c" untracked.sh 1:0
 	cat "$T/a" "$T/b" "$T/c" >"$T/report"
-	check test "$(writes "$T/report" lcov.info)" --coverage lcov.info
+	copy=$(writes "$T/report" lcov.info)
+	check test "$copy" --coverage lcov.info
 	run --separate-stderr "$assay" check
 	echo "$output"
 	# old.sh's first line, uncovered, is the base's: 2 of the 3 new lines are covered.
@@ -143,7 +153,8 @@ writes() { echo "mkdir -p \"\$(dirname \"$2\")\" && cp '$1' \"$2\""; }
 	printf 'one\n' >lib.sh
 	printf 'x = 1\ny = 2\n' >other.py
 	lcov "$T/report" lib.sh 1:1
-	check test "$(writes "$T/report" lcov.info)" --coverage lcov.info
+	copy=$(writes "$T/report" lcov.info)
+	check test "$copy" --coverage lcov.info
 	run --separate-stderr "$assay" check
 	[ "$status" -eq 0 ]
 	[[ ${lines[1]} == *"(new code: 1 of 1 lines covered)" ]]
@@ -161,7 +172,8 @@ writes() { echo "mkdir -p \"\$(dirname \"$2\")\" && cp '$1' \"$2\""; }
   </classes></package></packages>
 </coverage>
 XML
-	check test "$(writes "$T/report" cobertura.xml)" --coverage cobertura.xml
+	copy=$(writes "$T/report" cobertura.xml)
+	check test "$copy" --coverage cobertura.xml
 	run --separate-stderr "$assay" check
 	echo "$output"
 	[ "$status" -eq 1 ]
@@ -170,7 +182,8 @@ XML
 
 @test "a change with no line the report can cover passes" {
 	local_repo
-	check test "$(writes /dev/null lcov.info)" --coverage lcov.info
+	copy=$(writes /dev/null lcov.info)
+	check test "$copy" --coverage lcov.info
 	run --separate-stderr "$assay" check
 	echo "$output"
 	[ "$status" -eq 0 ]
@@ -181,9 +194,13 @@ XML
 	local_repo
 	printf 'one\n' >lib.sh
 	lcov "$T/report" lib.sh 1:1
-	check test "$(writes "$T/report" lcov.info)" --coverage lcov.info
+	copy=$(writes "$T/report" lcov.info)
+	check test "$copy" --coverage lcov.info
 	mkdir "$T/bin"
-	for t in bash git jq cp mkdir dirname head tail wc rm cat; do ln -s "$(command -v "$t")" "$T/bin/$t"; done
+	for t in bash git jq cp mkdir dirname head tail wc rm cat; do
+		tool=$(command -v "$t")
+		ln -s "$tool" "$T/bin/$t"
+	done
 	PATH=$T/bin run --separate-stderr "$assay" check
 	echo "$output"
 	[ "$status" -eq 1 ]

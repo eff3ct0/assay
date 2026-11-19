@@ -1,6 +1,6 @@
 bats_require_minimum_version 1.5.0
 # shellcheck source=test/helpers.bash
-source "$BATS_TEST_DIRNAME/helpers.bash"
+source "${BATS_TEST_DIRNAME:?}/helpers.bash"
 
 # agents-md: AGENTS.md and CLAUDE.md at the root, CLAUDE.md the single line @AGENTS.md or either file a symlink to
 # the other, and a "Related repos" section in the file that holds the instructions. The same predicate reads the

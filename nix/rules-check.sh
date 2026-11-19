@@ -95,7 +95,7 @@ mkdir "$template"
 		git -C "$template/worktree" push --quiet -u origin agent/example &&
 		git init --quiet "$template/local" &&
 		git -C "$template/local" commit --quiet --allow-empty -m init
-} </dev/null >"$work/err" 2>&1 || fail "cannot build the fixture: $(cat "$work/err")"
+} </dev/null >"$work/err" 2>&1 || fail "cannot build the fixture: $(<"$work/err")"
 
 # fixture: a fresh copy of the fixture, its root in `root`.
 examples=0
@@ -105,12 +105,16 @@ fixture() {
 	cp -a "$template" "$root" || fail "cannot copy the fixture to $root"
 }
 
-# file_entries <files object>: each file as two NUL-terminated records, its path and its content; \x01 for null.
-file_entries() { jq -j 'to_entries[] | "\(.key)\u0000\(.value // "\u0001")\u0000"' <<<"$1"; }
+# file_entries <files object> <file>: each file as two NUL-terminated records written to <file>, its path and its
+# content; \x01 for null.
+file_entries() {
+	jq -j 'to_entries[] | "\(.key)\u0000\(.value // "\u0001")\u0000"' <<<"$1" >"$2" || fail "cannot read the files $1"
+}
 
 # write_files <dir> <files object>: each file under the directory, with its content; null removes it.
 write_files() {
 	local dir=$1 path content
+	file_entries "$2" "$work/files.entries"
 	while IFS= read -r -d '' path && IFS= read -r -d '' content; do
 		if [ "$content" = $'\x01' ]; then
 			rm -f -- "$dir/$path" || fail "cannot remove $dir/$path"
@@ -118,7 +122,7 @@ write_files() {
 			{ mkdir -p -- "$(dirname -- "$dir/$path")" && printf '%s' "$content" >"$dir/$path"; } ||
 				fail "cannot write $dir/$path"
 		fi
-	done < <(file_entries "$2")
+	done <"$work/files.entries"
 }
 
 # tip_with <files object>: a commit on the worktree's HEAD whose tree has the files over HEAD's, null removing one.
@@ -127,6 +131,7 @@ tip_with() {
 	local -x GIT_INDEX_FILE=$work/index
 	rm -f "$GIT_INDEX_FILE"
 	git -C "$root/worktree" read-tree HEAD || return 1
+	file_entries "$1" "$work/tip.entries"
 	while IFS= read -r -d '' path && IFS= read -r -d '' content; do
 		if [ "$content" = $'\x01' ]; then
 			git -C "$root/worktree" update-index --force-remove -- "$path" || return 1
@@ -134,7 +139,7 @@ tip_with() {
 			blob=$(printf '%s' "$content" | git -C "$root/worktree" hash-object -w --stdin) &&
 				git -C "$root/worktree" update-index --add --cacheinfo "100644,$blob,$path" || return 1
 		fi
-	done < <(file_entries "$1")
+	done <"$work/tip.entries"
 	tree=$(git -C "$root/worktree" write-tree) &&
 		git -C "$root/worktree" commit-tree "$tree" -p HEAD -m example
 }
@@ -211,6 +216,8 @@ run_example() {
 	pre-push)
 		{ files=$(jq -c '.files // {}' <<<"$ex") && ref=$(jq -r '.ref // "refs/heads/agent/example"' <<<"$ex"); } ||
 			fail "cannot read the example $ex"
+		# tip_with reports its failure through its status, which this turns into fail.
+		# shellcheck disable=SC2310
 		tip=$(tip_with "$files") || fail "cannot build the pushed tip"
 		hook_says "$root/worktree" pre-push origin "$root/origin.git" <<<"refs/heads/agent/example $tip $ref $zero"
 		;;
@@ -232,6 +239,7 @@ summary() {
 }
 
 count_rules=0 count=0 failed=0
+jq -c '.rules[]' "$rules" >"$work/rules" || fail "cannot read the rules of $rules"
 # The list with the current rule alone, which the entrypoints read.
 one_rule=$work/rule.json
 while IFS= read -r -u 4 rule; do
@@ -246,6 +254,7 @@ while IFS= read -r -u 4 rule; do
 		unset ASSAY_AGENT
 	fi
 	for kind in deny allow; do
+		jq -c --arg k "$kind" '.[$k][]' <<<"$rule" >"$work/examples" || fail "cannot read the $kind examples of $name"
 		n=0
 		# On descriptor 3, which nothing an example runs reads.
 		while IFS= read -r -u 3 ex; do
@@ -253,6 +262,8 @@ while IFS= read -r -u 4 rule; do
 			count=$((count + 1))
 			what=$(summary "$on" "$ex")
 			rc=0
+			# run_example reports its failure through fail or its status, which this keeps.
+			# shellcheck disable=SC2310
 			run_example "$on" "$ex" || rc=$?
 			if [ "$rc" -ne 0 ]; then
 				echo "FAIL $name $kind $n: $what: $answer"
@@ -266,9 +277,9 @@ while IFS= read -r -u 4 rule; do
 			else
 				echo "ok   $name $kind $n: $what"
 			fi
-		done 3< <(jq -c --arg k "$kind" '.[$k][]' <<<"$rule")
+		done 3<"$work/examples"
 	done
-done 4< <(jq -c '.rules[]' "$rules")
+done 4<"$work/rules"
 
 if [ "$failed" -eq 0 ]; then
 	echo "rules check: $count_rules rules, $count examples, all as expected"

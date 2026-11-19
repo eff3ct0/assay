@@ -66,6 +66,15 @@ let
     assay: a loosening needs a reason:
     ${lib.concatMapStringsSep "\n" (l: "  - ${describe l}; set ${l.where}") unreasoned}'';
 
+  # The languages the repo enables in devenv, by the names assay's presets and .assay-preset.json use: `assay preset`
+  # and the `preset` check take the ones that have a preset.
+  languages = lib.attrNames (
+    lib.filterAttrs (_: enabled: enabled) {
+      bash = config.languages.shell.enable or false;
+      nix = config.languages.nix.enable or false;
+    }
+  );
+
   # Check names become log file names.
   badNames = builtins.filter (n: builtins.match "[A-Za-z0-9][A-Za-z0-9._-]*" n == null) (
     lib.attrNames cfg.checks
@@ -93,6 +102,7 @@ let
               ;
           }) cfg.checks;
           coverage = { inherit (cfg.coverage) newCode; };
+          inherit languages;
           loosenings = map (
             l:
             if l.kind == "new-code" then

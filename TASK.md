@@ -33,16 +33,17 @@ The issue links its spec: eff3ct0/nixos-config#58 (its resolution comment) and #
 - Header line: `preset behind: <language> <recorded> → <pinned> (assay preset <language>)`; an unreadable record is
   left to the `preset` check.
 - assay's own repo: a cleanup commit makes its scripts pass the preset's optional shellcheck checks (a file-level
-  `SC2310` suppression with its reason in `assay.sh` and `nix/rules-check.sh`, whose predicates and git wrapper are
-  conditions on purpose; every other finding fixed), then `assay preset bash` is run and committed.
+  `SC2310` suppression with its reason in `assay.sh`, whose predicates and git wrapper are conditions on purpose, two
+  line-level ones in `nix/rules-check.sh`; every other finding fixed), then `assay preset bash` is run and committed.
 
 ## Steps
 
-1. `assay.sh`: presets, `assay preset`, `assay builtin preset`, the header line, usage. (pending)
-2. Module: `languages` in the configuration; `preset` built-in check; package sets `assay_presets`. (pending)
-3. `preset/bash/1/.shellcheckrc`, `preset/README.md`. (pending)
+1. `assay.sh`: presets, `assay preset`, `assay builtin preset`, the header line, usage. (done)
+2. Module: `languages` in the configuration; `preset` built-in check; package sets `assay_presets`. (done)
+3. `preset/bash/1/.shellcheckrc`, `preset/README.md`. (done)
 4. Tests: `test/preset.bats`, built-in lists and `test/defaults/*.json`, `nix/checks.nix`, the bash fixture in
-   `test/devenv/defaults.bats` built with `assay preset bash`. (pending)
-5. Docs: README, `docs/adoption.md`, AGENTS.md. (pending)
-6. Cleanup of the optional checks' findings; `assay preset bash` on assay itself. (pending)
-7. `devenv test`, `bats test/devenv`, `nix flake check`; critic; pull request. (pending)
+   `test/devenv/defaults.bats` built with `assay preset bash`, a real-devenv test in `test/devenv/module.bats`. (done)
+5. Docs: README, `preset/README.md`, `docs/adoption.md`, AGENTS.md. (done)
+6. Cleanup of the optional checks' findings in every shell file (the `.bats` files of `test/` by three subagents,
+   one set of files each); `assay preset bash` on assay itself. (in progress)
+7. `devenv test`, `bats test/devenv`, `nix flake check`; commits; critic; pull request. (pending)

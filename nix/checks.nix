@@ -147,6 +147,10 @@ let
   );
   nixRepo = withLanguages { languages.nix.enable = true; };
   shellRepo = withLanguages { languages.shell.enable = true; };
+  bothLanguages = withLanguages {
+    languages.nix.enable = true;
+    languages.shell.enable = true;
+  };
   # Each check's name with what `assay check --list` shows of it: fast or not, and what it requires and covers.
   listed =
     config:
@@ -295,6 +299,15 @@ let
         "assay"
         "hello"
       ];
+    "the preset check is built in, fast, and runs assay builtin preset" =
+      builtinPlain.assay.checks.preset == {
+        exec = "assay builtin preset";
+        fast = true;
+        enable = true;
+        requires = null;
+        coverage = null;
+        reason = null;
+      };
     "the built-in checks' tools join every repo's devenv, beside the CLI" =
       map lib.getName builtinPlain.packages == [
         "assay"
@@ -508,7 +521,7 @@ in
         chmod -R u+w src
         cd src
         patchShebangs assay.sh test/stub devenv/bin
-        shellcheck assay.sh nix/rules-check.sh test/helpers.bash test/devenv/helpers.bash test/stub/devenv devenv/bin/*
+        shellcheck assay.sh nix/rules-check.sh test/assert.bash test/helpers.bash test/devenv/helpers.bash test/stub/devenv devenv/bin/*
         bats test
         touch $out
       '';
@@ -525,8 +538,12 @@ in
           checks: {
             demo: {exec: "true", fast: true, enable: true, requires: null, coverage: null},
             tested: {exec: "run-tests", fast: false, enable: true, requires: null, coverage: "$ASSAY_DIR/t.xml"}},
-          coverage: {newCode: 80}, loosenings: []}' \
+          coverage: {newCode: 80}, loosenings: [], languages: []}' \
           ${plain.env.ASSAY_CONFIG}
+        # The languages the repo enables, by the names of assay's presets.
+        jq -e '.languages == ["bash"]' ${shellRepo.env.ASSAY_CONFIG}
+        jq -e '.languages == ["nix"]' ${nixRepo.env.ASSAY_CONFIG}
+        jq -e '.languages == ["bash", "nix"]' ${bothLanguages.env.ASSAY_CONFIG}
         jq -e '.checks.demo.enable == false and .loosenings == [{check: "demo", kind: "off", reason: "off for the test"}]' \
           ${off.env.ASSAY_CONFIG}
         jq -e '.checks.demo.exec == "echo mine" and .loosenings == [{check: "demo", kind: "exec", reason: "mine for the test"}]' \

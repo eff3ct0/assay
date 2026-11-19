@@ -1,11 +1,14 @@
 # Shared setup: a throwaway HOME and git config, a configuration written by hand, and repos in a temp directory.
 
+# shellcheck source=test/assert.bash
+source "${BATS_TEST_DIRNAME:?}/assert.bash"
+
 setup() {
-	T=$BATS_TEST_TMPDIR
+	T=${BATS_TEST_TMPDIR:?}
 	export HOME=$T/home GIT_CONFIG_GLOBAL=$T/gitconfig GIT_CONFIG_NOSYSTEM=1
 	mkdir -p "$HOME"
 	# ASSAY_HITS_LOG and ASSAY_AGENT too: the suite, run on a machine that sets them, writes nothing to its log.
-	unset ASSAY_CONFIG ASSAY_BASE GITHUB_EVENT_PATH assay_tools ASSAY_HITS_LOG ASSAY_AGENT DEVENV_STUB_FAIL
+	unset ASSAY_CONFIG ASSAY_BASE GITHUB_EVENT_PATH assay_tools assay_presets ASSAY_HITS_LOG ASSAY_AGENT DEVENV_STUB_FAIL
 	git config --global user.name Test
 	git config --global user.email test@example.com
 	git config --global init.defaultBranch main
@@ -15,7 +18,7 @@ setup() {
 	git config --global gc.auto 0
 	git config --global maintenance.auto false
 	# shellcheck disable=SC2034 # used by the .bats files
-	assay=$BATS_TEST_DIRNAME/../assay.sh
+	assay=${BATS_TEST_DIRNAME:?}/../assay.sh
 	# devenv is the stub in test/stub/; the devenv it stands in for puts this checkout's assay on the PATH.
 	export PATH=$BATS_TEST_DIRNAME/stub:$PATH DEVENV_STUB_CALLS=$T/devenv.calls DEVENV_STUB_PROFILE=$T/profile
 	mkdir -p "$DEVENV_STUB_PROFILE"
@@ -71,6 +74,12 @@ check() {
 	jq --arg n "$name" --arg e "$exec" --argjson f "$fast" --argjson on "$enable" --argjson r "$requires" \
 		--argjson c "$coverage" '.checks[$n] = {exec: $e, fast: $f, enable: $on, requires: $r, coverage: $c}' \
 		"$ASSAY_CONFIG" >"$ASSAY_CONFIG.new"
+	mv "$ASSAY_CONFIG.new" "$ASSAY_CONFIG"
+}
+
+# languages <language>...: the languages the configuration says the repo's devenv enables, by assay's names.
+languages() {
+	jq --args '.languages = $ARGS.positional' "$@" <"$ASSAY_CONFIG" >"$ASSAY_CONFIG.new"
 	mv "$ASSAY_CONFIG.new" "$ASSAY_CONFIG"
 }
 

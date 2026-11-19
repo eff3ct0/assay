@@ -1,6 +1,6 @@
 bats_require_minimum_version 1.5.0
 # shellcheck source=test/helpers.bash
-source "$BATS_TEST_DIRNAME/helpers.bash"
+source "${BATS_TEST_DIRNAME:?}/helpers.bash"
 
 # commit-trailers: no commit in base..HEAD carries a Co-Authored-By trailer, matched case-insensitively.
 
@@ -20,12 +20,15 @@ commit() {
 	commit "three" "Body." "Signed-off-by: T <t@example.com>" "  CO-AUTHORED-BY : B <b@example.com>"
 	run --separate-stderr "$assay" builtin commit-trailers --base "$base"
 	[ "$status" -eq 1 ]
-	expected="Co-Authored-By trailers in $(short "$base")..HEAD:
-  $(short HEAD) three
+	from=$(short "$base")
+	three=$(short HEAD)
+	one=$(short HEAD~2)
+	expected="Co-Authored-By trailers in $from..HEAD:
+  $three three
       CO-AUTHORED-BY : B <b@example.com>
-  $(short HEAD~2) one
+  $one one
       co-authored-by: A <a@example.com>
-A commit names no co-author: reword each of these without its trailer (git rebase -i $(short "$base")), and push with --force-with-lease where they were pushed."
+A commit names no co-author: reword each of these without its trailer (git rebase -i $from), and push with --force-with-lease where they were pushed."
 	diff <(echo "$expected") <(echo "$output")
 }
 
@@ -57,7 +60,8 @@ A commit names no co-author: reword each of these without its trailer (git rebas
 	git merge --quiet --no-ff side -m "merge side" -m "Co-authored-by: A <a@example.com>"
 	run --separate-stderr "$assay" builtin commit-trailers --base "$base"
 	[ "$status" -eq 1 ]
-	[[ $output == *"$(short HEAD) merge side"* ]]
+	merge=$(short HEAD)
+	[[ $output == *"$merge merge side"* ]]
 }
 
 @test "the base comes from ASSAY_BASE, as assay check exports it" {
@@ -66,7 +70,8 @@ A commit names no co-author: reword each of these without its trailer (git rebas
 	check commit-trailers "\"$assay\" builtin commit-trailers"
 	run "$assay" check
 	[ "$status" -eq 1 ]
-	[[ $output == *"Co-Authored-By trailers in $(short origin/main)..HEAD:"* ]]
+	from=$(short origin/main)
+	[[ $output == *"Co-Authored-By trailers in $from..HEAD:"* ]]
 	run "$assay" check --base HEAD
 	[ "$status" -eq 0 ]
 }

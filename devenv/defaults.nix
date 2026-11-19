@@ -69,6 +69,11 @@ in
     fast = true;
     packages = [ pkgs.oxfmt ];
   };
+  # Each enabled language whose preset applies is in .assay-preset.json; the fix is the command it prints.
+  preset = {
+    exec = "assay builtin preset";
+    fast = true;
+  };
   suppressions = {
     exec = "assay builtin suppressions";
     fast = true;

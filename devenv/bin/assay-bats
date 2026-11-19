@@ -19,22 +19,25 @@ rm -rf "$out"
 mkdir -p "$out/empty" "$out/runner"
 
 tests=()
+git ls-files -z --cached --deduplicate -- ':(top,glob)**/*.bats' >"$out/runner/tests"
 while IFS= read -r -d '' f; do
 	if [ -f "$f" ]; then tests+=("$f"); fi
-done < <(git ls-files -z --cached --deduplicate -- ':(top,glob)**/*.bats')
+done <"$out/runner/tests"
 
 # kcov keeps the files under --include-path (a comma-separated list), and lists the ones nobody runs only when it
 # parses them while walking --bash-parse-files-in-dir: the top-level directories that hold the scripts, or the root
 # when one sits there. With no script, the include path is a directory that holds none.
 include=()
 declare -A dirs=()
+"$here/assay-files" >"$out/runner/files"
+xargs -0 -r shfmt -f <"$out/runner/files" >"$out/runner/shell-files"
 while IFS= read -r f; do
 	if [[ $f == *.bats ]]; then continue; fi
 	include+=("$root/$f")
 	dir=$root
 	if [[ $f == */* ]]; then dir=$root/${f%%/*}; fi
 	dirs[$dir]=1
-done < <("$here/assay-files" | xargs -0 -r shfmt -f)
+done <"$out/runner/shell-files"
 if [ -n "${dirs[$root]:-}" ]; then dirs=([$root]=1); fi
 : >"$out/runner/scripts"
 if [ ${#include[@]} -gt 0 ]; then printf '%s\n' "${include[@]}" >"$out/runner/scripts"; fi
@@ -44,24 +47,27 @@ if [ ${#include[@]} -eq 0 ]; then include=("$out/empty/none"); fi
 # kcov does not take for one (no .sh, and no "sh" in its first 80 bytes, as a sourced .bash library), so the runner
 # first names every script to kcov the way bash's trace does, at line 0, which no script has: kcov then lists it with
 # its lines unrun until a test runs them. Then it runs bats, or, with no .bats file, reports no test.
+bash=$(command -v bash)
 # shellcheck disable=SC2016 # the runner's own $f, $KCOV_BASH_XTRACEFD and $@
 {
-	printf '#!%s\n' "$(command -v bash)"
+	printf '#!%s\n' "$bash"
 	printf 'while IFS= read -r f; do printf "kcov@%%s@0@\\n" "$f" >&"$KCOV_BASH_XTRACEFD"; done <%q\n' \
 		"$out/runner/scripts"
 	if [ ${#tests[@]} -eq 0 ]; then echo 'echo 1..0'; else echo 'exec bats "$@"'; fi
 } >"$out/runner/bats"
 chmod +x "$out/runner/bats"
 
-args=(--bash-parser="$(command -v bash)" --include-path="$(
+include_path=$(
 	IFS=,
 	echo "${include[*]}"
-)")
+)
+args=(--bash-parser="$bash" --include-path="$include_path")
 if [ ${#dirs[@]} -gt 0 ]; then
-	args+=(--bash-parse-files-in-dir="$(
+	parse_dirs=$(
 		IFS=,
 		echo "${!dirs[*]}"
-	)")
+	)
+	args+=(--bash-parse-files-in-dir="$parse_dirs")
 fi
 rc=0
 kcov "${args[@]}" "$out" "$out/runner/bats" "${tests[@]}" 2>"$out/kcov.stderr" || rc=$?

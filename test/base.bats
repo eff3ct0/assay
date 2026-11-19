@@ -1,6 +1,6 @@
 # shellcheck disable=SC2030,SC2031 # bats runs each test in a process of its own: what one test sets, no other reads
 # shellcheck source=test/helpers.bash
-source "$BATS_TEST_DIRNAME/helpers.bash"
+source "${BATS_TEST_DIRNAME:?}/helpers.bash"
 
 # The base of the change, as the header shows it: "<label>@<short sha> (<source>)" or "<short sha> (<source>)".
 base_of_run() {
@@ -17,46 +17,58 @@ event() {
 
 @test "--base comes first" {
 	upstream
-	event pr.json "{\"pull_request\": {\"base\": {\"sha\": \"$(sha HEAD)\"}}}"
+	head=$(sha HEAD)
+	event pr.json "{\"pull_request\": {\"base\": {\"sha\": \"$head\"}}}"
 	export ASSAY_BASE=HEAD
 	base_of_run --base HEAD~1
-	[ "$base" = "HEAD~1@$(short HEAD~1) (--base)" ]
+	parent_short=$(short HEAD~1)
+	[ "$base" = "HEAD~1@$parent_short (--base)" ]
 }
 
 @test "ASSAY_BASE comes before GitHub's event" {
 	upstream
-	event pr.json "{\"pull_request\": {\"base\": {\"sha\": \"$(sha HEAD)\"}}}"
+	head=$(sha HEAD)
+	event pr.json "{\"pull_request\": {\"base\": {\"sha\": \"$head\"}}}"
 	export ASSAY_BASE=HEAD~1
 	base_of_run
-	[ "$base" = "HEAD~1@$(short HEAD~1) (ASSAY_BASE)" ]
+	parent_short=$(short HEAD~1)
+	[ "$base" = "HEAD~1@$parent_short (ASSAY_BASE)" ]
 }
 
 @test "on a pull request, the base is pull_request.base.sha" {
 	upstream
-	event pr.json "{\"before\": \"$(sha HEAD)\", \"pull_request\": {\"base\": {\"sha\": \"$(sha HEAD~1)\"}}}"
+	head=$(sha HEAD)
+	parent=$(sha HEAD~1)
+	event pr.json "{\"before\": \"$head\", \"pull_request\": {\"base\": {\"sha\": \"$parent\"}}}"
 	base_of_run
-	[ "$base" = "$(short HEAD~1) (pull_request event)" ]
+	parent_short=$(short HEAD~1)
+	[ "$base" = "$parent_short (pull_request event)" ]
 }
 
 @test "on a push, the base is before" {
 	upstream
-	event push.json "{\"before\": \"$(sha HEAD~1)\", \"after\": \"$(sha HEAD)\"}"
+	parent=$(sha HEAD~1)
+	head=$(sha HEAD)
+	event push.json "{\"before\": \"$parent\", \"after\": \"$head\"}"
 	base_of_run
-	[ "$base" = "$(short HEAD~1) (push event)" ]
+	parent_short=$(short HEAD~1)
+	[ "$base" = "$parent_short (push event)" ]
 }
 
 @test "a push that created the branch (before all zeros) falls through to fork-point" {
 	upstream
 	event push.json '{"before": "0000000000000000000000000000000000000000"}'
 	base_of_run
-	[ "$base" = "origin/main@$(short origin/main) (fork-point)" ]
+	main_short=$(short origin/main)
+	[ "$base" = "origin/main@$main_short (fork-point)" ]
 }
 
 @test "an event with no base falls through to fork-point" {
 	upstream
 	event dispatch.json '{"inputs": {}}'
 	base_of_run
-	[ "$base" = "origin/main@$(short origin/main) (fork-point)" ]
+	main_short=$(short origin/main)
+	[ "$base" = "origin/main@$main_short (fork-point)" ]
 }
 
 @test "an unreadable GitHub event exits 2" {
@@ -82,10 +94,13 @@ event() {
 	git fetch --quiet origin
 	check change "git diff --name-only \"\$ASSAY_BASE\" >$T/change"
 	base_of_run
-	[ "$base" = "origin/main@$(short "$cut") (fork-point)" ]
-	[ "$(cat "$T/change")" = topic.txt ]
+	cut_short=$(short "$cut")
+	[ "$base" = "origin/main@$cut_short (fork-point)" ]
+	holds "$T/change" topic.txt
 	# The plain merge base would have put the dropped commit's file into the change.
-	[ "$(git diff --name-only "$(git merge-base origin/main HEAD)")" = "$(printf 'b.txt\ntopic.txt')" ]
+	merge_base=$(git merge-base origin/main HEAD)
+	changed=$(git diff --name-only "$merge_base")
+	[ "$changed" = "$(printf 'b.txt\ntopic.txt')" ]
 }
 
 @test "merge-base: when fork-point finds nothing, the plain merge base" {
@@ -94,15 +109,19 @@ event() {
 	commit_file . topic.txt
 	# origin/main's reflog only knows its tip, which is not an ancestor of HEAD: fork-point finds nothing.
 	base_of_run
-	[ "$base" = "origin/main@$(short HEAD~1) (merge-base)" ]
+	parent_short=$(short HEAD~1)
+	[ "$base" = "origin/main@$parent_short (merge-base)" ]
 }
 
 @test "on the default branch, the base is the remote's tip: unpushed commits are the change" {
 	upstream
 	commit_file . unpushed.txt
 	base_of_run
-	[ "$base" = "origin/main@$(short origin/main) (fork-point)" ]
-	[ "$(sha origin/main)" = "$(sha HEAD~1)" ]
+	main_short=$(short origin/main)
+	[ "$base" = "origin/main@$main_short (fork-point)" ]
+	main=$(sha origin/main)
+	parent=$(sha HEAD~1)
+	[ "$main" = "$parent" ]
 }
 
 @test "the default branch is origin/HEAD's target first" {
@@ -112,19 +131,22 @@ event() {
 	git fetch --quiet origin
 	git remote set-head origin develop
 	base_of_run
-	[ "$base" = "origin/develop@$(short origin/develop) (fork-point)" ]
+	develop_short=$(short origin/develop)
+	[ "$base" = "origin/develop@$develop_short (fork-point)" ]
 }
 
 @test "without origin/HEAD the default branch is origin/main, then origin/master" {
 	upstream
 	git remote set-head origin --delete
 	base_of_run
-	[ "$base" = "origin/main@$(short origin/main) (fork-point)" ]
+	main_short=$(short origin/main)
+	[ "$base" = "origin/main@$main_short (fork-point)" ]
 	git -C "$T/up" push --quiet origin main:master
 	git fetch --quiet origin
 	git update-ref -d refs/remotes/origin/main
 	base_of_run
-	[ "$base" = "origin/master@$(short origin/master) (fork-point)" ]
+	master_short=$(short origin/master)
+	[ "$base" = "origin/master@$master_short (fork-point)" ]
 }
 
 @test "without a remote the default branch is local main, then master" {
@@ -132,10 +154,12 @@ event() {
 	git switch --quiet -c topic
 	commit_file . topic.txt
 	base_of_run
-	[ "$base" = "main@$(short main) (fork-point)" ]
+	main_short=$(short main)
+	[ "$base" = "main@$main_short (fork-point)" ]
 	git branch --quiet -m main master
 	base_of_run
-	[ "$base" = "master@$(short master) (fork-point)" ]
+	master_short=$(short master)
+	[ "$base" = "master@$master_short (fork-point)" ]
 }
 
 @test "with no default branch assay exits 2, asking for --base" {
@@ -172,7 +196,8 @@ event() {
 	run "$assay" check
 	[ "$status" -eq 2 ]
 	[[ $output == *"(from pull_request event)"* ]]
-	[ "$(git rev-parse --is-shallow-repository)" = true ]
+	shallow=$(git rev-parse --is-shallow-repository)
+	[ "$shallow" = true ]
 	run git cat-file -e "$old^{commit}"
 	[ "$status" -ne 0 ]
 }
@@ -183,6 +208,8 @@ event() {
 	commit_file "$T/up" new.txt
 	git -C "$T/up" push --quiet origin main
 	base_of_run
-	[ "$(sha origin/main)" = "$before" ]
-	[ "$base" = "origin/main@$(short "$before") (fork-point)" ]
+	main=$(sha origin/main)
+	[ "$main" = "$before" ]
+	before_short=$(short "$before")
+	[ "$base" = "origin/main@$before_short (fork-point)" ]
 }

@@ -1,6 +1,6 @@
 bats_require_minimum_version 1.5.0
 # shellcheck source=test/devenv/helpers.bash
-source "$BATS_TEST_DIRNAME/helpers.bash"
+source "${BATS_TEST_DIRNAME:?}/helpers.bash"
 
 @test "devenv test runs every check; git commit runs only the fast ones, through the assay hook" {
 	consumer "$ASSAY_BARE"
@@ -12,17 +12,20 @@ source "$BATS_TEST_DIRNAME/helpers.bash"
 	echo "$output"
 	[ "$status" -eq 0 ]
 	# The hook (assay check --fast) runs over all files first, then enterTest (assay check), in name order.
-	[ "$(cat "$T/ran")" = "$(printf 'quick\nfull\nquick')" ]
-	[ "$(hook entry)" = '"devenv shell -- assay check --fast"' ]
-	[ "$(hook pass_filenames)" = false ]
-	[ "$(hook always_run)" = true ]
+	holds "$T/ran" quick full quick
+	entry=$(hook entry)
+	[ "$entry" = '"devenv shell -- assay check --fast"' ]
+	pass_filenames=$(hook pass_filenames)
+	[ "$pass_filenames" = false ]
+	always_run=$(hook always_run)
+	[ "$always_run" = true ]
 	rm "$T/ran"
 	git add devenv.nix
 	run git commit -m checks
 	echo "$output"
 	[ "$status" -eq 0 ]
 	[[ $output == *"assay check --fast"*Passed* ]]
-	[ "$(cat "$T/ran")" = quick ]
+	holds "$T/ran" quick
 }
 
 @test "a failing check fails devenv test; a failing fast check also fails git commit" {
@@ -47,7 +50,8 @@ source "$BATS_TEST_DIRNAME/helpers.bash"
 	echo "$output"
 	[ "$status" -ne 0 ]
 	[[ $output == *"FAIL quick"*"(exit 4)"* ]]
-	[ "$(git log -1 --format=%s)" = "full fails" ]
+	subject=$(git log -1 --format=%s)
+	[ "$subject" = "full fails" ]
 	run devenv test
 	[ "$status" -ne 0 ]
 }
@@ -60,19 +64,21 @@ source "$BATS_TEST_DIRNAME/helpers.bash"
     assay.checks.test.exec = "echo seed=$ASSAY_SEED; exit 1";
     assay.checks.cargo = { exec = "cargo test"; requires = "Cargo.toml"; };
   }'
+	head=$(git rev-parse --short HEAD)
+	gitdir=$(git rev-parse --absolute-git-dir)
 	run --separate-stderr devenv shell -- assay check
 	echo "$output"
 	[ "$status" -eq 1 ]
-	[ "${lines[0]}" = "assay check · base main@$(git rev-parse --short HEAD) (fork-point)" ]
+	[ "${lines[0]}" = "assay check · base main@$head (fork-point)" ]
 	[ "${lines[1]}" = "  skipped: cargo (no Cargo.toml)" ]
 	[ "${lines[2]}" = "skip cargo (no Cargo.toml)" ]
 	[[ ${lines[3]} =~ ^ok\ \ \ lint\ [0-9.]+s$ ]]
 	[[ ${lines[4]} =~ ^FAIL\ test\ [0-9.]+s\ \(exit\ 1\)$ ]]
-	[[ $output == *$'\nseed=42\nlog: '"$(git rev-parse --absolute-git-dir)/assay/test.log"$'\n'* ]]
+	[[ $output == *$'\nseed=42\nlog: '"$gitdir/assay/test.log"$'\n'* ]]
 	[[ ${lines[-1]} == "1 of 3 checks failed in "*"; rerun: assay check test" ]]
 	run --separate-stderr devenv shell -- assay check --fast
 	[ "$status" -eq 0 ]
-	[ "${lines[0]}" = "assay check --fast · base main@$(git rev-parse --short HEAD) (fork-point)" ]
+	[ "${lines[0]}" = "assay check --fast · base main@$head (fork-point)" ]
 	run --separate-stderr devenv shell -- assay check --list
 	[ "$output" = "$(printf 'cargo\nlint (fast)\ntest')" ]
 	run --separate-stderr devenv shell -- assay check nope
@@ -124,8 +130,10 @@ source "$BATS_TEST_DIRNAME/helpers.bash"
 	devenv_nix '{ git-hooks.hooks.assay.always_run = false; }'
 	run devenv shell -- true
 	[ "$status" -eq 0 ]
-	[ "$(hook always_run)" = false ]
-	[ "$(hook entry)" = '"devenv shell -- assay check --fast"' ]
+	always_run=$(hook always_run)
+	[ "$always_run" = false ]
+	entry=$(hook entry)
+	[ "$entry" = '"devenv shell -- assay check --fast"' ]
 }
 
 @test "outside the devenv, plain assay check re-executes itself through devenv shell" {
@@ -171,8 +179,8 @@ source "$BATS_TEST_DIRNAME/helpers.bash"
 	echo "$stderr"
 	[ "$status" -eq 0 ]
 	[ "$output" = "$(printf '%s\n' 'actionlint (fast)' 'agents-md (fast)' bats 'commit-trailers (fast)' 'deadnix (fast)' \
-		'gitleaks (fast)' nix-flake-check 'nixf-tidy (fast)' 'nixfmt (fast)' 'oxfmt (fast)' 'shellcheck (fast)' \
-		'shfmt (fast)' 'statix (fast)' 'suppressions (fast)')" ]
+		'gitleaks (fast)' nix-flake-check 'nixf-tidy (fast)' 'nixfmt (fast)' 'oxfmt (fast)' 'preset (fast)' \
+		'shellcheck (fast)' 'shfmt (fast)' 'statix (fast)' 'suppressions (fast)')" ]
 	run git commit --allow-empty -m "an empty commit"
 	echo "$output"
 	[ "$status" -eq 0 ]
@@ -184,7 +192,7 @@ source "$BATS_TEST_DIRNAME/helpers.bash"
 	shape
 	run --separate-stderr devenv shell -- assay check --list
 	echo "$stderr"
-	[ "$output" = "$(printf '%s (fast)\n' actionlint agents-md commit-trailers gitleaks oxfmt suppressions)" ]
+	[ "$output" = "$(printf '%s (fast)\n' actionlint agents-md commit-trailers gitleaks oxfmt preset suppressions)" ]
 	run --separate-stderr devenv shell -- bash -c 'command -v oxfmt gitleaks actionlint'
 	[ "$status" -eq 0 ]
 	run devenv test
@@ -216,4 +224,26 @@ source "$BATS_TEST_DIRNAME/helpers.bash"
 	[ "$status" -eq 1 ]
 	[[ $output == *" 'frontend/**/*.{js,"* ]]
 	[[ $output == *"frontend/x.json"* && $output != *"backend/x.json"* ]]
+}
+
+@test "a repo that enables bash and has a shell script fails the preset check until assay preset writes the preset" {
+	consumer
+	devenv_nix '{ languages.shell.enable = true; }'
+	printf '%s\n' '#!/usr/bin/env bash' 'echo "hello"' >build.sh
+	git add -A
+	git commit --quiet -m script
+	run --separate-stderr devenv shell -- assay check preset
+	echo "$output"
+	[ "$status" -eq 1 ]
+	[[ $output == *"bash's preset applies (git sees the shell script build.sh), and .assay-preset.json does not list bash"* ]]
+	[[ $output == *$'\nrun: assay preset bash\n'* ]]
+	# From outside the devenv, through it.
+	run --separate-stderr "$ASSAY/assay.sh" preset
+	echo "$output"
+	[ "$status" -eq 0 ]
+	output_is 'wrote .shellcheckrc' 'wrote .assay-preset.json'
+	diff "$ASSAY/preset/bash/1/.shellcheckrc" .shellcheckrc
+	run --separate-stderr devenv shell -- assay check preset
+	echo "$output"
+	[ "$status" -eq 0 ]
 }

@@ -2,6 +2,9 @@
 # assay: a repo's named checks, declared in its devenv through assay's devenv module (devenv/) and run the same way
 # from pre-commit, `devenv test` and an agent's `devenv shell`. The module hands the checks over as one JSON file
 # whose path is ASSAY_CONFIG.
+# A function called as a condition (the git wrapper below, and each predicate) runs without set -e: every one of them
+# reports its own failure, through die or its status, and none relies on set -e.
+# shellcheck disable=SC2310
 set -euo pipefail
 
 # The package sets assay_tools (git, jq, gawk, coreutils, ast-grep) on the line before this script. assay's own
@@ -19,21 +22,25 @@ usage_text() {
 	cat <<'EOF'
 usage: assay check [--fast] [--base <rev>] [<check>...]    run the repo's checks
        assay check --list                                  list them, fast ones marked
+       assay preset [<language>...]                        write the languages' presets into the repo, or merge
+                                                           newer versions in
        assay builtin agents-md [<commit>]                  one of the built-in checks that are assay's own code
        assay builtin commit-trailers [--base <rev>]
        assay builtin gitleaks
+       assay builtin preset
        assay builtin suppressions [--base <rev>]
        assay new-code [--base <rev>]                       the change's new code, as JSON
        assay guard --rules <file>                          the agent guard: one hook event on stdin
        assay git-hook --rules <file> <hook> [<git's arguments>]
                                                            a global git hook: commit-msg or pre-push
 
-Outside the repo's devenv (ASSAY_CONFIG unset), check, builtin and new-code run themselves inside it,
+Outside the repo's devenv (ASSAY_CONFIG unset), check, preset, builtin and new-code run themselves inside it,
 from the repo root: devenv shell -- assay <command>, so the version the repo pins decides. guard and
 git-hook run where they are called, over the rule list given with --rules.
 The base of the change: --base, else ASSAY_BASE, else GitHub's event (GITHUB_EVENT_PATH), else the
 fork point of HEAD from the default branch, else their merge base. assay never fetches.
 Exit codes: 0 every selected check passed, 1 at least one failed, 2 assay could not run;
+assay preset exits 1 on a conflict or on a kept file that differs from the preset;
 assay builtin exits 127 when the tool its check runs is missing. assay guard exits 0 with its
 answer on stdout, and 1 on its own error, which lets the call through; assay git-hook exits 1 when
 a rule is violated or cannot be evaluated.
@@ -167,6 +174,9 @@ def validate:
     and ((.coverage | type) != "object" or (.coverage.newCode | percent | not))
   then fail("coverage.newCode must be an integer from 0 to 100")
   elif (.loosenings | type) != "array" then fail("loosenings must be an array")
+  elif .languages != null and ((.languages | type) != "array"
+    or any(.languages[]; if type == "string" then test($name_re) | not else true end))
+  then fail("languages must be an array of names")
   else
     . as $c
     | reduce ($c.checks | keys[]) as $n (null;
@@ -186,6 +196,7 @@ def validate:
       "c_requires[\($n | @sh)]=\($c.requires // "" | @sh)",
       "c_coverage[\($n | @sh)]=\($c.coverage // "" | @sh)"),
   "new_code=\(.coverage.newCode // "")",
+  (.languages // [] | .[] | "c_languages+=(\(@sh))"),
   (.loosenings[]
     | "loose_check+=(\(.check // "" | @sh)) loose_kind+=(\(.kind | @sh)) loose_reason+=(\(.reason | @sh))",
       "loose_value+=(\(if .kind == "new-code" then "\(.newCode) \(.default)" else "" end | @sh))"),
@@ -201,6 +212,8 @@ loose_kind=()
 loose_reason=()
 # A new-code loosening's threshold and assay's default, "<newCode> <default>"; empty for the others.
 loose_value=()
+# The languages the repo's devenv enables, by the names assay's presets use (bash, nix).
+c_languages=()
 config_loaded=0
 
 # Only ever called with ASSAY_CONFIG set: without it, main delegates.
@@ -359,13 +372,14 @@ requires_met() {
 # without git's limit on their number), so that the same tree and base give the same diff anywhere. A path is
 # quoted, C-style, only when it holds a control character, `"` or `\`.
 change_diff() {
-	local index untracked objects store
+	local index untracked objects store index_path
 	tmp_file index
 	tmp_file untracked
 	# Intent-to-add writes the empty blob: objects git writes go to a throwaway store, the repo's own an alternate.
 	tmp_file objects -d
 	store=$(git rev-parse --path-format=absolute --git-path objects) || die "cannot find the object store"
-	cp -- "$(git rev-parse --git-path index)" "$index" 2>/dev/null || rm -f -- "$index"
+	index_path=$(git rev-parse --git-path index) || die "cannot find the index"
+	cp -- "$index_path" "$index" 2>/dev/null || rm -f -- "$index"
 	git ls-files -z --others --exclude-standard >"$untracked" || die "cannot list the untracked files"
 	if [ -s "$untracked" ]; then
 		GIT_INDEX_FILE=$index GIT_OBJECT_DIRECTORY=$objects GIT_ALTERNATE_OBJECT_DIRECTORIES=$store \
@@ -550,7 +564,7 @@ builtin_agents_md() {
 # commit-trailers: no commit in base..HEAD carries a Co-Authored-By trailer, matched case-insensitively on any line
 # of its message, as GitHub reads one.
 builtin_commit_trailers() {
-	local re='^[[:space:]]*co-authored-by[[:space:]]*:' list commit subject line base_short
+	local re='^[[:space:]]*co-authored-by[[:space:]]*:' list commit subject line base_short message
 	parse_base_option commit-trailers "$@"
 	find_repo
 	resolve_base
@@ -561,9 +575,10 @@ builtin_commit_trailers() {
 	echo "Co-Authored-By trailers in $base_short..HEAD:"
 	while IFS=' ' read -r commit subject; do
 		echo "  $subject"
+		message=$(git log -1 --no-show-signature --format=%B "$commit") || die "cannot read the commit $commit"
 		while IFS= read -r line; do
 			if [[ ${line,,} =~ $re ]]; then echo "      ${line#"${line%%[![:space:]]*}"}"; fi
-		done < <(git log -1 --no-show-signature --format=%B "$commit")
+		done <<<"$message"
 	done <<<"$list"
 	echo "A commit names no co-author: reword each of these without its trailer (git rebase -i $base_short)," \
 		"and push with --force-with-lease where they were pushed."
@@ -942,7 +957,7 @@ END {
 '
 
 builtin_suppressions() {
-	local diff removed ranges path first last n=0 rc=0
+	local diff removed ranges records path first last n=0 rc=0
 	local -a files=()
 	local -A position=()
 	parse_base_option suppressions "$@"
@@ -951,7 +966,9 @@ builtin_suppressions() {
 	tmp_file diff
 	tmp_file removed
 	tmp_file ranges
+	tmp_file records
 	change_diff "$base_sha" >"$diff"
+	new_code "$diff" "$removed" >"$records" || die "cannot read the change's new code"
 	while IFS= read -r -d '' path && IFS= read -r -d '' first && IFS= read -r -d '' last; do
 		if [ -z "${position[$path]+set}" ]; then
 			if [ -L "$path" ] || [ ! -f "$path" ]; then continue; fi
@@ -960,13 +977,342 @@ builtin_suppressions() {
 			files+=("./$path")
 		fi
 		printf '%s\t%s\t%s\n' "${position[$path]}" "$first" "$last"
-	done < <(new_code "$diff" "$removed") >"$ranges"
+	done <"$records" >"$ranges"
 	[ "$n" -gt 0 ] || finish 0
 	LC_ALL=C awk "$suppressions_awk" "$removed" "$ranges" "${files[@]}" || rc=$?
 	case $rc in
 	0 | 1) finish "$rc" ;;
 	*) die "cannot read the files that hold new code (awk exit $rc)" ;;
 	esac
+}
+
+# Presets: the configuration files a language's default checks need in a repo. assay holds every version of each
+# language's preset, under preset/<language>/<version>/ (the files at the paths they take in the repo); its highest
+# version is the one the repo pins. `assay preset` writes it into the repo, which owns the files from then on, and
+# records the version it took in .assay-preset.json at the root: {"<language>": <version>}.
+record_file=.assay-preset.json
+
+# find_presets: sets presets to the directory that holds assay's presets. The package sets assay_presets on the line
+# before this script; run from a checkout, it is preset/ beside the script.
+presets=
+find_presets() {
+	local self
+	if [ -n "${assay_presets:-}" ]; then
+		presets=$assay_presets
+	else
+		self=$(realpath -- "${BASH_SOURCE[0]}") || die "cannot find where assay's script is"
+		presets=${self%/*}/preset
+	fi
+	[ -d "$presets" ] || die "cannot find assay's presets at $presets"
+}
+
+# preset_pinned <language>: sets pinned to the highest version of the language's preset, 0 when assay has none.
+pinned=0
+preset_pinned() {
+	local d v
+	pinned=0
+	[[ $1 =~ $name_re ]] || return 0
+	for d in "$presets/$1"/*/; do
+		v=${d%/}
+		v=${v##*/}
+		if [[ $v =~ ^[1-9][0-9]{0,8}$ ]] && [ "$v" -gt "$pinned" ]; then pinned=$v; fi
+	done
+}
+
+# preset_applies <language>: whether the language's preset applies to the repo (the current directory, its root),
+# with applies_why set to what makes it apply. bash's applies once git sees a shell script.
+applies_why=
+preset_applies() {
+	case $1 in
+	bash) has_shell_script ;;
+	*) return 1 ;;
+	esac
+}
+
+# has_shell_script: git sees a shell script in the working tree (tracked, or untracked and not ignored), as shfmt -f
+# finds them (by extension or shebang, .bats files included): the files bash's checks run on.
+has_shell_script() {
+	local list found f i
+	local -a files=()
+	tmp_file list
+	tmp_file found
+	git ls-files -z --cached --others --exclude-standard --deduplicate >"$list" || die "cannot list the working tree"
+	while IFS= read -r -d '' f; do
+		if [ -f "$f" ]; then files+=("./$f"); fi
+	done <"$list"
+	[ ${#files[@]} -gt 0 ] || return 1
+	command -v shfmt >/dev/null || die "cannot find shfmt on the PATH, which tells shell scripts apart"
+	for ((i = 0; i < ${#files[@]}; i += 1000)); do
+		shfmt -f "${files[@]:i:1000}" >"$found" || die "shfmt -f failed on the working tree's files"
+		if IFS= read -r f <"$found"; then
+			applies_why="git sees the shell script ${f#./}"
+			return 0
+		fi
+	done
+	return 1
+}
+
+# load_record: the record at the repo root (the current directory) into rec, <language> => <version>; empty when the
+# repo has none. Returns 1, with record_error set, when it is not one JSON object whose values are positive integers;
+# read_record dies then.
+declare -A rec=()
+record_error=
+# shellcheck disable=SC2016 # jq's $variables, not the shell's
+record_jq='
+def fail($m): "\($m)\n" | halt_error(1);
+[inputs]
+| if length != 1 then fail("expected one JSON document, found \(length)") else .[0] end
+| if type != "object" then fail("not a JSON object") else . end
+| to_entries[]
+| if (.key | test($name_re) | not) then fail("bad language name \(.key | tojson)")
+  elif (.value | type) != "number" or .value != (.value | floor) or .value < 1 or .value > 999999999 then
+    fail("\(.key): the version must be a positive integer, not \(.value | tojson)")
+  else "rec[\(.key | @sh)]=\(.value | floor)" end
+'
+load_record() {
+	local out
+	rec=()
+	if [ ! -e "$record_file" ] && [ ! -L "$record_file" ]; then return 0; fi
+	if ! out=$(jq -n -r --arg name_re "$name_re" "$record_jq" "$record_file" 2>&1); then
+		record_error=$out
+		return 1
+	fi
+	eval "$out"
+}
+read_record() {
+	load_record || die "cannot read $record_file: $record_error"
+}
+
+# presets_behind: the header line of `assay check` for each language the devenv enables whose recorded preset version
+# is behind the pinned one. A version behind fails nothing. A record that cannot be read adds no line: the preset
+# check fails on it.
+presets_behind() {
+	local lang
+	if [ ${#c_languages[@]} -eq 0 ]; then return 0; fi
+	load_record || return 0
+	if [ ${#rec[@]} -eq 0 ]; then return 0; fi
+	find_presets
+	for lang in "${c_languages[@]}"; do
+		[ -n "${rec[$lang]+set}" ] || continue
+		preset_pinned "$lang"
+		if [ "${rec[$lang]}" -lt "$pinned" ]; then
+			echo "  preset behind: $lang ${rec[$lang]} → $pinned (assay preset $lang)"
+		fi
+	done
+}
+
+# preset: every enabled language whose preset applies is in the record. Its last line is the command that fixes it.
+builtin_preset() {
+	local lang
+	local -a missing=()
+	[ $# -eq 0 ] || usage_error "preset takes no argument"
+	load_config
+	find_repo
+	find_presets
+	read_record
+	for lang in "${c_languages[@]}"; do
+		preset_pinned "$lang"
+		if [ "$pinned" -eq 0 ] || [ -n "${rec[$lang]+set}" ]; then continue; fi
+		if preset_applies "$lang"; then
+			missing+=("$lang")
+			echo "$lang's preset applies ($applies_why), and $record_file does not list $lang"
+		fi
+	done
+	[ ${#missing[@]} -gt 0 ] || finish 0
+	echo "run: assay preset ${missing[*]}"
+	finish 1
+}
+
+# preset_others <language> <file>: sets others to the other files the tool of a preset file reads in its place, in
+# the tool's order. When the repo has one and not the preset's file, that one is the tool's: the preset writes no file
+# of its own beside it, which would silently replace it, and merges into it and shows it as it would its own file
+# (each has the preset file's format). shellcheck reads shellcheckrc where a directory has no .shellcheckrc.
+others=()
+preset_others() {
+	others=()
+	case $1/$2 in
+	bash/.shellcheckrc) others=(shellcheckrc) ;;
+	esac
+}
+
+# preset_files <dir>: the files under a version's directory, relative to it, NUL-terminated, in byte order.
+preset_files() (
+	LC_ALL=C
+	shopt -s globstar dotglob nullglob
+	cd -- "$1" || exit 1
+	for f in **; do
+		if [ -f "$f" ]; then printf '%s\0' "$f"; fi
+	done
+)
+
+# same_content <file> <file>: the two files hold the same text.
+same_content() {
+	local a b
+	a=$(cat -- "$1" && echo .) || die "cannot read $1"
+	b=$(cat -- "$2" && echo .) || die "cannot read $2"
+	[ "$a" = "$b" ]
+}
+
+# What `assay preset` did, filled by apply_preset: a line per file it wrote, merged or kept; the diffs of the kept
+# files that differ from the preset, and the last lines, saying what is left to do.
+preset_lines=()
+preset_shown=
+preset_todo=()
+
+# apply_preset <language>: the language's pinned preset into the repo (the current directory, its root), file by
+# file, and its version into rec. A file the repo lacks is written. With no version recorded (an adoption), a file the
+# repo has is kept, and shown against the preset when they differ. With an older version recorded, the repo's file is
+# merged three ways (git merge-file): the base is the recorded version's file, theirs the pinned one's, ours the
+# repo's; a conflict leaves its markers in the file. The version is recorded whatever the outcome, so that a conflict
+# once resolved, or a kept file once extended, is not merged again.
+apply_preset() {
+	local lang=$1 from=${rec[$1]:-} to f target other theirs base merged files diff rc todo changed=0
+	preset_pinned "$lang"
+	to=$pinned
+	if [ -n "$from" ] && [ "$from" -gt "$to" ]; then
+		die "$record_file records $lang's preset $from, newer than this assay's $to: update assay (devenv update assay)"
+	fi
+	if [ -n "$from" ] && [ ! -d "$presets/$lang/$from" ]; then
+		die "$record_file records $lang's preset $from, which this assay does not hold"
+	fi
+	tmp_file files
+	tmp_file merged
+	tmp_file diff
+	tmp_file base
+	preset_files "$presets/$lang/$to" >"$files" || die "cannot list $presets/$lang/$to"
+	while IFS= read -r -d '' f; do
+		theirs=$presets/$lang/$to/$f
+		target=$f
+		if [ ! -e "$f" ] && [ ! -L "$f" ]; then
+			preset_others "$lang" "$f"
+			for other in "${others[@]}"; do
+				if [ -e "$other" ] || [ -L "$other" ]; then
+					target=$other
+					break
+				fi
+			done
+		fi
+		if [ ! -e "$target" ] && [ ! -L "$target" ]; then
+			if [[ $target == */* ]]; then mkdir -p -- "${target%/*}" || die "cannot create ${target%/*}"; fi
+			cat -- "$theirs" >"$target" || die "cannot write $target"
+			preset_lines+=("wrote $target")
+			changed=1
+			continue
+		fi
+		[ -f "$target" ] || die "$target is not a file, and $lang's preset has one there"
+		if [ -z "$from" ]; then
+			preset_lines+=("kept $target")
+			changed=1
+			if same_content "$target" "$theirs"; then continue; fi
+			rc=0
+			git -c core.quotePath=false diff --no-index --no-color --no-ext-diff --no-textconv -U3 -- "$target" "$theirs" \
+				>"$diff" || rc=$?
+			[ "$rc" -eq 1 ] || die "cannot compare $target with $lang's preset (git diff exit $rc)"
+			preset_shown+=$'\n'"--- $target, kept, against $lang's preset $to (the + lines are the preset's)"$'\n'
+			preset_shown+=$(awk '/^@@/ { on = 1 } on' "$diff") || die "cannot read the comparison of $target"
+			preset_shown+=$'\n'
+			todo="$target differs from $lang's preset $to: extend it by hand to hold what the preset holds (the + lines"
+			preset_todo+=("$todo above), keeping what the repo needs of its own")
+			continue
+		fi
+		if [ "$from" = "$to" ]; then continue; fi
+		if [ -f "$presets/$lang/$from/$f" ]; then
+			cat -- "$presets/$lang/$from/$f" >"$base" || die "cannot read $lang's preset $from"
+		else
+			: >"$base"
+		fi
+		# The preset did not change the file between the two versions.
+		if same_content "$base" "$theirs"; then continue; fi
+		rc=0
+		git merge-file -p --diff3 -L "$target" -L "$lang's preset $from" -L "$lang's preset $to" \
+			"$target" "$base" "$theirs" >"$merged" || rc=$?
+		if [ "$rc" -eq 0 ] && same_content "$merged" "$target"; then continue; fi
+		if [ "$rc" -ge 128 ]; then die "git merge-file failed on $target (exit $rc)"; fi
+		cat -- "$merged" >"$target" || die "cannot write $target"
+		changed=1
+		if [ "$rc" -eq 0 ]; then
+			preset_lines+=("merged $target")
+		else
+			preset_lines+=("conflict $target")
+			todo="$target conflicts with $lang's preset $to: resolve its markers (<<<<<<< the repo's lines, ||||||| $lang's"
+			preset_todo+=("$todo preset $from, >>>>>>> $lang's preset $to)")
+		fi
+	done <"$files"
+	if [ "$from" != "$to" ]; then
+		rec[$lang]=$to
+		record_changed=1
+	elif [ "$changed" = 0 ]; then
+		preset_lines+=("$lang's preset $to: up to date")
+	fi
+}
+
+# write_record: rec into the record, its keys sorted, as jq prints it (which is how oxfmt formats JSON).
+record_changed=0
+write_record() {
+	local lang json
+	json=$(for lang in "${!rec[@]}"; do printf '%s\t%s\n' "$lang" "${rec[$lang]}"; done |
+		jq -n -R -S '[inputs | split("\t") | {key: .[0], value: (.[1] | tonumber)}] | from_entries') ||
+		die "cannot build $record_file"
+	printf '%s\n' "$json" >"$record_file" || die "cannot write $record_file"
+}
+
+# assay preset [<language>...]: the pinned preset of each language named, or of every enabled language whose preset
+# applies, into the repo (apply_preset), then the versions taken into the record. Exits 0 when everything applied, 1
+# on a conflict or a kept file that differs from the preset.
+cmd_preset() {
+	local arg lang d
+	local -a langs=() known=()
+	local -A seen=()
+	for arg; do
+		case $arg in
+		-h | --help)
+			usage_text
+			finish 0
+			;;
+		-*) usage_error "unknown option '$arg'" ;;
+		*) ;;
+		esac
+	done
+	load_config
+	find_repo
+	find_presets
+	read_record
+	for d in "$presets"/*/; do
+		d=${d%/}
+		d=${d##*/}
+		preset_pinned "$d"
+		if [ "$pinned" -gt 0 ]; then known+=("$d"); fi
+	done
+	if [ $# -gt 0 ]; then
+		for lang; do
+			preset_pinned "$lang"
+			[ "$pinned" -gt 0 ] || usage_error "assay has no preset for '$lang'; it has one for: ${known[*]}"
+			if [ -z "${seen[$lang]:-}" ]; then langs+=("$lang"); fi
+			seen[$lang]=1
+		done
+	else
+		for lang in "${c_languages[@]}"; do
+			preset_pinned "$lang"
+			if [ "$pinned" -eq 0 ] || [ -n "${seen[$lang]:-}" ]; then continue; fi
+			seen[$lang]=1
+			if preset_applies "$lang"; then langs+=("$lang"); fi
+		done
+	fi
+	if [ ${#langs[@]} -eq 0 ]; then
+		echo "no preset to apply: no language this repo's devenv enables has a preset that applies"
+		finish 0
+	fi
+	for lang in "${langs[@]}"; do apply_preset "$lang"; done
+	if [ "$record_changed" = 1 ]; then
+		write_record
+		preset_lines+=("wrote $record_file")
+	fi
+	printf '%s\n' "${preset_lines[@]}"
+	[ ${#preset_todo[@]} -gt 0 ] || finish 0
+	printf '%s' "$preset_shown"
+	echo
+	printf '%s\n' "${preset_todo[@]}"
+	finish 1
 }
 
 cmd_builtin() {
@@ -977,6 +1323,7 @@ cmd_builtin() {
 	agents-md) builtin_agents_md "$@" ;;
 	commit-trailers) builtin_commit_trailers "$@" ;;
 	gitleaks) builtin_gitleaks "$@" ;;
+	preset) builtin_preset "$@" ;;
 	suppressions) builtin_suppressions "$@" ;;
 	*) usage_error "no built-in check named '$check'" ;;
 	esac
@@ -1028,7 +1375,7 @@ report_path() {
 # to what the check's line says about it, and returns 1 when the check fails on it: the new lines the report can
 # cover are under new_code percent covered, the report is missing, or diff-cover cannot run.
 measure() {
-	local n=$1 report=$2 dir=$3 rc=0 total missed covered
+	local n=$1 report=$2 dir=$3 rc=0 total missed covered word counts
 	if [ ! -f "$report" ]; then
 		note="no coverage report at $report"
 		return 1
@@ -1037,8 +1384,9 @@ measure() {
 		note="cannot create $dir"
 		return 1
 	fi
+	word=$(shell_word "$report")
 	{
-		echo "\$ diff-cover $(shell_word "$report") --compare-branch=$base_sha --diff-range-notation=.. --include-untracked"
+		echo "\$ diff-cover $word --compare-branch=$base_sha --diff-range-notation=.. --include-untracked"
 		PATH=$caller_path diff-cover "$report" --compare-branch="$base_sha" --diff-range-notation=.. \
 			--include-untracked --format "json:$dir/$n.json" </dev/null 2>&1 || rc=$?
 	} >"$dir/$n.txt"
@@ -1049,8 +1397,8 @@ measure() {
 		note="diff-cover exit $rc"
 		return 1
 	fi
-	if ! read -r total missed < <(jq -r '"\(.total_num_lines) \(.total_num_violations)"' "$dir/$n.json" 2>/dev/null) ||
-		! [[ $total =~ ^[0-9]+$ && $missed =~ ^[0-9]+$ ]]; then
+	if ! counts=$(jq -r '"\(.total_num_lines) \(.total_num_violations)"' "$dir/$n.json" 2>/dev/null) ||
+		! read -r total missed <<<"$counts" || ! [[ $total =~ ^[0-9]+$ && $missed =~ ^[0-9]+$ ]]; then
 		note="cannot read diff-cover's report $dir/$n.json"
 		return 1
 	fi
@@ -1068,15 +1416,17 @@ measure() {
 
 # print_head <file>: the first 100 lines of a file, ending in a newline, and how many more it has.
 print_head() {
-	local lines
-	lines=$(wc -l <"$1")
-	if [ -n "$(tail -c 1 "$1")" ]; then lines=$((lines + 1)); fi
+	local lines last
+	lines=$(wc -l <"$1") || die "cannot read $1"
+	# Empty when the file ends in a newline.
+	last=$(tail -c 1 "$1") || die "cannot read $1"
+	if [ -n "$last" ]; then lines=$((lines + 1)); fi
 	if [ "$lines" -eq 0 ]; then
 		echo "(no output)"
 		return 0
 	fi
 	head -n 100 "$1"
-	if [ -n "$(tail -c 1 "$1")" ] && [ "$lines" -le 100 ]; then echo; fi
+	if [ -n "$last" ] && [ "$lines" -le 100 ]; then echo; fi
 	if [ "$lines" -gt 100 ]; then echo "[$((lines - 100)) more lines in the log]"; fi
 }
 
@@ -1128,6 +1478,7 @@ run_checks() {
 	for n in "${skipped[@]}"; do
 		echo "  skipped: $n (no ${c_requires[$n]})"
 	done
+	presets_behind
 
 	now_us
 	start=$now
@@ -1606,7 +1957,7 @@ file_holds() {
 
 # guard_command: the command rules over the Bash tool's command, all at once through ast-grep.
 guard_command() {
-	local i inline="" sep="" out err file bound
+	local i inline="" sep="" out err file bound matches
 	local -a matched=()
 	active_rules command
 	for i in "${active[@]}"; do
@@ -1620,13 +1971,16 @@ guard_command() {
 	tmp_file err
 	# From the root: ast-grep would read a project's sgconfig.yml in the cwd.
 	out=$(cd / && printf '%s' "$ev_command" | ast-grep scan --inline-rules "$inline" --stdin --json=stream 2>"$err") ||
-		die "ast-grep cannot match the command rules: $(cat "$err")"
+		die "ast-grep cannot match the command rules: $(<"$err")"
 	# One record per match: the rule's index, whether it binds $FILE, and what.
+	tmp_file matches
+	jq -j '(.metaVariables.single.FILE // null) as $f
+    | "\(.ruleId[1:])\u0000\(if $f then 1 else 0 end)\u0000\($f.text // "")\u0000"' <<<"$out" >"$matches" ||
+		die "cannot read ast-grep's matches"
 	while IFS= read -r -d '' i && IFS= read -r -d '' bound && IFS= read -r -d '' file; do
 		if [ -n "${r_file_content[$i]}" ] && [ "$bound" = 1 ] && ! file_holds "$file" "${r_file_content[$i]}"; then continue; fi
 		matched[i]=1
-	done < <(jq -j '(.metaVariables.single.FILE // null) as $f
-    | "\(.ruleId[1:])\u0000\(if $f then 1 else 0 end)\u0000\($f.text // "")\u0000"' <<<"$out")
+	done <"$matches"
 	for i in "${!matched[@]}"; do violate "$i"; done
 	if [ ${#violated[@]} -gt 0 ]; then guard_answer deny; fi
 	finish 0
@@ -1656,15 +2010,17 @@ guard_path() {
 # remote, commits on no remote-tracking branch. Sets unsaved to what is unsaved, with the worktree's top level.
 unsaved=
 unsaved_work() {
-	local top status n
+	local top status n inside remotes
 	local -a what=()
-	[ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" = true ] || return 1
+	inside=$(git rev-parse --is-inside-work-tree 2>/dev/null) || return 1
+	[ "$inside" = true ] || return 1
 	top=$(git rev-parse --show-toplevel) || die "cannot find the top level of $PWD"
 	# No optional locks: the guard runs beside the agent's own git commands.
 	status=$(git --no-optional-locks status --porcelain --untracked-files=normal) ||
 		die "cannot read the status of $top"
 	if [ -n "$status" ]; then what+=("uncommitted changes"); fi
-	if [ -n "$(git remote)" ] && git rev-parse -q --verify HEAD >/dev/null; then
+	remotes=$(git remote) || die "cannot list the remotes of $top"
+	if [ -n "$remotes" ] && git rev-parse -q --verify HEAD >/dev/null; then
 		n=$(git rev-list --count HEAD --not --remotes) || die "cannot count the unpushed commits of $top"
 		if [ "$n" -eq 1 ]; then
 			what+=("1 commit on no remote")
@@ -1866,6 +2222,11 @@ main() {
 		shift
 		if [ -z "${ASSAY_CONFIG:-}" ]; then delegate new-code "$@"; fi
 		cmd_new_code "$@"
+		;;
+	preset)
+		shift
+		if [ -z "${ASSAY_CONFIG:-}" ]; then delegate preset "$@"; fi
+		cmd_preset "$@"
 		;;
 	# The machine-level subcommands run outside any devenv and never delegate.
 	guard)

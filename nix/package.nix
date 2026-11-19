@@ -11,6 +11,7 @@ writeShellApplication {
   name = "assay";
   # No runtimeInputs: they would come first on the PATH of every check too. The script puts these first on its own
   # PATH and runs each check with the PATH it was called with. ast-grep is the guard's: it matches command rules.
+  # assay_presets is where `assay preset` finds every version of each language's preset.
   text = ''
     assay_tools=${
       lib.makeBinPath [
@@ -21,6 +22,7 @@ writeShellApplication {
         jq
       ]
     }
+    assay_presets=${../preset}
   ''
   + builtins.readFile ../assay.sh;
   meta = {

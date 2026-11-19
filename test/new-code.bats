@@ -1,6 +1,6 @@
 bats_require_minimum_version 1.5.0
 # shellcheck source=test/helpers.bash
-source "$BATS_TEST_DIRNAME/helpers.bash"
+source "${BATS_TEST_DIRNAME:?}/helpers.bash"
 
 # New code: the lines a change adds or modifies, from the base's tree to the working tree, untracked files included.
 # `assay new-code` prints it as one JSON object, {"<path>": [[first, last], ...]}.
@@ -103,19 +103,25 @@ lines() { seq 1 "$2" >"$1"; }
 	git add s.txt
 	echo untracked >u.txt
 	echo more >>a.txt
+	index=$(git rev-parse --git-path index)
 	before=$(
 		git status --porcelain=v2 -uall
-		cat "$(git rev-parse --git-path index)" | sha256sum
+		sha256sum <"$index"
 	)
 	objects=$(git count-objects -v)
 	new_code --base HEAD
 	[ "$json" = '{"a.txt":[[2,2]],"s.txt":[[1,1]],"u.txt":[[1,1]]}' ]
-	[ "$(
+	index=$(git rev-parse --git-path index)
+	after=$(
 		git status --porcelain=v2 -uall
-		cat "$(git rev-parse --git-path index)" | sha256sum
-	)" = "$before" ]
-	[ "$(git count-objects -v)" = "$objects" ]
-	[ -z "$(ls "$(git rev-parse --absolute-git-dir)/assay" 2>/dev/null)" ]
+		sha256sum <"$index"
+	)
+	[ "$after" = "$before" ]
+	objects_after=$(git count-objects -v)
+	[ "$objects_after" = "$objects" ]
+	git_dir=$(git rev-parse --absolute-git-dir)
+	left=$(ls "$git_dir/assay" 2>/dev/null || true)
+	[ -z "$left" ]
 }
 
 @test "a check run by assay check sees the same new code through ASSAY_BASE" {
@@ -124,7 +130,8 @@ lines() { seq 1 "$2" >"$1"; }
 	check new "\"$assay\" new-code >$T/new.json"
 	run "$assay" check
 	[ "$status" -eq 0 ]
-	[ "$(jq -cS . "$T/new.json")" = '{"c.txt":[[1,1]]}' ]
+	seen=$(jq -cS . "$T/new.json")
+	[ "$seen" = '{"c.txt":[[1,1]]}' ]
 }
 
 @test "in a linked worktree, new code reads that worktree's index and files" {
@@ -170,5 +177,6 @@ lines() { seq 1 "$2" >"$1"; }
 	git config core.quotePath true
 	run --separate-stderr "$assay" new-code --base HEAD
 	[ "$status" -eq 0 ]
-	[ "$output" = "$(jq -S . <<<"$expected")" ]
+	pretty=$(jq -S . <<<"$expected")
+	[ "$output" = "$pretty" ]
 }
