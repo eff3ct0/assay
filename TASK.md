@@ -47,10 +47,11 @@ the end, a `code-review` pass, and a commit to this branch.
 
 ## Remaining steps
 
-1. Guard: command rules, `who`, failing open, path rules, `cwd`/`fileContent`, Stop (bats, `test/guard.bats`).
-2. Git hooks: commit-msg, pre-push, failing closed (`test/git-hook.bats`).
-3. Hits for both (`test/hits.bats`).
-4. `nix/rules-check.sh` and its bats tests (`test/rules-check.bats`).
-5. Home-manager module, `lib.rulesCheck`, nix checks (home-manager input; `test/rules/example.nix` rendered equals
-   `test/rules/example.json`).
-6. README, AGENTS.md, GLOSSARY, usage text; full suite, `nix flake check`, `test/devenv`; code review; critic.
+Done: the guard, the git hooks, hits, `nix/rules-check.sh`, the home-manager module, `lib.rulesCheck`, their tests and
+nix checks, README, AGENTS.md, GLOSSARY, usage text.
+
+1. Full runs: `nix flake check`, `devenv shell -- assay check` (the devenv's newer ast-grep), `nix develop -c bats
+   test/devenv`.
+2. The `code-review` skill over `b93c455..HEAD`; fix what it finds.
+3. The critic (`~/git/CLAUDE.md`, "Finishing a change"), then its recheck; remove this file once the last critic
+   passes.

@@ -73,7 +73,8 @@ edited() {
 @test "agents' rules run with ASSAY_AGENT set, everyone's without it" {
   cd "$T"
   mkdir "$T/bin"
-  printf '#!/usr/bin/env bash\necho "${ASSAY_AGENT-unset} $2 $4" >>"%s"\nexec "%s" "$@"\n' "$T/agents.log" "$assay" \
+  # The shebang names bash itself: the sandbox of nix flake check has no /usr/bin/env.
+  printf '#!%s\necho "${ASSAY_AGENT-unset} $2 $4" >>"%s"\nexec "%s" "$@"\n' "$BASH" "$T/agents.log" "$assay" \
     >"$T/bin/assay"
   chmod +x "$T/bin/assay"
   edited '.rules |= map(select(.name == "no-coauthor" or .name == "no-clone"))'
