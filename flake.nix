@@ -40,7 +40,7 @@
 
       # The check builder: lib.rulesCheck { pkgs; rules = <home>.config.programs.assay.rulesFile; } builds
       # assay-rules-check, which fails when a deny example passes or an allow example is denied.
-      lib.rulesCheck = import ./nix/rules-check.nix;
+      lib.rulesCheck = import ./nix/rules-check.nix self;
 
       checks = forAllSystems (
         pkgs:

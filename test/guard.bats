@@ -89,6 +89,11 @@ no_clone='Get repos and worktrees through the workspace tool, not git clone or g
     guard "$(edit_event "$path")"
     allowed
   done
+  # The main checkout's git dir sits in it, a linked worktree's private part included.
+  guard "$(edit_event "$T/repo/.git/hooks/pre-commit")"
+  denied_by "$T/repo/.git/hooks/pre-commit is in the main checkout $T/repo"
+  guard "$(edit_event "$T/repo/.git/worktrees/worktree/info/exclude")"
+  denied_by "is in the main checkout $T/repo"
 }
 
 # path_rule <glob>: RULES holds one path rule, for everyone, matching the glob.
@@ -125,6 +130,10 @@ a?c /x/abc 1
 a?c /x/a/c 0
 file.txt /x/fileXtxt 0
 a+(b) /x/a+(b) 1
+a\*b /x/a*b 1
+a\*b /x/axb 0
+a[b /x/a[b 1
+a[b /x/ab 0
 CASES
 }
 
@@ -226,6 +235,28 @@ Generated with a tool'" 'git add . && gh pr create -t x -F attributed.md'; do
   allowed
 }
 
+@test "a command rule's match may be a rule file's body: rule, constraints, utils, transform" {
+  cd "$T"
+  export ASSAY_AGENT=claude-code
+  RULES=$T/rules.json
+  jq -n '{version: 1, rules: [{name: "git-clone", on: "command", message: "no clone",
+    match: {rule: {kind: "command", all: [{has: {field: "name", pattern: "$NAME"}}, {has: {kind: "word", regex: "^clone$"}}]},
+      constraints: {NAME: {regex: "^(git|gh)$"}}}}]}' >"$RULES"
+  guard "$(bash_event 'gh clone x')"
+  denied_by "no clone"
+  guard "$(bash_event 'hg clone x')"
+  allowed
+  # --rules=<file> is the same option.
+  run --separate-stderr "$assay" guard --rules="$RULES" <<<"$(bash_event 'git clone x')"
+  denied_by "no clone"
+  jq '.rules[0].match.message = "x"' "$RULES" >"$T/bad.json"
+  RULES=$T/bad.json
+  guard "$(bash_event 'git clone x')"
+  echo "$stderr"
+  [ "$status" -eq 1 ]
+  [[ $stderr == *"rule git-clone: a match with a rule key is a rule file body"* ]]
+}
+
 @test "other events and tools pass" {
   cd "$T"
   example_rules
@@ -254,11 +285,11 @@ fails_open() {
   event=$(bash_event 'git clone x')
   RULES=$T/missing.json
   guard "$event"
-  fails_open "assay: cannot read the rules $T/missing.json"
+  fails_open "assay: cannot read the rule list $T/missing.json"
   RULES=$T/rules.json
   echo '{"version": 1, "rules": [' >"$RULES"
   guard "$event"
-  fails_open "assay: invalid rules $RULES"
+  fails_open "assay: invalid rule list $RULES"
   for bad in '{"version": 2, "rules": []}' \
     '{"version": 1, "rules": [{"name": "a", "on": "file", "match": "x", "message": "m"}]}' \
     '{"version": 1, "rules": [{"name": "a", "on": "command", "match": "git clone", "message": "m"}]}' \
@@ -271,7 +302,7 @@ fails_open() {
     '{"version": 1, "rules": [{"name": "a", "on": "path", "match": "*", "message": "m"}, {"name": "a", "on": "path", "match": "x", "message": "m"}]}'; do
     printf '%s\n' "$bad" >"$RULES"
     guard "$event"
-    fails_open "assay: invalid rules $RULES: "
+    fails_open "assay: invalid rule list $RULES: "
   done
   example_rules
   guard 'not json'

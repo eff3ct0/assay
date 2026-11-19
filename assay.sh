@@ -1212,6 +1212,9 @@ def rule_ok($i):
   elif (.on | IN("command", "path", "commit-msg", "pre-push", "stop") | not) then
     fail("rule \($n): on must be command, path, commit-msg, pre-push or stop, not \(.on | tojson)")
   elif .on == "command" and (.match | type) != "object" then fail("rule \($n): match must be an ast-grep rule, an object")
+  elif .on == "command" and (.match | has("rule")) and
+    (.match | keys - ["rule", "constraints", "utils", "transform"] | length) > 0 then
+    fail("rule \($n): a match with a rule key is a rule file body: rule, constraints, utils and transform only")
   elif .on != "command" and (.match | text | not) then fail("rule \($n): match must be a non-empty string")
   elif .on == "pre-push" and (.match | IN("agent-branch", "agents-md") | not) then
     fail("rule \($n): a pre-push rule matches agent-branch or agents-md, not \(.match | tojson)")
@@ -1238,9 +1241,10 @@ def rule_ok($i):
     | if has($n) then fail("two rules are named \($n)") else .[$n] = true end)
 | ($rules[]
     | "r_name+=(\(.name | @sh)) r_on+=(\(.on | @sh)) r_who+=(\(.who // "agents" | @sh))",
-      "r_match+=(\(if .on == "command" then .match | tojson else .match end | @sh))",
+      "r_match+=(\(if .on != "command" then .match elif .match | has("rule") then .match | tojson
+        else {rule: .match} | tojson end | @sh))",
       "r_message+=(\(.message | @sh)) r_note+=(\(.note // "" | @sh))",
-      "r_cwd+=(\(.cwd // "" | @sh)) r_file+=(\(.fileContent // "" | @sh))"),
+      "r_cwd+=(\(.cwd // "" | @sh)) r_file_content+=(\(.fileContent // "" | @sh))"),
   "rules_loaded=1"
 '
 
@@ -1251,7 +1255,7 @@ r_match=()
 r_message=()
 r_note=()
 r_cwd=()
-r_file=()
+r_file_content=()
 rules_loaded=0
 rules_file=
 
@@ -1279,16 +1283,26 @@ parse_rules_option() {
 
 load_rules() {
   local out
-  if [ ! -f "$rules_file" ] || [ ! -r "$rules_file" ]; then die "cannot read the rules $rules_file"; fi
+  if [ ! -f "$rules_file" ] || [ ! -r "$rules_file" ]; then die "cannot read the rule list $rules_file"; fi
   if ! out=$(jq -n -r --arg name_re "$name_re" "$rules_jq" "$rules_file" 2>&1); then
-    die "invalid rules $rules_file: $out"
+    die "invalid rule list $rules_file: $out"
   fi
   eval "$out"
-  [ "$rules_loaded" = 1 ] || die "invalid rules $rules_file: incomplete"
+  [ "$rules_loaded" = 1 ] || die "invalid rule list $rules_file: incomplete"
 }
 
 # rule_runs <i>: rule <i> runs in this session: it binds everyone, or it binds agents and the agent marker is set.
 rule_runs() { [ "${r_who[$1]}" = everyone ] || [ -n "${ASSAY_AGENT:-}" ]; }
+
+# active_rules <on>: the indices of the rules on <on> that run in this session, in the list's order, in active.
+active=()
+active_rules() {
+  local i
+  active=()
+  for i in "${!r_name[@]}"; do
+    if [ "${r_on[$i]}" = "$1" ] && rule_runs "$i"; then active+=("$i"); fi
+  done
+}
 
 # rule_text <i> [<detail>...]: what a violated rule says: its message, the details indented under it, then its note
 # after a blank line.
@@ -1328,7 +1342,7 @@ def get(f): (try f catch null) | if type == "string" then . else "" end;
 | if length != 1 then fail("expected one JSON document, found \(length)") else .[0] end
 | if type != "object" then fail("the event is not a JSON object") else . end
 | "ev_name=\(get(.hook_event_name) | @sh) ev_tool=\(get(.tool_name) | @sh) ev_cwd=\(get(.cwd) | @sh)",
-  "ev_active=\(if .stop_hook_active == true then 1 else 0 end)",
+  "ev_stop_active=\(if .stop_hook_active == true then 1 else 0 end)",
   "ev_command=\(get(.tool_input.command) | @sh)",
   "ev_path=\(get(.tool_input.file_path // .tool_input.notebook_path) | @sh)",
   "event_loaded=1"
@@ -1336,7 +1350,7 @@ def get(f): (try f catch null) | if type == "string" then . else "" end;
 ev_name=
 ev_tool=
 ev_cwd=
-ev_active=0
+ev_stop_active=0
 ev_command=
 ev_path=
 event_loaded=0
@@ -1392,20 +1406,29 @@ glob_matches() {
   fi
 }
 
-# in_main_checkout <absolute path>: the path is inside a main checkout's working tree, whose git dir is its common
-# dir (a linked worktree's is not). A path that does not exist yet is judged by its nearest existing directory.
-# Sets checkout_root to the checkout's top level.
+# in_main_checkout <absolute path>: the path is inside a main checkout: in its working tree, whose git dir is its
+# common dir (a linked worktree's is not), or in the git dir of a repo that is not bare, which sits in its main
+# checkout. A path that does not exist yet is judged by its nearest existing directory. Sets checkout_root to the
+# checkout's top level.
 checkout_root=
 in_main_checkout() {
-  local d=$1 out inside git_dir common_dir
+  local d=$1 out in_tree in_git_dir bare git_dir common_dir
   while [ ! -d "$d" ]; do
     d=${d%/*}
     if [ -z "$d" ]; then d=/; fi
   done
-  out=$(git -C "$d" rev-parse --path-format=absolute --is-inside-work-tree --git-dir --git-common-dir \
-    --show-toplevel 2>/dev/null) || return 1
-  { read -r inside && read -r git_dir && read -r common_dir && read -r checkout_root; } <<<"$out" || return 1
-  [ "$inside" = true ] && [ "$git_dir" = "$common_dir" ]
+  out=$(git -C "$d" rev-parse --path-format=absolute --is-inside-work-tree --is-inside-git-dir \
+    --is-bare-repository --git-dir --git-common-dir 2>/dev/null) || return 1
+  { read -r in_tree && read -r in_git_dir && read -r bare && read -r git_dir && read -r common_dir; } <<<"$out" ||
+    return 1
+  if [ "$in_tree" = true ]; then
+    [ "$git_dir" = "$common_dir" ] || return 1
+    checkout_root=$(git -C "$d" rev-parse --show-toplevel 2>/dev/null) || return 1
+  elif [ "$in_git_dir" = true ] && [ "$bare" = false ]; then
+    checkout_root=${common_dir%/*}
+  else
+    return 1
+  fi
 }
 
 # path_matches <glob or main-checkout> <path>: a path rule's match, or a command rule's cwd.
@@ -1435,14 +1458,17 @@ guard_answer() {
   finish 0
 }
 
-# unquote_word <word>: a shell word as the shell would pass it, for the simple forms: quotes around it removed, and a
-# leading --option= cut off.
+# unquote_word <word>: a shell word as the shell would pass it, for the simple forms: quotes around it removed, a
+# leading --option= cut off, and a leading ~/ expanded.
 unquote_word() {
   local w=$1
-  if [ ${#w} -ge 2 ] && { [[ $w == \"*\" ]] || [[ $w == \'*\' ]]; }; then w=${w:1:${#w}-2}; fi
+  strip_quotes() {
+    if [ ${#w} -ge 2 ] && { [[ $w == \"*\" ]] || [[ $w == \'*\' ]]; }; then w=${w:1:${#w}-2}; fi
+  }
+  strip_quotes
   if [[ $w == -*=* ]]; then
     w=${w#*=}
-    if [ ${#w} -ge 2 ] && { [[ $w == \"*\" ]] || [[ $w == \'*\' ]]; }; then w=${w:1:${#w}-2}; fi
+    strip_quotes
   fi
   if [[ $w == \~/* ]]; then w=$HOME/${w#\~/}; fi
   printf '%s' "$w"
@@ -1466,10 +1492,11 @@ file_holds() {
 guard_command() {
   local i inline="" sep="" out err file bound
   local -a matched=()
-  for i in "${!r_name[@]}"; do
-    if [ "${r_on[$i]}" != command ] || ! rule_runs "$i"; then continue; fi
+  active_rules command
+  for i in "${active[@]}"; do
     if [ -n "${r_cwd[$i]}" ] && ! path_matches "${r_cwd[$i]}" "$ev_cwd"; then continue; fi
-    inline+="$sep{\"id\": \"r$i\", \"language\": \"bash\", \"severity\": \"hint\", \"rule\": ${r_match[$i]}}"
+    # r_match holds a rule file's body, an object: the id, the language and the severity go first.
+    inline+="$sep{\"id\": \"r$i\", \"language\": \"bash\", \"severity\": \"hint\", ${r_match[$i]:1}"
     sep=$'\n---\n'
   done
   if [ -z "$inline" ] || [ -z "$ev_command" ]; then finish 0; fi
@@ -1480,7 +1507,7 @@ guard_command() {
     die "ast-grep cannot match the command rules: $(cat "$err")"
   # One record per match: the rule's index, whether it binds $FILE, and what.
   while IFS= read -r -d '' i && IFS= read -r -d '' bound && IFS= read -r -d '' file; do
-    if [ -n "${r_file[$i]}" ] && [ "$bound" = 1 ] && ! file_holds "$file" "${r_file[$i]}"; then continue; fi
+    if [ -n "${r_file_content[$i]}" ] && [ "$bound" = 1 ] && ! file_holds "$file" "${r_file_content[$i]}"; then continue; fi
     matched[i]=1
   done < <(jq -j '(.metaVariables.single.FILE // null) as $f
     | "\(.ruleId[1:])\u0000\(if $f then 1 else 0 end)\u0000\($f.text // "")\u0000"' <<<"$out")
@@ -1495,8 +1522,8 @@ guard_path() {
   local i abs
   [ -n "$ev_path" ] || finish 0
   abs=$(realpath -m -s -- "$ev_path") || die "cannot resolve the path $ev_path"
-  for i in "${!r_name[@]}"; do
-    if [ "${r_on[$i]}" != path ] || ! rule_runs "$i"; then continue; fi
+  active_rules path
+  for i in "${active[@]}"; do
     if path_matches "${r_match[$i]}" "$abs"; then
       if [ "${r_match[$i]}" = main-checkout ]; then
         violate "$i" "$abs is in the main checkout $checkout_root"
@@ -1538,10 +1565,10 @@ unsaved_work() {
 # already kept the turn going.
 guard_stop() {
   local i
-  [ "$ev_active" = 0 ] || finish 0
+  [ "$ev_stop_active" = 0 ] || finish 0
   [ -n "$ev_cwd" ] && [ -d "$ev_cwd" ] || finish 0
-  for i in "${!r_name[@]}"; do
-    if [ "${r_on[$i]}" != stop ] || ! rule_runs "$i"; then continue; fi
+  active_rules stop
+  for i in "${active[@]}"; do
     # unsaved-work, the only stop match.
     if unsaved_work; then violate "$i" "$unsaved"; fi
   done
@@ -1591,16 +1618,6 @@ hook_reject() {
     log_hit git-hook '{hook: $hook, rule: $rule}' --arg hook "$hook" --arg rule "${r_name[$i]}"
   done
   finish 1
-}
-
-# active_rules <on>: the indices of the rules on <on> that run in this session, in active.
-active=()
-active_rules() {
-  local i
-  active=()
-  for i in "${!r_name[@]}"; do
-    if [ "${r_on[$i]}" = "$1" ] && rule_runs "$i"; then active+=("$i"); fi
-  done
 }
 
 # hook_commit_msg <message file>: the commit-msg rules' regexes over the message as git stores it: what follows the
@@ -1653,7 +1670,7 @@ remote_default_branch() {
 # - agents-md: every pushed branch tip's tree has the AGENTS.md / CLAUDE.md shape (agents_md_problems).
 hook_pre_push() {
   [ $# -ge 1 ] && [ $# -le 2 ] || die "pre-push takes the remote's name and URL"
-  local remote=$1 url=${2:-$1} lref loid rref i n problem problems
+  local remote=$1 url=${2:-$1} lref loid rref i pushed problem problems
   local -a lines=() details=()
   active_rules pre-push
   [ ${#active[@]} -gt 0 ] || finish 0
@@ -1663,8 +1680,8 @@ hook_pre_push() {
   done
   for i in "${active[@]}"; do
     details=()
-    for n in "${lines[@]}"; do
-      loid=${n%% *} rref=${n#* }
+    for pushed in "${lines[@]}"; do
+      loid=${pushed%% *} rref=${pushed#* }
       [[ $rref == refs/heads/* ]] || continue
       case ${r_match[$i]} in
         agent-branch)

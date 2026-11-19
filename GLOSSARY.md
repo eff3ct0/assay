@@ -99,6 +99,11 @@ that the agent guard and the global git hooks read.
 A command, path, message, push or session state that a rule in the rule list must deny or allow; the check builder
 feeds each one to the entrypoint that judges it.
 
+**Check builder**:
+`lib.rulesCheck` in assay's flake: a Nix derivation that feeds every example of a rule list to the entrypoint that
+judges it, and fails when one is not judged as it says.
+_Avoid_: rules check (a check, in this glossary, runs in a repo)
+
 **Agent guard**:
 `assay guard`: reads one harness hook event and allows a tool call, denies it, or keeps a turn going. A guardrail
 against habits, not a security boundary.

@@ -204,11 +204,11 @@ tip() {
   cd "$T"
   RULES=$T/missing.json
   commit_msg 'Fix'
-  rejected "assay: cannot evaluate rules: cannot read the rules $T/missing.json"
+  rejected "assay: cannot evaluate rules: cannot read the rule list $T/missing.json"
   RULES=$T/rules.json
   echo '{"version": 1, "rules": [{"name": "a", "on": "commit-msg", "message": "m"}]}' >"$RULES"
   commit_msg 'Fix'
-  rejected "assay: cannot evaluate rules: invalid rules $RULES: rule a: match must be a non-empty string"
+  rejected "assay: cannot evaluate rules: invalid rule list $RULES: rule a: match must be a non-empty string"
   jq -n '{version: 1, rules: [{name: "a", on: "commit-msg", match: "(", message: "m", who: "everyone"}]}' >"$RULES"
   commit_msg 'Fix'
   rejected "assay: cannot evaluate rules: rule a's regex cannot be used"

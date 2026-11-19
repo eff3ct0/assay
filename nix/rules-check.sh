@@ -68,12 +68,14 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 export HOME=$work/home GIT_CONFIG_GLOBAL=$work/gitconfig GIT_CONFIG_NOSYSTEM=1 GIT_CEILING_DIRECTORIES=$work
 unset ASSAY_AGENT ASSAY_HITS_LOG GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE
-mkdir -p "$HOME"
-git config --global user.name assay
-git config --global user.email assay@example.com
-git config --global init.defaultBranch main
-git config --global advice.detachedHead false
-git config --global gc.auto 0
+{
+  mkdir -p "$HOME" &&
+    git config --global user.name assay &&
+    git config --global user.email assay@example.com &&
+    git config --global init.defaultBranch main &&
+    git config --global advice.detachedHead false &&
+    git config --global gc.auto 0
+} || fail "cannot set up git in $work"
 
 # The fixture, built once and copied for each example: its linked worktree records relative paths, so that a copy
 # is a fixture of its own. Every failure is checked by hand: the examples run inside a `||` list, where `set -e`
@@ -103,6 +105,9 @@ fixture() {
   cp -a "$template" "$root" || fail "cannot copy the fixture to $root"
 }
 
+# file_entries <files object>: each file as two NUL-terminated records, its path and its content; \x01 for null.
+file_entries() { jq -j 'to_entries[] | "\(.key)\u0000\(.value // "\u0001")\u0000"' <<<"$1"; }
+
 # write_files <dir> <files object>: each file under the directory, with its content; null removes it.
 write_files() {
   local dir=$1 path content
@@ -113,7 +118,7 @@ write_files() {
       { mkdir -p -- "$(dirname -- "$dir/$path")" && printf '%s' "$content" >"$dir/$path"; } ||
         fail "cannot write $dir/$path"
     fi
-  done < <(jq -j 'to_entries[] | "\(.key)\u0000\(.value // "\u0001")\u0000"' <<<"$2")
+  done < <(file_entries "$2")
 }
 
 # tip_with <files object>: a commit on the worktree's HEAD whose tree has the files over HEAD's, null removing one.
@@ -129,7 +134,7 @@ tip_with() {
       blob=$(printf '%s' "$content" | git -C "$root/worktree" hash-object -w --stdin) &&
         git -C "$root/worktree" update-index --add --cacheinfo "100644,$blob,$path" || return 1
     fi
-  done < <(jq -j 'to_entries[] | "\(.key)\u0000\(.value // "\u0001")\u0000"' <<<"$1")
+  done < <(file_entries "$1")
   tree=$(git -C "$root/worktree" write-tree) &&
     git -C "$root/worktree" commit-tree "$tree" -p HEAD -m example
 }
@@ -138,7 +143,7 @@ tip_with() {
 # guard fails, with its error in answer.
 guard_says() {
   local out rc=0
-  out=$(assay guard --rules "$single" <<<"$1" 2>"$work/err") || rc=$?
+  out=$(assay guard --rules "$one_rule" <<<"$1" 2>"$work/err") || rc=$?
   if [ "$rc" -ne 0 ]; then
     answer="assay guard exited $rc: $(head -n 1 "$work/err")"
     return 2
@@ -153,9 +158,10 @@ guard_says() {
 hook_says() {
   local dir=$1 rc=0
   shift
-  (cd "$dir" && assay git-hook --rules "$single" "$@") >"$work/out" 2>"$work/err" || rc=$?
+  (cd "$dir" && assay git-hook --rules "$one_rule" "$@") >"$work/out" 2>"$work/err" || rc=$?
   answer=$(head -n 1 "$work/err")
-  if [ "$rc" -eq 1 ] && [ -n "$answer" ] && [[ $answer != "assay: cannot evaluate rules:"* ]] && [ ! -s "$work/out" ]; then
+  if [ "$rc" -eq 1 ] && [ -n "$answer" ] && [[ $answer != "assay: cannot evaluate rules:"* ]] &&
+    [ ! -s "$work/out" ]; then
     return 0
   fi
   if [ "$rc" -eq 0 ] && [ ! -s "$work/err" ] && [ ! -s "$work/out" ]; then return 0; fi
@@ -165,32 +171,37 @@ hook_says() {
 
 # run_example <on> <example>: the example through its entrypoint in a fresh fixture; sets answer (empty when allowed).
 run_example() {
-  local on=$1 ex=$2 cwd event file tip ref
+  local on=$1 ex=$2 cwd files event flags remote uncommitted unpushed file tip ref
   fixture
   answer=
   case $on in
     command | path)
-      cwd=$(jq -r --arg root "$root" '.cwd // "." | if startswith("/") then . else "\($root)/\(.)" end' <<<"$ex")
+      {
+        cwd=$(jq -r --arg root "$root" '.cwd // "." | if startswith("/") then . else "\($root)/\(.)" end' <<<"$ex") &&
+          files=$(jq -c '.files // {}' <<<"$ex") &&
+          event=$(jq -c --arg d "$cwd" --arg tool "$on" '
+            if $tool == "command" then {tool_name: "Bash", tool_input: {command: .command}}
+            else {tool_name: "Edit", tool_input: {file_path: .path}} end
+            | {hook_event_name: "PreToolUse"} + . + {cwd: $d}' <<<"$ex")
+      } || fail "cannot read the example $ex"
       mkdir -p -- "$cwd" || fail "cannot create $cwd"
-      write_files "$cwd" "$(jq -c '.files // {}' <<<"$ex")"
-      if [ "$on" = command ]; then
-        event=$(jq -c --arg d "$cwd" \
-          '{hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: {command: .command}, cwd: $d}' <<<"$ex")
-      else
-        event=$(jq -c --arg d "$cwd" \
-          '{hook_event_name: "PreToolUse", tool_name: "Edit", tool_input: {file_path: .path}, cwd: $d}' <<<"$ex")
-      fi
+      write_files "$cwd" "$files"
       guard_says "$event"
       ;;
     stop)
-      if [ "$(jq '.remote != false' <<<"$ex")" = true ]; then cwd=$root/worktree; else cwd=$root/local; fi
-      if [ "$(jq '.uncommitted == true' <<<"$ex")" = true ]; then
+      flags=$(jq -r '[.remote != false, .uncommitted == true, .unpushed == true] | @tsv' <<<"$ex") ||
+        fail "cannot read the example $ex"
+      read -r remote uncommitted unpushed <<<"$flags"
+      if [ "$remote" = true ]; then cwd=$root/worktree; else cwd=$root/local; fi
+      if [ "$uncommitted" = true ]; then
         echo draft >"$cwd/uncommitted.txt" || fail "cannot write $cwd/uncommitted.txt"
       fi
-      if [ "$(jq '.unpushed == true' <<<"$ex")" = true ]; then
+      if [ "$unpushed" = true ]; then
         git -C "$cwd" commit --quiet --allow-empty -m unpushed || fail "cannot commit in $cwd"
       fi
-      guard_says "$(jq -nc --arg d "$cwd" '{hook_event_name: "Stop", cwd: $d, stop_hook_active: false}')"
+      event=$(jq -nc --arg d "$cwd" '{hook_event_name: "Stop", cwd: $d, stop_hook_active: false}') ||
+        fail "cannot write the Stop event"
+      guard_says "$event"
       ;;
     commit-msg)
       file=$root/COMMIT_EDITMSG
@@ -198,8 +209,9 @@ run_example() {
       hook_says "$root/repo" commit-msg "$file" </dev/null
       ;;
     pre-push)
-      tip=$(tip_with "$(jq -c '.files // {}' <<<"$ex")") || fail "cannot build the pushed tip"
-      ref=$(jq -r '.ref // "refs/heads/agent/example"' <<<"$ex")
+      { files=$(jq -c '.files // {}' <<<"$ex") && ref=$(jq -r '.ref // "refs/heads/agent/example"' <<<"$ex"); } ||
+        fail "cannot read the example $ex"
+      tip=$(tip_with "$files") || fail "cannot build the pushed tip"
       hook_says "$root/worktree" pre-push origin "$root/origin.git" <<<"refs/heads/agent/example $tip $ref $zero"
       ;;
   esac
@@ -220,13 +232,15 @@ summary() {
 }
 
 count_rules=0 count=0 failed=0
-single=$work/rule.json
+# The list with the current rule alone, which the entrypoints read.
+one_rule=$work/rule.json
 while IFS= read -r -u 4 rule; do
   count_rules=$((count_rules + 1))
-  name=$(jq -r '.name' <<<"$rule")
-  on=$(jq -r '.on' <<<"$rule")
-  jq -c '{version: 1, rules: [.]}' <<<"$rule" >"$single"
-  if [ "$(jq -r '.who // "agents"' <<<"$rule")" = agents ]; then
+  {
+    name=$(jq -r '.name' <<<"$rule") && on=$(jq -r '.on' <<<"$rule") && who=$(jq -r '.who // "agents"' <<<"$rule") &&
+      jq -c '{version: 1, rules: [.]}' <<<"$rule" >"$one_rule"
+  } || fail "cannot read the rule $rule"
+  if [ "$who" = agents ]; then
     export ASSAY_AGENT=assay-rules-check
   else
     unset ASSAY_AGENT

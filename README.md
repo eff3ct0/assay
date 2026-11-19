@@ -269,7 +269,8 @@ security boundary: matching command text can be evaded (`bash -c`, variables), a
 By `on`:
 
 - `command`, by `assay guard` on the Bash tool's command: `match` is an ast-grep rule for bash, the value of a rule
-  file's `rule:`. Every command rule runs at once, through `ast-grep scan --inline-rules <rules> --stdin`. It matches
+  file's `rule:`, or, with a `rule` key, a rule file's body (`rule`, `constraints`, `utils`, `transform`). Every
+  command rule runs at once, through `ast-grep scan --inline-rules <rules> --stdin`. It matches
   the command's structure, not its text: `cd x && git clone y`, `git -C r worktree add ../x`, `git -c x=y clone z`,
   `FOO=1 git clone z`, and a command inside `$(…)`, a pipeline, a subshell or an `if` match a `has` rule on the name
   `git` and the word `clone`; `git commit -m "explain git clone"` and `echo git clone` do not. A command handed as a
@@ -283,8 +284,9 @@ By `on`:
     `--option=` and a leading `~/` resolved as the shell would; a file that cannot be read (`-`, a variable) holds
     nothing. A match that binds no `$FILE` counts as usual, so one rule covers `--body` and `--body-file` with `any`.
 - `path`, by `assay guard` on the path an Edit, Write or NotebookEdit writes (relative to the cwd when it is not
-  absolute): `match` is a glob or `main-checkout`, a path inside a main checkout's working tree, whose git dir is its
-  common dir; a path that does not exist yet is judged by its nearest existing directory. In a glob, `*` and `?` stay
+  absolute): `match` is a glob or `main-checkout`, a path inside a main checkout: in its working tree, whose git dir
+  is its common dir (a linked worktree's is not), or in the git dir of a repo that is not bare. A path that does not
+  exist yet is judged by its nearest existing directory. In a glob, `*` and `?` stay
   within a path component and `**` crosses them, `[…]` is a class (`[!…]` negated) and `\` makes the next character
   plain. A glob with no `/` matches the file's name (`*.env`), one that starts with `/` the whole path (`/etc/**`),
   any other the path's end at a component boundary (`.ssh/*`).
@@ -353,7 +355,9 @@ checks.${system}.agent-rules = inputs.assay.lib.rulesCheck {
 };
 ```
 
-It builds `assay-rules-check`, which feeds every example to the real entrypoint its rule's `on` names, with that rule
+`assay` (by default the package the module installs by default) is the package whose entrypoints it runs: a
+configuration that sets `programs.assay.package` passes the same one, since command rules depend on its ast-grep. It
+builds `assay-rules-check`, which feeds every example to the real entrypoint its rule's `on` names, with that rule
 alone and `ASSAY_AGENT` set or not as `who` asks: a `PreToolUse` or `Stop` event to `assay guard`, a message file or
 a pushed ref to `assay git-hook`. It fails when a `deny` example passes, an `allow` example is denied, or an
 entrypoint fails on one, naming the rule and the example; its output is the report. It takes seconds and needs no

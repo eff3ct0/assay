@@ -275,6 +275,29 @@ let
       ];
     "an example with a field its kind lacks fails evaluation" =
       !rulesEvaluate [ (rule // { deny = [ { path = "x"; } ]; }) ];
+    "a command match with a rule key takes a rule file's body only" =
+      rulesEvaluate [
+        (
+          rule
+          // {
+            match = {
+              rule.kind = "command";
+              constraints.A.regex = "x";
+            };
+          }
+        )
+      ]
+      && !rulesEvaluate [
+        (
+          rule
+          // {
+            match = {
+              rule.kind = "command";
+              message = "m";
+            };
+          }
+        )
+      ];
     "a cwd on a path rule fails evaluation" =
       !rulesEvaluate [
         (

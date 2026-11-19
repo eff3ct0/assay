@@ -48,6 +48,13 @@ let
     path = "path";
     commit-msg = "message";
   };
+  # The keys of an ast-grep rule file's body that a command rule's match may hold, beside the rule itself.
+  ruleBodyKeys = [
+    "rule"
+    "constraints"
+    "utils"
+    "transform"
+  ];
   predicates = {
     pre-push = [
       "agent-branch"
@@ -90,6 +97,15 @@ let
     lib.optional (
       rule.on == "command" && !builtins.isAttrs rule.match
     ) "${where}: a command rule's match is an ast-grep rule, an attribute set"
+    ++
+      lib.optional
+        (
+          rule.on == "command"
+          && builtins.isAttrs rule.match
+          && rule.match ? rule
+          && removeAttrs rule.match ruleBodyKeys != { }
+        )
+        "${where}: a match with a rule key is a rule file's body: ${lib.concatStringsSep ", " ruleBodyKeys} only"
     ++ lib.optional (
       rule.on != "command" && !builtins.isString rule.match
     ) "${where}: a ${rule.on} rule's match is a string"
@@ -165,8 +181,8 @@ let
       match = mkOption {
         type = types.either types.nonEmptyStr (types.attrsOf types.anything);
         description = ''
-          For `command`, an ast-grep rule for bash (the value of a rule file's `rule:`), matched against the command's
-          structure. For `path`, a glob or `main-checkout`. For `commit-msg`, a regex in jq's syntax. For `pre-push`,
+          For `command`, an ast-grep rule for bash (the value of a rule file's `rule:`), or a rule file's body
+          (`rule` with `constraints`, `utils`, `transform`), matched against the command's structure. For `path`, a glob or `main-checkout`. For `commit-msg`, a regex in jq's syntax. For `pre-push`,
           `agent-branch` or `agents-md`. For `stop`, `unsaved-work`.
         '';
       };
