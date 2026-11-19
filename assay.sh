@@ -1577,7 +1577,10 @@ read_dependencies() {
 	[ -f "$file" ] || return 0
 	while IFS= read -r line || [ -n "$line" ]; do
 		n=$((n + 1))
-		if [[ $line =~ ^[[:space:]]*(#|$) ]]; then continue; fi
+		# case keeps comment text out of Bash's regex trace, where a quote can confuse kcov.
+		case ${line#"${line%%[![:space:]]*}"} in
+		'' | \#*) continue ;;
+		esac
 		[[ $line =~ $re ]] || die "cannot read line $n of $file: $line"
 		spec=${BASH_REMATCH[1]} check=${BASH_REMATCH[3]}
 		dependency_name "$spec" || die "line $n of $file names no package: $line"
