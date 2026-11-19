@@ -509,6 +509,9 @@ let
       w: lib.hasInfix "no commit or push runs assay's rules" w
     ) withoutGit.config.warnings;
     "disabled, the module registers no hook" = !(disabled.config.programs.git.settings ? hook);
+    "disabled, the module installs no skill" =
+      !(disabled.config.home.file ? ".claude/skills/assay-rule")
+      && !(disabled.config.xdg.configFile ? "opencode/skills/assay-rule");
   };
   homeFailed = lib.attrNames (lib.filterAttrs (_: ok: !ok) homeExpectations);
 
@@ -605,6 +608,10 @@ in
         }
         # assay is on the user's PATH.
         test -x ${home.activationPackage}/home-path/bin/assay
+        # The skills, where Claude Code loads them and where OpenCode does, as the repo holds them.
+        for dir in .claude/skills .config/opencode/skills; do
+          cmp ${home.activationPackage}/home-files/$dir/assay-rule/SKILL.md ${../skills/assay-rule/SKILL.md}
+        done
         # The generated git config holds both hooks.
         gitconfig=${home.activationPackage}/home-files/.config/git/config
         for hook in commit-msg pre-push; do
