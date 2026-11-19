@@ -139,8 +139,8 @@ builtin_checks() {
 # repo turns it on in its devenv.nix.
 tla_on() {
 	builtin_checks plain
+	jq '.checks.tla.enable = true' "$ASSAY_CONFIG" >"$T/tla.json"
 	export ASSAY_CONFIG=$T/tla.json
-	jq '.checks.tla.enable = true' "${BATS_TEST_DIRNAME:?}/defaults/plain.json" >"$ASSAY_CONFIG"
 }
 
 # shaped_repo: a repo with one commit that every built-in check passes, as the current directory.

@@ -1873,9 +1873,9 @@ builtin_ast_grep() {
 # them after a violation; Java's temporary files, where TLC unpacks its standard modules, to its tmp/; and
 # -noGenerateSpecTE keeps TLC from writing a trace module beside the spec. Any non-zero exit of TLC fails the check
 # (12 an invariant violated, 11 a deadlock, 150 and 151 parse and configuration errors), its trace in the output.
-tla_fp=0
 builtin_tla() {
-	local dir list cfg spec rc
+	# fp: which of TLC's fingerprint polynomials (-fp) every run uses.
+	local dir list cfg spec rc fp=0
 	local -a cfgs=() failures=()
 	[ $# -eq 0 ] || usage_error "tla takes no argument"
 	find_repo
@@ -1903,10 +1903,10 @@ builtin_tla() {
 			failures+=("$cfg: no $spec beside it")
 			continue
 		fi
-		echo "\$ tlc -workers 1 -fp $tla_fp -noGenerateSpecTE -metadir $dir -config $cfg $spec"
+		echo "\$ tlc -workers 1 -fp $fp -noGenerateSpecTE -metadir $dir -config $cfg $spec"
 		rc=0
 		JDK_JAVA_OPTIONS="${JDK_JAVA_OPTIONS:+$JDK_JAVA_OPTIONS }-Djava.io.tmpdir=$dir/tmp" \
-			tlc -workers 1 -fp "$tla_fp" -noGenerateSpecTE -metadir "$dir" -config "$cfg" "$spec" </dev/null 2>&1 ||
+			tlc -workers 1 -fp "$fp" -noGenerateSpecTE -metadir "$dir" -config "$cfg" "$spec" </dev/null 2>&1 ||
 			rc=$?
 		echo
 		if [ "$rc" -ne 0 ]; then failures+=("$cfg: TLC exit $rc"); fi

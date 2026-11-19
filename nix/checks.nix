@@ -465,6 +465,10 @@ let
       ];
     };
   exampleRules = import ../test/rules/example.nix;
+  # assay's skills, each a directory of skills/, in name order.
+  skillNames = lib.attrNames (
+    lib.filterAttrs (_: type: type == "directory") (builtins.readDir ../skills)
+  );
   home = homeWith {
     programs.assay = {
       enable = true;
@@ -604,17 +608,11 @@ let
       w: lib.hasInfix "no commit or push runs assay's rules" w
     ) withoutGit.config.warnings;
     "disabled, the module registers no hook" = !(disabled.config.programs.git.settings ? hook);
-    "disabled, the module installs no skill" =
-      lib.all
-        (
-          skill:
-          !(disabled.config.home.file ? ".claude/skills/${skill}")
-          && !(disabled.config.xdg.configFile ? "opencode/skills/${skill}")
-        )
-        [
-          "assay-rule"
-          "assay-property"
-        ];
+    "disabled, the module installs no skill" = lib.all (
+      skill:
+      !(disabled.config.home.file ? ".claude/skills/${skill}")
+      && !(disabled.config.xdg.configFile ? "opencode/skills/${skill}")
+    ) skillNames;
   };
   homeFailed = lib.attrNames (lib.filterAttrs (_: ok: !ok) homeExpectations);
 
@@ -738,11 +736,10 @@ in
         }
         # assay is on the user's PATH.
         test -x ${home.activationPackage}/home-path/bin/assay
-        # Every skill, assay-rule and assay-property among them, where Claude Code loads them and where OpenCode
-        # does, as the repo holds them.
+        # Every skill, where Claude Code loads them and where OpenCode does, as the repo holds them, and nothing else.
         for dir in .claude/skills .config/opencode/skills; do
-          [ "$(ls ${home.activationPackage}/home-files/$dir)" = "$(ls ${../skills})" ]
-          for skill in assay-rule assay-property; do
+          [ "$(ls ${home.activationPackage}/home-files/$dir)" = ${lib.escapeShellArg (lib.concatStringsSep "\n" skillNames)} ]
+          for skill in ${lib.escapeShellArgs skillNames}; do
             cmp ${home.activationPackage}/home-files/$dir/$skill/SKILL.md ${../skills}/$skill/SKILL.md
           done
         done

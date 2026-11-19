@@ -180,7 +180,8 @@ assay check · base origin/main@ab03c18 (fork-point)
 Every repo that imports the module runs these, whatever its languages, and all of them but `findings` are fast. The
 tools they run (actionlint, ast-grep, gitleaks and oxfmt from the repo's nixpkgs; qlty, and radarlint for Python and
 Scala, from assay's own packages) join the repo's devenv, so the fix commands run there too. They are default checks:
-turning one off or redefining its `exec` is a loosening.
+turning one off or redefining its `exec` is a loosening. One more built-in check, `tla`, is opt-in: off until a repo
+turns it on ([properties and the `tla` check](#properties-and-the-tla-check)).
 
 - `actionlint`: the GitHub workflows, skipped without `.github/workflows/*`: their syntax, their expressions, and
   shellcheck over each `run:` block. zizmor is not run: its default audits would rewrite every workflow, and its
@@ -288,8 +289,8 @@ assay new-code [--base <rev>]                       the change's new code, as JS
 
 The built-in checks that are assay's own code run as `assay builtin <check>`, which is their `exec`; an agent can run
 one alone. The base is `assay check`'s, from `ASSAY_BASE` when `assay check` runs them. Exit codes: `0` passed, `1`
-failed, `2` could not run, `127` the check's tool (gitleaks, ast-grep, qlty, radarlint, tlc) is missing. Outside the repo's
-devenv they re-execute themselves through it, as `assay check` does.
+failed, `2` could not run, `127` the check's tool (gitleaks, ast-grep, qlty, radarlint, tlc) is missing. Outside the
+repo's devenv they re-execute themselves through it, as `assay check` does.
 
 ## `assay findings`
 

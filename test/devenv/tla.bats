@@ -1,4 +1,4 @@
-# shellcheck disable=SC2016 # the model's TLA+ text is literal
+# shellcheck disable=SC2016 # the model's TLA+ text, and the devenv's own $DEVENV_PROFILE, are literal
 bats_require_minimum_version 1.5.0
 # shellcheck source=test/devenv/helpers.bash
 source "${BATS_TEST_DIRNAME:?}/helpers.bash"
@@ -15,6 +15,9 @@ clock() {
 		'Spec == Init /\ [][Next]_hour' 'InRange == hour \in 1..12' '====' >tla/Clock.tla
 	printf '%s\n' 'SPECIFICATION Spec' 'INVARIANT InRange' >tla/Clock.cfg
 }
+
+# trace <log>: a violation's trace in TLC's output, from its error to the count of states.
+trace() { sed -n '/^Error: /,/ states generated, /p' "$1"; }
 
 @test "tla: off and listed so, without TLC; on, it brings TLC, skips a repo with no model, passes a correct one and fails a broken one with the same trace" {
 	consumer
@@ -56,11 +59,11 @@ clock() {
 	[ "$status" -eq 1 ]
 	[[ $output == *"Error: Invariant InRange is violated."* ]]
 	[[ $output == *$'\ntla/Clock.cfg: TLC exit 12\n1 of 1 TLA+ configuration failed\n'* ]]
-	sed -n '/^Error: /,/ states generated, /p' "$git_dir/assay/tla.log" >"$T/first"
+	trace "$git_dir/assay/tla.log" >"$T/first"
 	grep -qxF 'hour = 13' "$T/first"
 	run --separate-stderr devenv shell -- assay check tla
 	[ "$status" -eq 1 ]
-	sed -n '/^Error: /,/ states generated, /p' "$git_dir/assay/tla.log" >"$T/second"
+	trace "$git_dir/assay/tla.log" >"$T/second"
 	diff "$T/first" "$T/second"
 	prints ' M tla/Clock.tla' git status --porcelain
 }

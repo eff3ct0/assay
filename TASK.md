@@ -37,16 +37,24 @@ The issue (`gh issue view 14 -R eff3ct0/assay`) and its specs (eff3ct0/nixos-con
   `.tla` fails with a plain message; any non-zero exit fails. TLC leaves a timestamped states directory in the metadir
   on a violation, hence the emptying.
 - Tests need `tlaplus18` on the PATH: `nix/test-tools.nix` (dev shell, sandbox) and assay's own `devenv.nix`.
-- The issue's "To verify" (whether a test's own settings override the fixed seed) is checked by running the libraries;
-  what holds goes into the skill.
+- The issue's "To verify" was run with each library (Hypothesis 6.151.10, fast-check 4.10.3 under Vitest 5.1.1,
+  munit-scalacheck 1.3.1, proptest 1.12.0 and 1.6.0/1.7.0): a test's own seed escapes the fixed one
+  (`@settings(derandomize=False)`, fast-check's `seed`; munit-scalacheck's `.useSeed` repeats one value); a test's own
+  case count beats the exploration knob except proptest's `PROPTEST_CASES`; munit-scalacheck's `.check(...)` passes
+  a false property; under Hypothesis's `ci` profile (derandomized) `ASSAY_SEED` changes nothing. The skill says so,
+  and the PR reports the Hypothesis point against the issue's text (it bears on Python's preset, #7).
+- Exploration unsets `ASSAY_SEED` for fast-check and munit-scalacheck: the devenv always exports it.
+
+- The skill says what holds today: the TypeScript and Python presets (issues #7, #8) do not exist yet, so a repo
+  without them brings the wiring with its first property.
+- After the code review (Standards and Spec): "built-in" now covers opt-in checks (GLOSSARY), long lines reflowed,
+  `tla_fp` became a commented local, the test helpers deduplicated, the home check derives the skill names from
+  `skills/`, and the skill gained the `lean` check's "full run, on with the language". Left as they are: a shared
+  `need_tool` helper and the copied `ln -s` loop of the 127 tests (they touch code outside this change), and the
+  Hypothesis point (the skill states the verified fact; the PR raises it for #7).
 
 ## Remaining steps
 
-1. `--list` marks off checks; tests in `test/check.bats`, `test/builtin.bats`, `test/delegate.bats`.
-2. `tla` in `devenv/defaults.nix`, the module's packages rule, `test/defaults/*.json`, `nix/checks.nix` expectations.
-3. `assay builtin tla` in `assay.sh` (usage text too) and `test/tla.bats`.
-4. The skill, `assay-rule`'s ladder step 6, `test/skills.bats`, the home-manager check over every skill.
-5. Devenv tests (`test/devenv/`): `--list` shows `tla (off)`; turned on with no `tla/` it is skipped; with a model,
-   passes and leaves `git status` clean.
-6. README, AGENTS.md, GLOSSARY if needed.
-7. Full suite (`devenv test`), commit, critic, PR with "Closes https://github.com/eff3ct0/assay/issues/14".
+1. Done: `--list`, the `tla` check and `assay builtin tla`, the skill and `assay-rule`'s step, the home check, the
+   devenv test, the docs, the code review's fixes. `nix flake check` passed before the review's fixes.
+2. `devenv test` in full; the critic; the PR with "Closes https://github.com/eff3ct0/assay/issues/14".

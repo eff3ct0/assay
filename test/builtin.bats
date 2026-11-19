@@ -7,7 +7,7 @@ source "${BATS_TEST_DIRNAME:?}/helpers.bash"
 
 untimed() { sed -E 's/ [0-9]+\.[0-9]{2}s/ Ns/g' <<<"$output"; }
 
-@test "assay check --list shows the built-in checks, all fast but findings and tla, and tla off" {
+@test "assay check --list shows the built-in checks, all fast but findings and tla, which is off" {
 	local_repo
 	builtin_checks plain
 	run --separate-stderr "$assay" check --list

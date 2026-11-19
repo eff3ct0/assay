@@ -53,9 +53,9 @@ implementation during a refactor), metamorphic relation (adding a filter never g
 - One property per test, named by the test.
 - Every counterexample found stays in the repo as an explicit example, in the same commit as the fix.
 - It takes its seed and its number of cases from the run. A test's own seed escapes the fixed seed
-  (`@settings(derandomize=False)`, fast-check's `seed`; munit-scalacheck's `.useSeed` draws one value every time), and
-  a test's own number of cases (`max_examples`, `numRuns`) wins over exploration's. A slow munit-scalacheck property
-  sets its count per suite (`override def scalaCheckTestParameters`), which keeps the seed.
+  (`@settings(derandomize=False)`, fast-check's `seed`; munit-scalacheck's `.useSeed` makes every case the same
+  input), and a test's own number of cases (`max_examples`, `numRuns`) wins over exploration's. A slow
+  munit-scalacheck property sets its count per suite (`override def scalaCheckTestParameters`), which keeps the seed.
 - In munit-scalacheck, a property's body is a `Prop`: `.check(...)` returns `Unit`, printing a failure while the test
   passes.
 
@@ -66,21 +66,23 @@ code; they get no check of their own. Every run assay makes uses the fixed seed 
 repo's `devenv.nix`, exported in its devenv), so the same tree gives the same result; changing it in a commit is how a
 repo deliberately explores new inputs.
 
-| Library          | Every run's seed                                  | With a repo's first property       |
-| ---------------- | ------------------------------------------------- | ---------------------------------- |
-| proptest         | `PROPTEST_RNG_SEED=$ASSAY_SEED` in the test check | add proptest 1.7.0 or later (dev)  |
-| Hypothesis       | `--hypothesis-profile=ci` in the test check       | none: Python's preset holds it     |
-| fast-check       | `fc.configureGlobal` in `vitest.setup.ts`         | none: TypeScript's preset holds it |
-| munit-scalacheck | a base trait every property suite extends         | write the trait below              |
+Each language's default test check and preset in assay carry the wiring of the first column. A repo whose language has
+none yet in assay (its test check is its own, or its preset predates the wiring) gets the same wiring with its first
+property: the variable or flag in its test check's command, the file where the library reads it.
+
+| Library          | Every run's seed                                  | With a repo's first property      |
+| ---------------- | ------------------------------------------------- | --------------------------------- |
+| proptest         | `PROPTEST_RNG_SEED=$ASSAY_SEED` in the test check | add proptest 1.7.0 or later (dev) |
+| Hypothesis       | `--hypothesis-profile=ci` in the test check       | none, with Python's preset        |
+| fast-check       | `fc.configureGlobal` in `vitest.setup.ts`         | none, with TypeScript's preset    |
+| munit-scalacheck | a base trait every property suite extends         | write the trait below             |
 
 - proptest before 1.7.0 ignores `PROPTEST_RNG_SEED`.
 - Hypothesis's `ci` profile is derandomized, with no database and no deadline: its inputs follow from each test, so
   `ASSAY_SEED` does not change them. Python's preset adds `hypothesis` and registers the `explore` profile in
-  `conftest.py`.
+  `conftest.py`, `max_examples` from `ASSAY_CASES`.
 - fast-check's `vitest.setup.ts`, named in `vitest.config.ts`'s `setupFiles`, sets `seed` from `ASSAY_SEED` and
   `numRuns` from `ASSAY_CASES`, each when it is set. TypeScript's preset adds `fast-check` and both files.
-- Where the repo lacks a row's wiring (its test check is its own, or its preset predates it), the property comes with
-  it: the variable or flag in the test check's command, the file where the library reads it.
 
 munit-scalacheck's base trait:
 
@@ -149,8 +151,9 @@ Kept in the form the library replays first, in the same commit as the fix:
 - Through devenv's `languages.lean4.enable` (nixpkgs' `lean4`, Lake included), with the Lake package in `lean/`.
 - Without elan, `lean-toolchain` is ignored: the version is the devenv's.
 - Mathlib is decided when a case needs it: it needs elan, a matching toolchain and a cache downloaded over the network.
-- assay gains a `lean` check (`lake build --wfail`, so that a `sorry` fails) with the first Lean case. A proof you
-  write before it exists is that case: tell the user, and run `lake build --wfail` in `lean/` before each commit.
+- assay gains a `lean` check (`lake build --wfail`, so that a `sorry` fails; full run, on with the language) with the
+  first Lean case. A proof you write before it exists is that case: tell the user, and run `lake build --wfail` in
+  `lean/` before each commit.
 
 ## Linking to the code
 

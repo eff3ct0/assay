@@ -112,6 +112,7 @@ frontmatter() { awk -v f="$2" 'NR == 1 && $0 != "---" { exit } NR > 1 && $0 == "
 		'| Hypothesis       | `--hypothesis-profile=ci` in the test check       |' \
 		'| fast-check       | `fc.configureGlobal` in `vitest.setup.ts`         |' \
 		'| munit-scalacheck | a base trait every property suite extends         | write the trait below ' \
+		'Each language'"'"'s default test check and preset in assay carry the wiring of the first column. A repo whose language has' \
 		'override def scalaCheckInitialSeed: String =' \
 		'case Some(n) => super.scalaCheckTestParameters.withMinSuccessfulTests(n.toInt)' \
 		'| proptest         | `PROPTEST_CASES=10000` and no `PROPTEST_RNG_SEED` ' \
@@ -127,7 +128,7 @@ frontmatter() { awk -v f="$2" 'NR == 1 && $0 != "---" { exit } NR > 1 && $0 == "
 		'(`assay.checks.tla.enable = true;`), which brings TLC (`tlaplus18`) into its devenv.' \
 		'- Through devenv'"'"'s `languages.lean4.enable` (nixpkgs'"'"' `lean4`, Lake included), with the Lake package in `lean/`.' \
 		'- Without elan, `lean-toolchain` is ignored: the version is the devenv'"'"'s.' \
-		'- assay gains a `lean` check (`lake build --wfail`, so that a `sorry` fails) with the first Lean case.' \
+		'- assay gains a `lean` check (`lake build --wfail`, so that a `sorry` fails; full run, on with the language) with the' \
 		'A model'"'"'s or proof'"'"'s header lists the files it abstracts, and each of those files carries a comment naming the model' \
 		'Quint (its `verify` downloads Apalache), Apalache (not in nixpkgs), trace validation and model-based test generation.'; do
 		if ! grep -qF -- "$part" "$skill"; then
