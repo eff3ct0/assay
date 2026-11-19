@@ -201,9 +201,16 @@ fixture() {
   [[ $output == *$'\nsrc/app.py:23: radarlint-python/python:S1481: Remove the unused local variable "w".\n'* ]]
   # radarlint is the only plugin, run from the PATH: qlty downloaded nothing, its tools cache holds a lock at most.
   [ "$(grep '^name = ' .qlty/qlty.toml)" = 'name = "radarlint-python"' ]
-  grep -q "^script = \"'$(readlink -f "$(command -v radarlint)")' python \${target}\"$" .qlty/qlty.toml
+  grep -q "^script = \"'$(readlink -f "$(command -v radarlint)")' python \${target} # rules: python:S3776=false scala:S3776=false\"$" \
+    .qlty/qlty.toml
   [ -z "$(find "$HOME/.qlty/cache/tools" -type f ! -name '*.lock' 2>/dev/null)" ]
   [ "$(cat .qlty/configs/radarlint.properties)" = "$(printf '%s\n' radarlint.rules.python.S3776=false radarlint.rules.scala.S3776=false)" ]
+  # A rule turned back on shows at once, though qlty caches radarlint's results for the same files.
+  jq '.findings.rules["python:S3776"] = true' "$ASSAY_CONFIG" >"$T/on.json"
+  ASSAY_CONFIG=$T/on.json run --separate-stderr "$assay" findings --base HEAD
+  echo "$output$stderr"
+  [ "$status" -eq 0 ]
+  grep -q '^src/app.py:1: radarlint-python/python:S3776: ' <<<"$output"
 }
 
 # without <tool>...: the PATH, less those tools: a new directory of links to everything else on it, first one first.
@@ -352,4 +359,20 @@ without() {
   echo "$output"
   [ "$status" -eq 1 ]
   grep -q '^src/b.ts:1: qlty/identical-code: .*: src/b.ts:1-[0-9]*, src/a.ts:1-[0-9]*$' <<<"$output"
+}
+
+@test "a nested block or an expression that starts on new code is new, though the base had one in that file" {
+  local_repo
+  builtin_checks plain
+  fixture tangled.py src/m.py
+  git add src
+  git commit --quiet -m tangled
+  # Another function, nested as deep, takes the old one's place.
+  printf '%s\n' 'def other(rows, n):' '    out = []' '    for row in rows:' '        for cell in row:' \
+    '            if cell:' '                while n > 0:' '                    if cell > n:' \
+    '                        out.append(cell)' '                    n -= 1' '    return out' >src/m.py
+  run --separate-stderr "$assay" builtin findings --base HEAD
+  echo "$output$stderr"
+  [ "$status" -eq 1 ]
+  [ "${lines[0]}" = "src/m.py:7: qlty/nested-control-flow: Deeply nested control flow (level = 5)" ]
 }

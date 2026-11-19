@@ -242,7 +242,8 @@ A **new finding** is one the change introduces, and the `findings` check fails o
 - A smell is about a piece of code (a function, a file, a nested block, an expression, a clone): it is new when the
   base has no counterpart, the same rule in the same file (following renames) and, for one about a function, the same
   function; a clone's place, when the base has no clone's place in the same file between the same files. So a smell
-  that existed at the base and grew, or that the change edits, does not fail.
+  that existed at the base and grew, or that the change edits, does not fail. A nested block or a boolean expression,
+  which has no function to tell it from another of its file, is also new when it starts on new code.
 
 qlty refuses to run without `.qlty/qlty.toml`, which holds store paths: assay writes `.qlty/` on every run, from
 `assay.findings`, and keeps it out of git with a `.qlty/` line in `.git/info/exclude`. A repo that tracks

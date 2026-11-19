@@ -73,7 +73,12 @@ The issue's body is the specification (`gh issue view 11 -R eff3ct0/assay`), wit
   to the first operands); for a clone's place, a clone's place in the same base path between the same set of base
   paths. Not `structural_hash`: appending code to a file whose whole module was a clone turned the clone into the
   function's, with another hash. Counted as multisets: with more at HEAD than at the base, those not starting on new
-  code take the counterparts first. So a smell the base has, grown or edited, never fails.
+  code take the counterparts first. So a smell the base has, grown or edited, never fails. A nested block or a
+  boolean expression is also new when it starts on new code: without a function, a block that replaces another of
+  the same file would otherwise pass (the first critic's failure).
+- radarlint's rules end its script as a shell comment (`# rules: python:S3776=false ...`): qlty keys its cache of a
+  plugin's results by the script, not by `.qlty/configs/radarlint.properties`, so a rule turned back on did not show
+  while the cache held the file (the first critic's failure).
 - duplication's `nodes_threshold` holds for every language: assay writes it for Rust too, whose qlty default is 50,
   since #52 makes values per repo, not per language, and the issue names 64.
 - The base's smells: `git read-tree` of the base into a temporary index, `checkout-index --prefix` into a temporary
@@ -91,9 +96,9 @@ The issue's body is the specification (`gh issue view 11 -R eff3ct0/assay`), wit
 
 ## Remaining steps
 
-Done: packages, `assay findings`, `assay builtin findings`, the module's options, loosenings and default check,
-`test/findings.bats`, `nix/checks.nix`, delegation, `test/devenv/module.bats`, README, AGENTS.md, adoption guide.
-`nix develop -c bats test`, `nix develop -c bats test/devenv`, shellcheck and `nix flake check` passed.
+Done: everything the issue asks for, the code review and its fixes, a first critic (Done failed on the two points
+above, now fixed; Resume, Verbatim and Differential passed). `main` moved meanwhile (the guard, #22): it is merged into
+the branch.
 
-1. `devenv test` in the worktree; the code review; a critic, as the global rules ask.
-2. Remove this file once the last critic passes.
+1. A fresh critic rechecks the two failures, the diff of their fix and the merge's conflict resolution.
+2. Remove this file once that recheck passes.

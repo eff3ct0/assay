@@ -1006,10 +1006,12 @@ builtin_suppressions() {
 
 # .qlty/qlty.toml, from the configuration's `findings` settings (qlty's own defaults for what it leaves out), with
 # radarlint's plugins pointed at $radarlint, an absolute path: qlty runs plugins with an empty PATH, and would
-# download its own tools for its own plugin definitions.
+# download its own tools for its own plugin definitions. The rules end the plugin's script as a shell comment: qlty
+# keys its cache of radarlint's results by the script, not by radarlint.properties.
 # shellcheck disable=SC2016 # jq's $variables and qlty's ${target}, not the shell's
 findings_toml_jq='
 (.findings // {}) as $f
+| (($f.rules // {}) | to_entries | map("\(.key)=\(.value)") | join(" ")) as $rules
 | "# Written by assay on every run, from assay.findings: an edit here does not last.",
   "config_version = \"0\"",
   (($f.smells // {}) | to_entries[] | "", "[smells.\(.key)]", "enabled = \(.value.enable)", "threshold = \(.value.threshold)"),
@@ -1020,7 +1022,8 @@ findings_toml_jq='
     | "", "[plugins.definitions.\($plugin)]", "file_types = [\($language | tojson)]",
       "config_files = [\"radarlint.properties\"]", "latest_version = \"assay\"", "known_good_version = \"assay\"",
       "", "[plugins.definitions.\($plugin).drivers.lint]",
-      "script = \("\($radarlint | @sh) \($language) ${target}" | tojson)", "success_codes = [0, 1]", "output = \"stdout\"",
+      "script = \("\($radarlint | @sh) \($language) ${target} # rules: \($rules)" | tojson)",
+      "success_codes = [0, 1]", "output = \"stdout\"",
       "output_format = \"sarif\"", "output_missing = \"error\"", "batch = true", "cache_results = true"),
   (($f.radarlint // [])[] | "", "[[plugin]]", "name = \("radarlint-\(.)" | tojson)", "version = \"assay\"")
 '
@@ -1060,9 +1063,10 @@ def clone: .ruleId | IN("qlty:identical-code", "qlty:similar-code");
 
 # The findings on the change as one SARIF log, {"runs": [lint, smells]}, each result marked new or not with SARIF's
 # baselineState. A linter'"'"'s finding is new when any of its lines is new code, as qlty keeps them to changed lines. A
-# smell is new when the base has no counterpart: the same rule, file (through renames) and function (a block's or an
-# expression'"'"'s, none: the same rule and file); for a clone'"'"'s place, a clone'"'"'s place in the same file, between the same
-# files. So a smell the base has, grown or edited, is not new. qlty'"'"'s hash of a clone is no identity: a clone grows or
+# smell is new when the base has no counterpart: the same rule, file (through renames) and function; for a clone'"'"'s
+# place, a clone'"'"'s place in the same file, between the same files. So a smell the base has, grown or edited, is not
+# new. A nested block or an expression has no function to tell it from another of the file: it is also new when it
+# starts on new code. qlty'"'"'s hash of a clone is no identity: a clone grows or
 # shrinks to the largest piece of code its places share, so an unrelated edit next to one changes it. With more of one
 # counterpart now than at the base, the ones that do not start on new code take the base'"'"'s first.
 # shellcheck disable=SC2016 # jq's $variables, not the shell's
@@ -1073,6 +1077,7 @@ findings_jq='
   def rule_on: ($rules[.ruleId // "" | sub("^[^:]*:"; "")]) != false;
   def new_code($from; $to): path as $p | any($new_code[$p][]?; .[0] <= $to and $from <= .[1]);
   def on_new_code($run): if about_a_place($run) then new_code(line; last_line) else new_code(line; line) end;
+  def without_function: .ruleId | IN("qlty:nested-control-flow", "qlty:boolean-logic");
   def function: .message.text // "" | capture("\\(count = [0-9]+\\): (?<name>.*)$").name // "";
   def counterpart($paths):
     path as $p
@@ -1092,7 +1097,10 @@ findings_jq='
       ($base_counts[$group[0].key] // 0) as $at_base
       | reduce ($group | sort_by(.on_new_code, (.result | line)) | to_entries[]) as $e (.;
           .[$e.value.i | tostring] = (if $e.key < $at_base then "unchanged" else "new" end)))) as $states
-| ($entries | map(.result + {baselineState: $states[.i | tostring]})) as $smells_results
+| ($entries
+    | map(.result + {baselineState:
+        (if .on_new_code and (.result | without_function) then "new" else $states[.i | tostring] end)}))
+    as $smells_results
 | {"$schema": "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json",
    version: "2.1.0",
    runs: [($lint[0].runs[0] + {results: $lint_results}), ($smells[0].runs[0] + {results: $smells_results})]}
