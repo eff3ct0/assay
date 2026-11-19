@@ -1,0 +1,369 @@
+{
+  "uid": "assay-metrics",
+  "title": "Assay metrics",
+  "schemaVersion": 39,
+  "timezone": "utc",
+  "time": {
+    "from": "now-90d",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "sqlite",
+        "type": "datasource",
+        "query": "frser-sqlite-datasource"
+      },
+      {
+        "name": "repo",
+        "type": "query",
+        "datasource": {
+          "type": "frser-sqlite-datasource",
+          "uid": "${sqlite}"
+        },
+        "query": "SELECT repo FROM repos ORDER BY repo",
+        "refresh": 1,
+        "includeAll": true,
+        "multi": false,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Coverage",
+      "type": "timeseries",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "${sqlite}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "${sqlite}"
+          },
+          "rawQueryText": "SELECT time/86400*86400 AS time, 1.0*sum(c.value->>'covered')/sum(c.value->>'total') AS coverage FROM snapshots,json_each(metrics,'$.coverage') c WHERE repo IN (${repo:sqlstring}) AND time BETWEEN $__from / 1000 AND $__to / 1000 GROUP BY 1 ORDER BY 1",
+          "queryType": "time series",
+          "timeColumns": [
+            "time"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Lint per thousand lines by tool",
+      "type": "timeseries",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "${sqlite}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "${sqlite}"
+          },
+          "rawQueryText": "WITH s AS (SELECT time/86400*86400 day,metrics,(SELECT sum(value->>'lines') FROM json_each(metrics,'$.loc')) loc FROM snapshots WHERE repo IN (${repo:sqlstring}) AND time BETWEEN $__from / 1000 AND $__to / 1000 AND json_type(metrics,'$.lint')='array'), tags AS (SELECT DISTINCT j.value->>'tool' tag FROM s,json_each(metrics,'$.lint') j) SELECT day AS time,tag AS metric,1000.0*sum(coalesce((SELECT sum(value->>'count') FROM json_each(metrics,'$.lint') WHERE value->>'tool'=tag),0))/sum(loc) AS value FROM s,tags WHERE loc IS NOT NULL GROUP BY day,tag ORDER BY day,tag",
+          "queryType": "time series",
+          "timeColumns": [
+            "time"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Smells per thousand lines by kind",
+      "type": "timeseries",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "${sqlite}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "${sqlite}"
+          },
+          "rawQueryText": "WITH s AS (SELECT time/86400*86400 day,metrics,(SELECT sum(value->>'lines') FROM json_each(metrics,'$.loc')) loc FROM snapshots WHERE repo IN (${repo:sqlstring}) AND time BETWEEN $__from / 1000 AND $__to / 1000 AND json_type(metrics,'$.smells')='array'), tags AS (SELECT DISTINCT j.value->>'kind' tag FROM s,json_each(metrics,'$.smells') j) SELECT day AS time,tag AS metric,1000.0*sum(coalesce((SELECT sum(value->>'count') FROM json_each(metrics,'$.smells') WHERE value->>'kind'=tag),0))/sum(loc) AS value FROM s,tags WHERE loc IS NOT NULL GROUP BY day,tag ORDER BY day,tag",
+          "queryType": "time series",
+          "timeColumns": [
+            "time"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Duplicated lines",
+      "type": "timeseries",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "${sqlite}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "${sqlite}"
+          },
+          "rawQueryText": "SELECT time/86400*86400 AS time, 1.0*sum(metrics->>'$.duplication.duplicated')/sum(metrics->>'$.duplication.total') AS duplicated FROM snapshots WHERE repo IN (${repo:sqlstring}) AND time BETWEEN $__from / 1000 AND $__to / 1000 GROUP BY 1 ORDER BY 1",
+          "queryType": "time series",
+          "timeColumns": [
+            "time"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Landed changes per week",
+      "type": "timeseries",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "${sqlite}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "${sqlite}"
+          },
+          "rawQueryText": "SELECT (time+259200)/604800*604800-259200 AS time,sum(pr) AS pull_request,sum(1-pr) AS direct FROM changes WHERE repo IN (${repo:sqlstring}) AND time BETWEEN $__from / 1000 AND $__to / 1000 GROUP BY 1 ORDER BY 1",
+          "queryType": "time series",
+          "timeColumns": [
+            "time"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Reverts \u00b7 rolling 90 days",
+      "type": "timeseries",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "${sqlite}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "${sqlite}"
+          },
+          "rawQueryText": "WITH RECURSIVE days(t) AS (SELECT $__from / 86400000 * 86400 UNION ALL SELECT t+86400 FROM days WHERE t+86400 <= $__to/1000) SELECT t AS time, avg(1.0*revert) AS rate, 0.005 AS reference FROM days LEFT JOIN changes ON repo IN (${repo:sqlstring}) AND changes.time>t-90*86400 AND changes.time<=t GROUP BY t ORDER BY t",
+          "queryType": "time series",
+          "timeColumns": [
+            "time"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Hits per week by check and actor",
+      "type": "timeseries",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "${sqlite}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "${sqlite}"
+          },
+          "rawQueryText": "SELECT (time+259200)/604800*604800-259200 AS time,name||' \u00b7 '||CASE WHEN agent IS NULL THEN 'person' ELSE 'agent' END AS metric,count(*) AS value FROM failures WHERE repo IN (${repo:sqlstring}) AND time BETWEEN $__from / 1000 AND $__to / 1000 GROUP BY 1,2 ORDER BY 1,2",
+          "queryType": "time series",
+          "timeColumns": [
+            "time"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Checks without a hit in 90 days",
+      "type": "table",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "${sqlite}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "${sqlite}"
+          },
+          "rawQueryText": "WITH inventory AS (SELECT * FROM checks UNION SELECT repo,name FROM failures UNION SELECT repo,name FROM repos CROSS JOIN rules) SELECT repo,name FROM inventory i WHERE repo IN (${repo:sqlstring}) AND NOT EXISTS (SELECT 1 FROM failures f WHERE f.repo=i.repo AND f.name=i.name AND time>=unixepoch('now','-90 days')) ORDER BY repo,name",
+          "queryType": "table",
+          "timeColumns": []
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Check duration by repo and mode",
+      "type": "table",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "${sqlite}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "${sqlite}"
+          },
+          "rawQueryText": "WITH runs AS (SELECT repo,event->>'mode' mode,event->>'seconds' seconds,unixepoch(event->>'time') time FROM hits WHERE event->>'source'='check' AND repo IN (${repo:sqlstring})), ranked AS (SELECT *,row_number() OVER w n,count(*) OVER (PARTITION BY repo,mode) size FROM runs WHERE time BETWEEN $__from / 1000 AND $__to / 1000 WINDOW w AS (PARTITION BY repo,mode ORDER BY seconds)) SELECT repo,mode,avg(CASE WHEN n IN ((size+1)/2,(size+2)/2) THEN seconds END) median,max(CASE WHEN n=(95*size+99)/100 THEN seconds END) p95 FROM ranked GROUP BY repo,mode ORDER BY repo,mode",
+          "queryType": "table",
+          "timeColumns": []
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "Repos that have not adopted Assay",
+      "type": "table",
+      "datasource": {
+        "type": "frser-sqlite-datasource",
+        "uid": "${sqlite}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "frser-sqlite-datasource",
+            "uid": "${sqlite}"
+          },
+          "rawQueryText": "SELECT repo FROM repos WHERE repo IN (${repo:sqlstring}) AND state='unadopted' ORDER BY repo",
+          "queryType": "table",
+          "timeColumns": []
+        }
+      ]
+    }
+  ]
+}

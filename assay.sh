@@ -39,6 +39,7 @@ usage: assay check [--fast] [--base <rev>] [<check>...]    run the repo's checks
        assay builtin tla
        assay findings [--base <rev>] [--sarif]             the analyzer's findings on the change
        assay measure                                       the tree's snapshot metrics, as JSON
+       assay collect --db <file>                           collect the configured owners' metrics
        assay new-code [--base <rev>]                       the change's new code, as JSON
        assay rule new <kebab-name> [--lang <lang>] [--from <file>:<line>[-<line>]]
                                                            scaffold an ast-grep rule and its tests
@@ -132,7 +133,9 @@ log_hit() {
       {v: 1, time: (now | todate), source: $source, repo: ($repo | text_or_null), agent: ($agent | text_or_null)}
       + ('"$filter"')') &&
 			mkdir -p "$(dirname "$ASSAY_HITS_LOG")" &&
-			printf '%s\n' "$line" >>"$ASSAY_HITS_LOG"
+			(
+				flock -x 9 && printf '%s\n' "$line" >>"$ASSAY_HITS_LOG"
+			) 9>>"$ASSAY_HITS_LOG.lock"
 	} 2>/dev/null || true
 }
 
@@ -3305,12 +3308,6 @@ cmd_git_hook() {
 	esac
 }
 
-# not_yet <command> <usage>: a subcommand a later version implements.
-not_yet() {
-	echo "usage: assay $1 $2" >&2
-	die "$1 is not implemented yet"
-}
-
 main() {
 	[ $# -ge 1 ] || usage
 	case $1 in
@@ -3350,6 +3347,16 @@ main() {
 		cmd_rule "$@"
 		;;
 	# The machine-level subcommands run outside any devenv and never delegate.
+	collect)
+		shift
+		local dir
+		dir=$(realpath "${BASH_SOURCE[0]}")
+		dir=${dir%/*}
+		export ASSAY_SCHEMA=${assay_schema:-$dir/schema}
+		local -a priority=(nice -n 10)
+		if command -v ionice >/dev/null; then priority+=(ionice -c 3); fi
+		exec "${priority[@]}" "${assay_python:-python3}" "${assay_collect:-$dir/collect.py}" "$@"
+		;;
 	guard)
 		shift
 		cmd_guard "$@"
@@ -3358,7 +3365,6 @@ main() {
 		shift
 		cmd_git_hook "$@"
 		;;
-	collect) not_yet collect "--db <file>    the nightly collector" ;;
 	-h | --help | help)
 		usage_text
 		finish 0

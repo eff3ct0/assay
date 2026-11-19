@@ -7,6 +7,10 @@
   git,
   jq,
   yq-go,
+  python3,
+  flock,
+  util-linux,
+  stdenv,
 }:
 writeShellApplication {
   name = "assay";
@@ -23,13 +27,20 @@ writeShellApplication {
         git
         jq
         yq-go
+        flock
       ]
+      + lib.optionalString stdenv.isLinux ":${lib.getBin util-linux}/bin"
     }
     assay_presets=${../preset}
+    assay_schema=${../schema}
+    assay_collect=${../collect.py}
+    assay_python=${python3.withPackages (p: [ p.jsonschema ])}/bin/python3
   ''
   + builtins.readFile ../assay.sh;
   derivationArgs.postCheck = ''
     install -Dm644 ${../schema/measure.json} "$out/share/assay/schema/measure.json"
+    install -Dm644 ${../schema/collect.sql} "$out/share/assay/schema/collect.sql"
+    install -Dm644 ${../dashboard.json} "$out/share/assay/dashboard.json"
   '';
   meta = {
     description = "A repo's named checks, run the same way from pre-commit, devenv test and an agent's shell";

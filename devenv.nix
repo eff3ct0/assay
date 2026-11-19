@@ -9,6 +9,8 @@
   packages = with pkgs; [
     # ast-grep and yq: the suite runs assay.sh, which finds them on the PATH.
     ast-grep
+    flock
+    sqlite
     git
     jq
     python3Packages.jsonschema

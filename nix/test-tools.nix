@@ -14,6 +14,8 @@ lib.optional (lib.meta.availableOn stdenv.hostPlatform kcov) (callPackage ./kcov
 ++ lib.optional (lib.meta.availableOn stdenv.hostPlatform qlty) qlty
 ++ [
   bats
+  flock
+  sqlite
   shellcheck
   nixfmt
   jq

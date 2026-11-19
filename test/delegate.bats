@@ -139,7 +139,7 @@ not_adopted() {
 	run --separate-stderr "$assay" collect
 	[ "$status" -eq 2 ]
 	[[ ${stderr_lines[0]} == "usage: assay collect "* ]]
-	[ "${stderr_lines[-1]}" = "assay: collect is not implemented yet" ]
+	[ "${stderr_lines[-1]}" = "assay collect: error: the following arguments are required: --db" ]
 	[ ! -e "$T/devenv.calls" ]
 }
 

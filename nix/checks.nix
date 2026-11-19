@@ -476,6 +476,8 @@ let
     programs.assay = {
       enable = true;
       rules = exampleRules;
+      collect.database = "/fixture/metrics.db";
+      collect.owners = [ "sample" ];
     };
   };
   homeConfig = home.config;
@@ -771,6 +773,9 @@ in
             cmp ${home.activationPackage}/home-files/$dir/$skill/SKILL.md ${../skills}/$skill/SKILL.md
           done
         done
+        units=${home.activationPackage}/home-files/.config/systemd/user
+        grep -Fx 'OnCalendar=*-*-* 03:00:00' "$units/assay-collect.timer"
+        grep -Fx 'ExecStart=${assayExe} collect --db /fixture/metrics.db' "$units/assay-collect.service"
         # The generated git config holds both hooks.
         gitconfig=${home.activationPackage}/home-files/.config/git/config
         for hook in commit-msg pre-push; do

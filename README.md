@@ -140,7 +140,7 @@ without `devenv.nix`, or whose devenv does not import assay's module, is exit 2:
 [docs/adoption.md](docs/adoption.md) and says that an adoption is a change of its own, made before other work.
 
 The machine-level subcommands, [`guard` and `git-hook`](#on-a-machine-the-guard-and-the-global-git-hooks) and
-`collect`, never delegate; this version only prints `collect`'s usage.
+`collect`, never delegate.
 
 ## `assay preset`
 
@@ -705,6 +705,33 @@ repo's devenv.
 {"v":1,"time":"2026-11-18T21:05:10Z","source":"guard","repo":"/path/to/repo","agent":"claude-code","event":"PreToolUse","tool":"Bash","rule":"no-clone","decision":"deny"}
 {"v":1,"time":"2026-11-18T21:06:00Z","source":"git-hook","repo":"/path/to/repo","agent":"claude-code","hook":"pre-push","rule":"agent-branch"}
 ```
+
+## Nightly collection
+
+Set `programs.assay.collect.database` to an absolute SQLite path and
+`programs.assay.collect.owners` to the owners to collect. `collect.root` defaults
+to `~/git`. Create the database's parent directory first: the collector needs
+write access and the Grafana reader needs search access and a readable database.
+The module supplies `assay-collect.service` and its nightly user timer only when
+the database is configured. The service can also be started on demand.
+
+For a manual run, `ASSAY_COLLECT_OWNERS` is a JSON array of owner names and
+`ASSAY_COLLECT_ROOT` overrides the Grove root. `assay collect --db FILE` fetches
+each origin and replaces its landed-change history. It measures changed tips in
+temporary archives, sequentially, allowing 30 minutes per repository. Inspect
+`snapshots.error` for failed measurements. An archive does not contain `.git`,
+submodule contents or smudged LFS objects. The collector never backfills.
+
+`ASSAY_HITS_LOG` selects the JSONL spool; one collector/database consumes a spool.
+The writer locks before opening the file, and the collector rotates it under the
+same lock. A pending batch stays recoverable until its SQLite transaction commits.
+`ASSAY_RULES` optionally names the machine's rule list for the inactive-check table.
+The module supplies both paths to the service.
+
+Point a Grafana `frser-sqlite-datasource` at the database, import
+`share/assay/dashboard.json` from the package, then select that datasource.
+The database uses rollback journaling. The raw-count schema is installed at
+`share/assay/schema/collect.sql`; dashboard queries compute the ratios.
 
 ## License
 

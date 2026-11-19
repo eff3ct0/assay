@@ -279,6 +279,23 @@ in
         allow example, which `assay.lib.rulesCheck` feeds to the entrypoints.
       '';
     };
+    collect = {
+      database = mkOption {
+        type = types.nullOr (types.strMatching "/.*");
+        default = null;
+        description = "Absolute SQLite path. Setting it enables the nightly user timer.";
+      };
+      root = mkOption {
+        type = types.strMatching "/.*";
+        default = "${config.home.homeDirectory}/git";
+        description = "Grove root containing the owner directories.";
+      };
+      owners = mkOption {
+        type = types.listOf (types.strMatching "[A-Za-z0-9_][A-Za-z0-9._-]*");
+        default = [ ];
+        description = "Owners whose main checkouts are collected.";
+      };
+    };
     rulesFile = mkOption {
       type = types.path;
       readOnly = true;
@@ -289,6 +306,33 @@ in
   };
 
   config = lib.mkIf cfg.enable {
+    systemd.user.services.assay-collect = lib.mkIf (cfg.collect.database != null) {
+      Unit.Description = "Collect Assay metrics";
+      Service = {
+        Type = "oneshot";
+        ExecStart = lib.escapeShellArgs [
+          (lib.getExe cfg.package)
+          "collect"
+          "--db"
+          cfg.collect.database
+        ];
+        Environment = [
+          "ASSAY_COLLECT_ROOT=${cfg.collect.root}"
+          "ASSAY_COLLECT_OWNERS=${builtins.toJSON cfg.collect.owners}"
+          "ASSAY_HITS_LOG=${config.home.sessionVariables.ASSAY_HITS_LOG}"
+          "ASSAY_RULES=${cfg.rulesFile}"
+          "PATH=${config.home.profileDirectory}/bin:/run/current-system/sw/bin"
+        ];
+      };
+    };
+    systemd.user.timers.assay-collect = lib.mkIf (cfg.collect.database != null) {
+      Unit.Description = "Nightly Assay collection";
+      Timer = {
+        OnCalendar = "*-*-* 03:00:00";
+        Persistent = true;
+      };
+      Install.WantedBy = [ "timers.target" ];
+    };
     home = {
       packages = [ cfg.package ];
       # Only this machine records hits: CI and other machines leave ASSAY_HITS_LOG unset.
