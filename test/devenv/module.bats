@@ -3,7 +3,7 @@ bats_require_minimum_version 1.5.0
 source "$BATS_TEST_DIRNAME/helpers.bash"
 
 @test "devenv test runs every check; git commit runs only the fast ones, through the assay hook" {
-	consumer
+	consumer "$ASSAY_BARE"
 	devenv_nix "{
     assay.checks.quick = { exec = \"echo quick >>$T/ran\"; fast = true; };
     assay.checks.full.exec = \"echo full >>$T/ran\";
@@ -26,7 +26,7 @@ source "$BATS_TEST_DIRNAME/helpers.bash"
 }
 
 @test "a failing check fails devenv test; a failing fast check also fails git commit" {
-	consumer
+	consumer "$ASSAY_BARE"
 	devenv_nix '{
     assay.checks.quick = { exec = "true"; fast = true; };
     assay.checks.full.exec = "echo full failed; exit 3";
@@ -53,7 +53,7 @@ source "$BATS_TEST_DIRNAME/helpers.bash"
 }
 
 @test "inside devenv shell: assay check reports, selects and lists; ASSAY_SEED comes from assay.seed" {
-	consumer
+	consumer "$ASSAY_BARE"
 	# shellcheck disable=SC2016 # the check's own $ASSAY_SEED
 	devenv_nix '{
     assay.checks.lint = { exec = "echo lint"; fast = true; };
@@ -120,7 +120,7 @@ source "$BATS_TEST_DIRNAME/helpers.bash"
 }
 
 @test "a plain definition in the repo changes a field of the hook" {
-	consumer
+	consumer "$ASSAY_BARE"
 	devenv_nix '{ git-hooks.hooks.assay.always_run = false; }'
 	run devenv shell -- true
 	[ "$status" -eq 0 ]
@@ -129,7 +129,7 @@ source "$BATS_TEST_DIRNAME/helpers.bash"
 }
 
 @test "outside the devenv, plain assay check re-executes itself through devenv shell" {
-	consumer
+	consumer "$ASSAY_BARE"
 	devenv_nix '{
     assay.checks.lint = { exec = "echo lint"; fast = true; };
     assay.checks.test.exec = "echo tests failed; exit 1";
@@ -170,10 +170,50 @@ source "$BATS_TEST_DIRNAME/helpers.bash"
 	run --separate-stderr nix run . -- check --list
 	echo "$stderr"
 	[ "$status" -eq 0 ]
-	[ "$output" = "$(printf '%s\n' bats 'deadnix (fast)' nix-flake-check 'nixf-tidy (fast)' 'nixfmt (fast)' \
-		'shellcheck (fast)' 'shfmt (fast)' 'statix (fast)')" ]
+	[ "$output" = "$(printf '%s\n' 'actionlint (fast)' 'agents-md (fast)' bats 'commit-trailers (fast)' 'deadnix (fast)' \
+		'gitleaks (fast)' nix-flake-check 'nixf-tidy (fast)' 'nixfmt (fast)' 'oxfmt (fast)' 'shellcheck (fast)' \
+		'shfmt (fast)' 'statix (fast)' 'suppressions (fast)')" ]
 	run git commit --allow-empty -m "an empty commit"
 	echo "$output"
 	[ "$status" -eq 0 ]
 	[[ $output == *"assay check --fast"*Passed* ]]
+}
+
+@test "a repo that imports assay's module runs the built-in checks, fast, with their tools in its devenv" {
+	consumer
+	shape
+	run --separate-stderr devenv shell -- assay check --list
+	echo "$stderr"
+	[ "$output" = "$(printf '%s (fast)\n' actionlint agents-md commit-trailers gitleaks oxfmt suppressions)" ]
+	run --separate-stderr devenv shell -- bash -c 'command -v oxfmt gitleaks actionlint'
+	[ "$status" -eq 0 ]
+	run devenv test
+	echo "$output"
+	[ "$status" -eq 0 ]
+	# The hook stops a commit whose CLAUDE.md copies AGENTS.md.
+	cp AGENTS.md CLAUDE.md
+	git add CLAUDE.md
+	run git commit -m copy
+	echo "$output"
+	[ "$status" -ne 0 ]
+	[[ $output == *"CLAUDE.md copies AGENTS.md"* ]]
+}
+
+@test "oxfmt follows languages.javascript and its directory in a real devenv" {
+	consumer
+	shape
+	mkdir frontend backend
+	printf '%s\n' '{"a":1,' '"b":2}' | tee frontend/x.json >backend/x.json
+	devenv_nix '{ languages.javascript.enable = true; }'
+	run --separate-stderr devenv shell -- assay check oxfmt
+	echo "$output"
+	[ "$status" -eq 1 ]
+	[[ $output == *"$ oxfmt --check --no-error-on-unmatched-pattern '**/*.{md,mdx,yml,yaml}' '**/*.{js,"* ]]
+	[[ $output == *"frontend/x.json"* && $output == *"backend/x.json"* ]]
+	devenv_nix '{ languages.javascript = { enable = true; directory = "frontend"; }; }'
+	run --separate-stderr devenv shell -- assay check oxfmt
+	echo "$output"
+	[ "$status" -eq 1 ]
+	[[ $output == *" 'frontend/**/*.{js,"* ]]
+	[[ $output == *"frontend/x.json"* && $output != *"backend/x.json"* ]]
 }

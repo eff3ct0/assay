@@ -42,10 +42,11 @@ imports:
 }
 ```
 
-The module builds the CLI with the repo's own nixpkgs and puts it on the PATH, adds a pre-commit hook,
-`devenv shell -- assay check --fast` (git runs hooks outside the devenv), and appends `assay check` to `enterTest`. So
-`git commit` runs the fast checks over what is staged, and `devenv test` runs every pre-commit hook over all files,
-then every check. `devenv.lock` pins assay; `devenv update assay` moves it.
+The module builds the CLI with the repo's own nixpkgs and puts it on the PATH, adds the
+[built-in checks](#built-in-checks) with their tools, adds a pre-commit hook, `devenv shell -- assay check --fast`
+(git runs hooks outside the devenv), and appends `assay check` to `enterTest`. So `git commit` runs the fast checks
+over what is staged, and `devenv test` runs every pre-commit hook over all files, then every check. `devenv.lock` pins
+assay; `devenv update assay` moves it.
 
 ### `assay.checks.<name>`
 
@@ -81,30 +82,6 @@ declares `coverage`.
 - Lowering `assay.coverage.newCode` is a loosening: evaluation fails until `assay.coverage.reason` says why. Raising it
   is free.
 - Whole-tree coverage is a metric, never a check.
-
-### Default checks
-
-Each language's checks are on when the repo enables the language in devenv (`languages.<language>.enable`), are named
-after their tool, and bring their tools into the devenv. Each runs over the files git sees (tracked, or untracked and
-not ignored), never over `.`, so `.devenv/` and other ignored files are never read; with nothing to check, it passes.
-
-| Language | `--fast` | full run only |
-| --- | --- | --- |
-| Nix, `languages.nix.enable` | `nixfmt`, `statix`, `deadnix`, `nixf-tidy` | `nix-flake-check` (`nix flake check`), requires `flake.nix` |
-| bash, `languages.shell.enable` | `shellcheck`, `shfmt` | `bats`, with `coverage` |
-
-- Nix's checks run over the `.nix` files; `nixf-tidy` runs with `--variable-lookup` on each file, and any diagnostic
-  fails it, whatever its severity. Nix has no coverage tool, so a Nix repo has no coverage check.
-- bash's checks run over the shell files `shfmt -f` finds (by extension or shebang, `.bats` files included). shfmt
-  keeps its defaults (tabs). `bats` runs the tracked `.bats` files under kcov, whose Cobertura report,
-  `$ASSAY_DIR/kcov/bats/cobertura.xml`, lists every shell script, those no test runs included, and nothing else.
-  nixpkgs has kcov for Linux only: elsewhere `bats` fails on the missing tool until the repo turns it off with a
-  reason.
-- The commands call three helpers the module puts on the PATH (`devenv/bin`): `assay-files [<glob>...]` (the files
-  git sees that exist, NUL-terminated), `assay-nixf-tidy <file>...` and `assay-bats <dir>`.
-
-`assay.seed` (a positive 32-bit integer, `42` unless set) is exported as `ASSAY_SEED`, so that property-based tests run
-with a fixed seed.
 
 ## `assay check`
 
@@ -142,6 +119,125 @@ so the version the repo pins always decides; `nix run github:eff3ct0/assay -- ch
 The machine-level subcommands, `guard`, `git-hook` and `collect`, never delegate; this version only prints their
 usage.
 
+## Built-in checks
+
+Every repo that imports the module runs these, whatever its languages, and all of them are fast. The tools they run
+(actionlint, gitleaks and oxfmt, from the repo's nixpkgs) join the repo's devenv, so the fix commands run there too.
+They are default checks: turning one off or redefining its `exec` is a loosening.
+
+- `actionlint`: the GitHub workflows, skipped without `.github/workflows/*`: their syntax, their expressions, and
+  shellcheck over each `run:` block. zizmor is not run: its default audits would rewrite every workflow, and its
+  online audits need the network.
+- `agents-md`: `AGENTS.md` and `CLAUDE.md` exist at the root; `CLAUDE.md` is the single line `@AGENTS.md`, or either
+  file is a symlink to the other (`AGENTS.md` or `./AGENTS.md`, and the same for `CLAUDE.md`); a copy fails, even an
+  identical one. The file that holds the instructions has a "Related repos" heading, of any level; whether what it
+  says is right stays prose. `assay builtin agents-md <commit>` reads a commit's tree instead of the working tree,
+  with the same answers.
+- `commit-trailers`: no commit in `base..HEAD` has a line that starts with `Co-Authored-By:`, in any case. In CI it
+  catches what slipped past local hooks (`--no-verify`, commits made on GitHub).
+- `gitleaks`: gitleaks over the files git sees in the working tree, tracked or untracked but not ignored (a local
+  `.env` or `.devenv/` is not read); history is not scanned. A secret is fixed by removing it, and rotating it if it
+  ever left the machine. A false positive's fingerprint, printed with each finding, goes in `.gitleaksignore`; the
+  repo's `.gitleaks.toml` applies as usual.
+- `oxfmt`: oxfmt's defaults over Markdown and YAML in every repo, plus a JavaScript project's own files when
+  `languages.javascript.enable` is set, under `languages.javascript.directory`. The command, run from the root:
+
+  ```sh
+  oxfmt --check --no-error-on-unmatched-pattern '**/*.{md,mdx,yml,yaml}' \
+    '<dir>/**/*.{js,jsx,mjs,cjs,ts,tsx,mts,cts,json,jsonc,json5,css,scss,less,html,vue}'
+  ```
+
+  The second pattern only for JavaScript, with no `<dir>/` at the root. TOML is never checked (cargo and uv write
+  it), JSON only in a JavaScript project, and nothing to check is a pass. The fix is the same command without
+  `--check`, which `assay check` prints with the failure; a bare `oxfmt` would format more. A tool-written file of a
+  checked type (a sops file, say) goes in the repo's `.oxfmtrc.json` under `ignorePatterns`, which is no loosening.
+
+- `suppressions`: a suppression (a comment or attribute that silences a finding at its place) added on new code
+  names the rule it silences and gives a reason. Old suppressions never block a change: one on a line the change
+  leaves alone is not read, and one the change also removes from the same file, with the same marker and rules (a
+  modified or moved line, in a file git sees as the same or renamed), is not new.
+
+The markers `suppressions` knows, by language (by a file's extension, and by its shebang for a shell script without
+one), each in a form that passes:
+
+| Language                                         | Marker                                             | Passes as                                                        |
+| ------------------------------------------------ | -------------------------------------------------- | ---------------------------------------------------------------- |
+| JavaScript, TypeScript (`js` `ts` `vue` and kin) | `eslint-disable`, `-line`, `-next-line`            | `// eslint-disable-next-line no-console -- <why>`                |
+|                                                  | `oxlint-disable`, `-line`, `-next-line`            | `// oxlint-disable-next-line no-console -- <why>`                |
+|                                                  | `@ts-expect-error`                                 | `// @ts-expect-error TS2345: <why>`                              |
+|                                                  | `@ts-ignore`, `@ts-nocheck`                        | never                                                            |
+|                                                  | `Stryker disable`                                  | `// Stryker disable next-line EqualityOperator: <why>`           |
+| Python (`py` `pyi`)                              | `noqa`, `ruff: noqa`, `flake8: noqa`               | `# noqa: E501  # <why>`                                          |
+|                                                  | `type: ignore`                                     | `# type: ignore[attr-defined]  # <why>`                          |
+|                                                  | `pyright: ignore`                                  | `# pyright: ignore[reportAttributeAccessIssue]  # <why>`         |
+|                                                  | `pragma: no cover`, `pragma: no branch`            | `# pragma: no cover  # <why>`                                    |
+| Rust (`rs`)                                      | `#[allow]`, `#[expect]`, `#![allow]`, `#![expect]` | `#[allow(clippy::too_many_lines, reason = "<why>")]`             |
+|                                                  | `#[mutants::skip]`                                 | `#[mutants::skip] // <why>`                                      |
+| Scala (`scala` `sc` `sbt`)                       | `@nowarn`                                          | `@nowarn("cat=deprecation") // <why>`                            |
+|                                                  | `@SuppressWarnings`                                | `@SuppressWarnings(Array("org.wartremover.warts.Var")) // <why>` |
+|                                                  | `scalafix:off`, `scalafix:ok`                      | `// scalafix:ok DisableSyntax.var; <why>`                        |
+| shell (`sh` `bash` `bats`)                       | `shellcheck disable`                               | `# shellcheck disable=SC2086 # <why>`                            |
+| all but shell                                    | `qlty-ignore`                                      | `// qlty-ignore(eslint:camelcase): <why>`                        |
+
+- A marker with a reason field gives the reason there: ESLint's and oxlint's `--`, Rust's `reason = "…"`, Stryker's
+  `:`, scalafix's `;`, `qlty-ignore`'s long form, `@ts-expect-error`'s description. One without (`noqa`,
+  `type: ignore`, `pyright: ignore`, `pragma`, `shellcheck disable`, `@nowarn`, `@SuppressWarnings`,
+  `#[mutants::skip]`) takes a comment on the same line or a comment line just above.
+- Naming the rule: a blanket form fails (`# noqa`, `# type: ignore`, `/* eslint-disable */`, `shellcheck disable=all`,
+  `Stryker disable all`, `qlty-ignore: eslint`). `@ts-expect-error` names the TypeScript error's code, and `pragma`
+  and `#[mutants::skip]` have no rule to name.
+- `ast-grep-ignore` is not this check's: the `ast-grep` check bans it outright.
+
+### New code
+
+**New code** is the lines a change adds or modifies, compared with its base: the base's tree against the working
+tree, untracked files included (ignored ones not), following renames. Binary files and submodules add none.
+`suppressions` reads it, and so will the `findings` check. `assay new-code` prints it:
+
+```sh
+$ assay new-code
+{"src/app.py":[[3,5],[12,12]],"src/new.py":[[1,40]]}
+```
+
+### `assay builtin` and `assay new-code`
+
+```
+assay builtin agents-md [<commit>]                  the AGENTS.md / CLAUDE.md shape, of the working tree or a commit
+assay builtin commit-trailers [--base <rev>]        no Co-Authored-By in base..HEAD
+assay builtin gitleaks                              secrets in the files git sees
+assay builtin suppressions [--base <rev>]           new suppressions name their rule and give a reason
+assay new-code [--base <rev>]                       the change's new code, as JSON
+```
+
+The built-in checks that are assay's own code run as `assay builtin <check>`, which is their `exec`; an agent can run
+one alone. The base is `assay check`'s, from `ASSAY_BASE` when `assay check` runs them. Exit codes: `0` passed, `1`
+failed, `2` could not run, `127` the check's tool (gitleaks) is missing. Outside the repo's devenv they re-execute themselves through it, as `assay check` does.
+
+## Each language's checks
+
+Each language's checks are on when the repo enables the language in devenv (`languages.<language>.enable`), are named
+after their tool, and bring their tools into the devenv. They are default checks: turning one off, redefining its
+`exec` or changing its `coverage` is a loosening. Each runs over the files git sees (tracked, or untracked and
+not ignored), never over `.`, so `.devenv/` and other ignored files are never read; with nothing to check, it passes.
+
+| Language                       | `--fast`                                   | full run only                                               |
+| ------------------------------ | ------------------------------------------ | ----------------------------------------------------------- |
+| Nix, `languages.nix.enable`    | `nixfmt`, `statix`, `deadnix`, `nixf-tidy` | `nix-flake-check` (`nix flake check`), requires `flake.nix` |
+| bash, `languages.shell.enable` | `shellcheck`, `shfmt`                      | `bats`, with `coverage`                                     |
+
+- Nix's checks run over the `.nix` files; `nixf-tidy` runs with `--variable-lookup` on each file, and any diagnostic
+  fails it, whatever its severity. Nix has no coverage tool, so a Nix repo has no coverage check.
+- bash's checks run over the shell files `shfmt -f` finds (by extension or shebang, `.bats` files included). shfmt
+  keeps its defaults (tabs). `bats` runs the tracked `.bats` files under kcov, whose Cobertura report,
+  `$ASSAY_DIR/kcov/bats/cobertura.xml`, lists every shell script, those no test runs included, and nothing else.
+  nixpkgs has kcov for Linux only: elsewhere `bats` fails on the missing tool until the repo turns it off with a
+  reason.
+- The commands call three helpers the module puts on the PATH (`devenv/bin`): `assay-files [<glob>...]` (the files
+  git sees that exist, NUL-terminated), `assay-nixf-tidy <file>...` and `assay-bats <dir>`.
+
+`assay.seed` (a positive 32-bit integer, `42` unless set) is exported as `ASSAY_SEED`, so that property-based tests run
+with a fixed seed.
+
 ## The hits log
 
 When `ASSAY_HITS_LOG` names a file, each `assay check` run appends one JSON line to it, passing or not. Append-only
@@ -154,7 +250,7 @@ it, never the `assay` that delegates to the repo's devenv.
 - `check`: `mode` (`fast` or `full`), `only` (the check names given, as given; empty for all), `seconds`, `failed`
   (the failing checks' names) and `exit`.
 
-```json
+```jsonl
 {"v":1,"time":"2026-11-18T21:04:05Z","source":"check","repo":"/path/to/repo","agent":null,"mode":"fast","only":[],"seconds":0.42,"failed":["lint"],"exit":1}
 ```
 

@@ -117,3 +117,23 @@ local_repo() {
 # sha <rev> [dir]
 sha() { git -C "${2:-.}" rev-parse "$1"; }
 short() { git -C "${2:-.}" rev-parse --short "$1"; }
+
+# builtin_checks <setup>: the configuration assay's devenv module writes for a devenv setup, test/defaults/<setup>.json
+# (plain, javascript or javascript-frontend; nix flake check compares each with the module's), with this checkout's
+# assay on the PATH for the checks that call it.
+builtin_checks() {
+	export ASSAY_CONFIG=$BATS_TEST_DIRNAME/defaults/$1.json
+	PATH=$DEVENV_STUB_PROFILE:$PATH
+}
+
+# shaped_repo: a repo with one commit that every built-in check passes, as the current directory.
+shaped_repo() {
+	local_repo
+	printf '%s\n' '# repo' '' '## Related repos' '' '- Depends on: none.' >AGENTS.md
+	echo '@AGENTS.md' >CLAUDE.md
+	mkdir -p .github/workflows
+	printf '%s\n' 'name: check' 'on:' '  push:' 'jobs:' '  check:' '    runs-on: ubuntu-latest' '    steps:' \
+		'      - run: echo ok' >.github/workflows/check.yml
+	git add -A
+	git commit --quiet -m shaped
+}

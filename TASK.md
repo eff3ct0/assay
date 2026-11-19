@@ -71,6 +71,7 @@ line 0, since kcov's walk misses a `.bash` library without "sh" in its first 80 
 1. Critic, then one recheck critic on its failures.
 
 Open decisions for p3rkins (not to be decided by an agent):
+
 - `.git-blame-ignore-revs` for the shfmt commit (`style: shfmt's reformat…`) only makes sense if the branch is not
   squash-merged.
 - kcov is nixpkgs' kcov patched (`nix/kcov.nix`), so it builds from source where no cache has it.

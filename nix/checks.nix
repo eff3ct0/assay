@@ -2,63 +2,97 @@
 let
   inherit (pkgs) lib;
 
-  # A stand-in for the devenv options the module sets, so that it evaluates without devenv.
-  devenvStub = {
-    options = {
-      packages = lib.mkOption {
-        type = lib.types.listOf lib.types.package;
-        default = [ ];
+  # A stand-in for the devenv options the module sets or reads, so that it evaluates without devenv.
+  devenvStub =
+    { config, ... }:
+    {
+      options = {
+        devenv.root = lib.mkOption {
+          type = lib.types.str;
+          default = "/repo";
+        };
+        languages = {
+          javascript = {
+            enable = lib.mkOption {
+              type = lib.types.bool;
+              default = false;
+            };
+            directory = lib.mkOption {
+              type = lib.types.str;
+              default = config.devenv.root;
+            };
+          };
+          nix.enable = lib.mkEnableOption "Nix";
+          shell.enable = lib.mkEnableOption "shell";
+        };
+        packages = lib.mkOption {
+          type = lib.types.listOf lib.types.package;
+          default = [ ];
+        };
+        env = lib.mkOption {
+          type = lib.types.attrsOf lib.types.str;
+          default = { };
+        };
+        git-hooks.hooks = lib.mkOption {
+          type = lib.types.attrsOf (
+            lib.types.submodule { freeformType = lib.types.attrsOf lib.types.anything; }
+          );
+          default = { };
+        };
+        enterTest = lib.mkOption {
+          type = lib.types.lines;
+          default = "";
+        };
+        assertions = lib.mkOption {
+          type = lib.types.listOf lib.types.attrs;
+          default = [ ];
+        };
       };
-      env = lib.mkOption {
-        type = lib.types.attrsOf lib.types.str;
-        default = { };
-      };
-      git-hooks.hooks = lib.mkOption {
-        type = lib.types.attrsOf (
-          lib.types.submodule { freeformType = lib.types.attrsOf lib.types.anything; }
-        );
-        default = { };
-      };
-      enterTest = lib.mkOption {
-        type = lib.types.lines;
-        default = "";
-      };
-      assertions = lib.mkOption {
-        type = lib.types.listOf lib.types.attrs;
-        default = [ ];
-      };
-      languages.nix.enable = lib.mkEnableOption "Nix";
-      languages.shell.enable = lib.mkEnableOption "shell";
     };
-  };
 
-  # The module with two default checks, `demo` and `tested` (which writes a coverage report and needs a tool), and
-  # a repo's own definitions.
-  evalWith =
-    repo:
+  # The module with the given default checks, and a repo's own definitions.
+  evalModule =
+    defaults: repo:
     (lib.evalModules {
       modules = [
         devenvStub
-        (import ../devenv/module.nix {
-          defaults = _: {
-            demo = {
-              exec = "true";
-              fast = true;
-            };
-            tested = {
-              exec = "run-tests";
-              coverage = "$ASSAY_DIR/t.xml";
-              packages = [ pkgs.hello ];
-            };
-          };
-        })
+        (import ../devenv/module.nix { inherit defaults; })
         { _module.args.pkgs = pkgs; }
         repo
       ];
     }).config;
 
+  # The module with two default checks, `demo` and `tested` (which writes a coverage report and needs a tool).
+  evalWith = evalModule (_: {
+    demo = {
+      exec = "true";
+      fast = true;
+    };
+    tested = {
+      exec = "run-tests";
+      coverage = "$ASSAY_DIR/t.xml";
+      packages = [ pkgs.hello ];
+    };
+  });
+
+  # The module with assay's own default checks, the built-in ones.
+  evalBuiltin = evalModule (import ../devenv/defaults.nix);
+  builtinPlain = evalBuiltin { };
+  builtinJavascript = evalBuiltin { languages.javascript.enable = true; };
+  javascriptIn =
+    directory:
+    evalBuiltin {
+      languages.javascript = {
+        enable = true;
+        inherit directory;
+      };
+    };
+  builtinFrontend = javascriptIn "./frontend";
+  oxfmtExec = config: config.assay.checks.oxfmt.exec;
+
   # Whether the configuration file can be produced.
   evaluates = repo: (builtins.tryEval (evalWith repo).env.ASSAY_CONFIG).success;
+  evaluatesBuiltin = repo: (builtins.tryEval (evalBuiltin repo).env.ASSAY_CONFIG).success;
 
   plain = evalWith { };
   off = evalWith {
@@ -101,19 +135,12 @@ let
   };
   names = config: map (p: lib.getName p) config.packages;
 
-  # The module with assay's own defaults (devenv/defaults.nix), for the languages a repo enables.
-  withDefaults =
-    repo:
-    (lib.evalModules {
-      modules = [
-        devenvStub
-        (import ../devenv/module.nix { defaults = import ../devenv/defaults.nix; })
-        { _module.args.pkgs = pkgs; }
-        repo
-      ];
-    }).config;
-  nixRepo = withDefaults { languages.nix.enable = true; };
-  shellRepo = withDefaults { languages.shell.enable = true; };
+  # The module with each language's default checks alone (devenv/languages/), for the languages a repo enables.
+  withLanguages = evalModule (
+    args: import ../devenv/languages/nix.nix args // import ../devenv/languages/bash.nix args
+  );
+  nixRepo = withLanguages { languages.nix.enable = true; };
+  shellRepo = withLanguages { languages.shell.enable = true; };
   # Each check's name with what `assay check --list` shows of it: fast or not, and what it requires and covers.
   listed =
     config:
@@ -189,7 +216,22 @@ let
         "hello"
         "diff-cover"
       ];
-    "a repo that enables no language gets no default check" = (withDefaults { }).assay.checks == { };
+    "a repo that enables no language gets no language's check" =
+      (withLanguages { }).assay.checks == { };
+    "assay's defaults are the built-in checks and the enabled languages' checks" =
+      let
+        all =
+          lib.attrNames
+            (evalBuiltin {
+              languages.nix.enable = true;
+              languages.shell.enable = true;
+            }).assay.checks;
+      in
+      lib.all (n: builtins.elem n all) (
+        lib.attrNames builtinPlain.assay.checks
+        ++ lib.attrNames nixRepo.assay.checks
+        ++ lib.attrNames shellRepo.assay.checks
+      );
     "Nix's defaults: nixfmt, statix, deadnix and nixf-tidy fast, nix flake check when flake.nix exists" =
       listed nixRepo == {
         nixfmt = fastCheck;
@@ -236,7 +278,7 @@ let
         ];
     "dropping the bats check's coverage is a loosening" =
       !(builtins.tryEval
-        (withDefaults {
+        (withLanguages {
           languages.shell.enable = true;
           assay.checks.bats.coverage = null;
         }).env.ASSAY_CONFIG
@@ -246,6 +288,29 @@ let
         "assay"
         "hello"
       ];
+    "the built-in checks' tools join every repo's devenv, beside the CLI" =
+      map lib.getName builtinPlain.packages == [
+        "assay"
+        "actionlint"
+        "gitleaks"
+        "oxfmt"
+      ];
+    "a JavaScript directory given absolute, relative or with a trailing slash is the same pattern" =
+      lib.all (d: oxfmtExec (javascriptIn d) == oxfmtExec builtinFrontend)
+        [
+          "/repo/frontend"
+          "frontend"
+          "frontend/"
+        ];
+    "a JavaScript directory that is the root adds no prefix" =
+      lib.all (d: oxfmtExec (javascriptIn d) == oxfmtExec builtinJavascript)
+        [
+          "/repo"
+          "."
+          "./"
+        ];
+    "redefining a built-in check's exec is a loosening" =
+      !evaluatesBuiltin { assay.checks.oxfmt.exec = "oxfmt --check ."; };
   };
   failed = lib.attrNames (lib.filterAttrs (_: ok: !ok) expectations);
 in
@@ -289,6 +354,15 @@ in
           ${lowered.env.ASSAY_CONFIG}
         jq -e '.checks.tested.coverage == null and .loosenings == [{check: "tested", kind: "coverage", reason: "no report for the test"}]' \
           ${uncovered.env.ASSAY_CONFIG}
+        # The built-in checks give the configurations the bats suite runs.
+        same() {
+          jq -S . "$1" >a.json
+          jq -S . "$2" >b.json
+          diff a.json b.json || { echo "FAIL: $1 differs from $2" >&2; exit 1; }
+        }
+        same ${builtinPlain.env.ASSAY_CONFIG} ${../test/defaults/plain.json}
+        same ${builtinJavascript.env.ASSAY_CONFIG} ${../test/defaults/javascript.json}
+        same ${builtinFrontend.env.ASSAY_CONFIG} ${../test/defaults/javascript-frontend.json}
         touch $out
       '';
 }

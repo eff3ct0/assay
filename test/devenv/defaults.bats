@@ -4,7 +4,8 @@ bats_require_minimum_version 1.5.0
 source "$BATS_TEST_DIRNAME/helpers.bash"
 
 # Nix's and bash's default checks, through the real devenv: a fixture project per language, each check failing on a
-# defect and passing on its fix, and the coverage of new code of bash's test check.
+# defect and passing on its fix, and the coverage of new code of bash's test check. The consumers import a copy of
+# assay with the languages' default checks alone, so that the built-in ones stay out of the way.
 
 # check_fails <check> <text>: `assay check <check>` fails, and its output holds the text.
 check_fails() {
@@ -30,7 +31,7 @@ nix_fixture() {
 }
 
 @test "Nix: assay check --list shows nixfmt, statix, deadnix and nixf-tidy as fast, nix flake check as full" {
-	consumer
+	consumer "$ASSAY_LANGUAGES"
 	devenv_nix '{ languages.nix.enable = true; }'
 	run --separate-stderr devenv shell -- assay check --list
 	[ "$status" -eq 0 ]
@@ -38,7 +39,7 @@ nix_fixture() {
 }
 
 @test "Nix: each check fails on its defect and passes on its fix; .devenv/ is never read; no flake.nix, no flake check" {
-	consumer
+	consumer "$ASSAY_LANGUAGES"
 	devenv_nix '{ languages.nix.enable = true; }'
 	nix_fixture
 	# Every defect at once, where only an ignored directory holds it.
@@ -73,7 +74,7 @@ nix_fixture() {
 }
 
 @test "Nix: nix flake check runs once flake.nix exists, and fails with the flake" {
-	consumer
+	consumer "$ASSAY_LANGUAGES"
 	devenv_nix '{ languages.nix.enable = true; }'
 	printf '%s\n' '{' '  outputs = _: throw "a broken flake";' '}' >flake.nix
 	git add flake.nix
@@ -96,7 +97,7 @@ bash_fixture() {
 }
 
 @test "bash: assay check --list shows shellcheck and shfmt as fast, bats as full; a tree with no shell file passes" {
-	consumer
+	consumer "$ASSAY_LANGUAGES"
 	devenv_nix '{ languages.shell.enable = true; }'
 	run --separate-stderr devenv shell -- assay check --list
 	[ "$status" -eq 0 ]
@@ -108,7 +109,7 @@ bash_fixture() {
 }
 
 @test "bash: shellcheck and shfmt fail on their defects and pass on the fix; bats' report lists a script no test runs" {
-	consumer
+	consumer "$ASSAY_LANGUAGES"
 	devenv_nix '{ languages.shell.enable = true; }'
 	bash_fixture
 	check_passes
@@ -130,7 +131,7 @@ bash_fixture() {
 }
 
 @test "bash: new lines no test runs fail bats through diff-cover; covering them passes; a lower newCode needs a reason" {
-	consumer
+	consumer "$ASSAY_LANGUAGES"
 	devenv_nix '{ languages.shell.enable = true; }'
 	bash_fixture
 	printf '%s\n' 'farewell() {' '	echo "bye $1"' '}' >>lib/greet.sh

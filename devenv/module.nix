@@ -14,7 +14,10 @@ let
   # Built with the repo's own pkgs, so the input can stay `flake: false`.
   assay = pkgs.callPackage ../nix/package.nix { };
 
-  defaultChecks = defaults { inherit config lib pkgs; };
+  defaults' = defaults { inherit config lib pkgs; };
+  # The checks, without the tools each one lists.
+  defaultChecks = lib.mapAttrs (_: d: removeAttrs d [ "packages" ]) defaults';
+  defaultTools = lib.unique (lib.concatMap (d: d.packages or [ ]) (lib.attrValues defaults'));
 
   # The coverage of new code assay asks for, in percent of the new lines a check's report can cover.
   defaultNewCode = 80;
@@ -194,15 +197,13 @@ in
   };
 
   config = {
-    assay.checks = lib.mapAttrs (
-      _: d: lib.mapAttrs (_: mkDefault) (removeAttrs d [ "packages" ])
-    ) defaultChecks;
+    assay.checks = lib.mapAttrs (_: lib.mapAttrs (_: mkDefault)) defaultChecks;
 
     # The CLI, the tools of assay's default checks, and diff-cover when an enabled check declares coverage.
     packages = [
       assay
     ]
-    ++ lib.unique (lib.concatMap (d: d.packages or [ ]) (lib.attrValues defaultChecks))
+    ++ defaultTools
     ++ lib.optional (lib.any (c: c.enable && c.coverage != null) (
       lib.attrValues cfg.checks
     )) pkgs.python3Packages.diff-cover;

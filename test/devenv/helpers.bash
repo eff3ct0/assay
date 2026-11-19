@@ -47,6 +47,17 @@ _: {
 }
 EOF
 	git -C "$ASSAY_WITH_DEFAULT" commit --quiet -am "a default check"
+	# The same module with no default check, for the tests of the runner itself.
+	export ASSAY_BARE=$BATS_FILE_TMPDIR/assay-bare
+	copy_assay "$ASSAY_BARE"
+	echo '_: { }' >"$ASSAY_BARE/devenv/defaults.nix"
+	git -C "$ASSAY_BARE" commit --quiet -am "no default check"
+	# The same module with each language's default checks alone, without the built-in ones.
+	export ASSAY_LANGUAGES=$BATS_FILE_TMPDIR/assay-languages
+	copy_assay "$ASSAY_LANGUAGES"
+	echo 'args: import ./languages/nix.nix args // import ./languages/bash.nix args' \
+		>"$ASSAY_LANGUAGES/devenv/defaults.nix"
+	git -C "$ASSAY_LANGUAGES" commit --quiet -am "the languages' default checks alone"
 }
 
 setup() {
@@ -78,6 +89,15 @@ EOF
 	echo '{ }' >devenv.nix
 	git add -A
 	git commit --quiet -m init
+}
+
+# shape: commit an AGENTS.md with a "Related repos" section and a CLAUDE.md that is the line @AGENTS.md, the shape the
+# agents-md check asks for.
+shape() {
+	printf '%s\n' '# repo' '' '## Related repos' '' '- Depends on: none.' >AGENTS.md
+	echo '@AGENTS.md' >CLAUDE.md
+	git add AGENTS.md CLAUDE.md
+	git commit --quiet -m shape
 }
 
 # devenv_nix <text>: the repo's devenv.nix.

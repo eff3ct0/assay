@@ -2,6 +2,7 @@
   lib,
   writeShellApplication,
   coreutils,
+  gawk,
   git,
   jq,
 }:
@@ -13,6 +14,7 @@ writeShellApplication {
     assay_tools=${
       lib.makeBinPath [
         coreutils
+        gawk
         git
         jq
       ]
