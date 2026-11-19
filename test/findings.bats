@@ -241,7 +241,7 @@ without() {
   local_repo
   builtin_checks plain
   mkdir "$T/bin"
-  printf '%s\n' '#!/usr/bin/env bash' 'echo "qlty broke" >&2' 'exit 99' >"$T/bin/qlty"
+  printf '%s\n' '#!/bin/sh' 'echo "qlty broke" >&2' 'exit 99' >"$T/bin/qlty"
   chmod +x "$T/bin/qlty"
   PATH=$T/bin:$PATH
   run --separate-stderr "$assay" findings

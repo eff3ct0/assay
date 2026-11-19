@@ -103,9 +103,10 @@ usage.
 
 ## Built-in checks
 
-Every repo that imports the module runs these, whatever its languages, and all of them are fast. The tools they run
-(actionlint, gitleaks and oxfmt, from the repo's nixpkgs) join the repo's devenv, so the fix commands run there too.
-They are default checks: turning one off or redefining its `exec` is a loosening.
+Every repo that imports the module runs these, whatever its languages, and all of them but `findings` are fast. The
+tools they run (actionlint, gitleaks and oxfmt from the repo's nixpkgs; qlty, and radarlint for Python and Scala, from
+assay's own packages) join the repo's devenv, so the fix commands run there too. They are default checks: turning one
+off or redefining its `exec` is a loosening.
 
 - `actionlint`: the GitHub workflows, skipped without `.github/workflows/*`: their syntax, their expressions, and
   shellcheck over each `run:` block. zizmor is not run: its default audits would rewrite every workflow, and its
@@ -117,6 +118,7 @@ They are default checks: turning one off or redefining its `exec` is a loosening
   with the same answers.
 - `commit-trailers`: no commit in `base..HEAD` has a line that starts with `Co-Authored-By:`, in any case. In CI it
   catches what slipped past local hooks (`--no-verify`, commits made on GitHub).
+- `findings`, in the full run only: no new finding among those [`assay findings`](#assay-findings) shows.
 - `gitleaks`: gitleaks over the files git sees in the working tree, tracked or untracked but not ignored (a local
   `.env` or `.devenv/` is not read); history is not scanned. A secret is fixed by removing it, and rotating it if it
   ever left the machine. A false positive's fingerprint, printed with each finding, goes in `.gitleaksignore`; the
@@ -174,7 +176,7 @@ one), each in a form that passes:
 
 **New code** is the lines a change adds or modifies, compared with its base: the base's tree against the working
 tree, untracked files included (ignored ones not), following renames. Binary files and submodules add none.
-`suppressions` reads it, and so will the `findings` check. `assay new-code` prints it:
+`suppressions` and the `findings` check read it. `assay new-code` prints it:
 
 ```sh
 $ assay new-code
@@ -188,12 +190,95 @@ assay builtin agents-md [<commit>]                  the AGENTS.md / CLAUDE.md sh
 assay builtin commit-trailers [--base <rev>]        no Co-Authored-By in base..HEAD
 assay builtin gitleaks                              secrets in the files git sees
 assay builtin suppressions [--base <rev>]           new suppressions name their rule and give a reason
+assay builtin findings [--base <rev>]               no new finding on the change
 assay new-code [--base <rev>]                       the change's new code, as JSON
 ```
 
 The built-in checks that are assay's own code run as `assay builtin <check>`, which is their `exec`; an agent can run
 one alone. The base is `assay check`'s, from `ASSAY_BASE` when `assay check` runs them. Exit codes: `0` passed, `1`
-failed, `2` could not run, `127` the check's tool (gitleaks) is missing. Outside the repo's devenv they re-execute themselves through it, as `assay check` does.
+failed, `2` could not run, `127` the check's tool (gitleaks, qlty, radarlint) is missing. Outside the repo's devenv
+they re-execute themselves through it, as `assay check` does.
+
+## `assay findings`
+
+```
+assay findings [--base <rev>] [--sarif]             the analyzer's findings on the change
+```
+
+The **analyzer** an agent consults about its own change while it works: the qlty CLI, run in the repo itself, with no
+server. It runs `qlty check --upstream <base>` (lint findings, on changed lines only) and
+`qlty smells --upstream <base>` (every smell of a changed file). The base is `assay check`'s. Outside the repo's
+devenv it re-executes itself through it, as `assay check` does.
+
+qlty runs only what no other check runs, so that a finding fails one check only:
+
+- radarlint's plugins (SonarSource's analyzers) for Python and Scala, in a repo that sets `languages.python.enable` or
+  `languages.scala.enable`, with Sonar's cognitive complexity (`S3776`) off: complexity has one source, the smells;
+- smells, for TypeScript, Rust, Python and Scala: function and file complexity, nested control flow, parameters,
+  return statements, boolean logic, and identical or similar code, a clone naming each of its places. Nix and bash
+  have none: qlty's smells do not parse them.
+- Not qlty's shellcheck, shfmt, ESLint, clippy, ruff or Nix plugins: those tools are checks of their own.
+
+Output, on stdout: the findings by file, the lint findings first, then the smells, each as
+`<path>:<line>: <tool>/<rule>: <message>`, and a count. A finding that does not fail the `findings` check ends in
+`(not on new code)` or `(at the base too)`:
+
+```
+$ assay findings
+src/app.py:23: radarlint-python/python:S1481: Remove the unused local variable "w".
+src/app.py:1: qlty/function-complexity: Function with high complexity (count = 28): tangled (at the base too)
+src/app.py:7: qlty/nested-control-flow: Deeply nested control flow (level = 5) (not on new code)
+
+3 findings on the change, 1 of them new: the findings check fails on those
+```
+
+`--sarif` prints one SARIF 2.1.0 log with two runs, the lint findings and the smells, each result's `baselineState`
+`new` or `unchanged`. Exit codes: `0` whenever it ran, with findings or without, since consulting the analyzer stops
+nobody; `2` when it could not run (qlty missing or failing included).
+
+A **new finding** is one the change introduces, and the `findings` check fails on each new one, whatever its level:
+
+- A finding about a line (radarlint's, nested control flow, boolean logic) is new when its line, the one printed, is
+  new code.
+- A finding about a function or a file (function and file complexity, parameters, return statements) is new when the
+  base has no counterpart: the same rule, file (following renames) and function. So a smell that existed at the base
+  and grew does not fail.
+- A clone's place is new when the base has no clone's place in the same file between the same files.
+
+qlty refuses to run without `.qlty/qlty.toml`, which holds store paths: assay writes `.qlty/` on every run, from
+`assay.findings`, and keeps it out of git with a `.qlty/` line in `.git/info/exclude`. A repo that tracks
+`.qlty/qlty.toml` is exit 2. qlty runs with `QLTY_TELEMETRY=off` (its package sets it on every run), and its plugins
+run the tools of the repo's devenv: qlty downloads nothing. qlty is packaged for `x86_64-linux` only; elsewhere the
+`findings` check exits 127.
+
+### `assay.findings`
+
+qlty's defaults hold: function complexity 18, file complexity 50, nested control flow 5, function parameters 6,
+return statements 6, boolean logic 4, identical and similar code 15 lines, duplication's `nodes_threshold` 64 (Rust's
+own, 50, stays). A repo changes them in its `devenv.nix`:
+
+```nix
+{
+  assay.findings.smells.function_complexity = {
+    threshold = 25;
+    reason = "the parser in src/grammar.py is one big match; see #12";
+  };
+  assay.findings.rules."python:S1192" = {
+    enable = false;
+    reason = "string constants repeat in the generated schema";
+  };
+}
+```
+
+- `smells.<kind>`, one of `boolean_logic`, `file_complexity`, `function_complexity`, `function_parameters`,
+  `identical_code`, `nested_control_flow`, `return_statements`, `similar_code`: `enable` (default `true`) and
+  `threshold`. `smells.duplication.nodes_threshold`.
+- `rules.<key>.enable`: a radarlint rule, by Sonar's key; `python:S3776` and `scala:S3776` are off by default. There is
+  no warning tier: a rule nobody wants is turned off, not downgraded.
+- Raising a threshold, turning a smell off or turning a rule off is a loosening: evaluation fails until its `reason`
+  is set, and `assay check` lists it in its header
+  (`loosening: findings smells.function_complexity.threshold is 25, above qlty's 18: <reason>`). Lowering a threshold
+  or turning a rule on is free.
 
 ## The hits log
 

@@ -37,6 +37,10 @@ eff3ct0/nixos-config#46, #50 and #52. The research behind #46 is `docs/research/
   `https://radarlint-releases.s3.amazonaws.com/radarlint/v2.0.0/radarlint.tar.gz`, compiled for Java 22+
   (nixpkgs' `jdk25_headless`). Java takes its home from the password database, not `HOME`: SonarLint fails to create
   `<home>/.sonarlint` in a sandbox, so the wrapper passes `-Duser.home="$HOME"`. Its telemetry is disabled at start.
+- radarlint creates `work/` beside its jar, found through the jar's real path (the JVM resolves symlinks): from the
+  store it fails ("Read-only file system"). The wrapper copies the jar into a directory of its own per run (plugins
+  linked), removed after it. qlty passes plugins only `HOME` and proxies, not `TMPDIR`, and the Nix sandbox has no
+  `/tmp`: the wrapper falls back to `HOME`.
 - radarlint reads `radarlint.properties` from its working directory: `radarlint.rules.python.S3776=false` turns the
   rule off. qlty symlinks `.qlty/configs/<config file>` into the repo root while the plugin runs (when the plugin
   definition lists it in `config_files` and the root has none), then removes it.
@@ -67,9 +71,10 @@ eff3ct0/nixos-config#46, #50 and #52. The research behind #46 is `docs/research/
 - New finding: a finding about a line (radarlint, `nested-control-flow`, `boolean-logic`) is new when its start
   line is new code (assay's own new code, which follows renames). A finding about a function or a file
   (`function-complexity`, `function-parameters`, `return-statements`, `file-complexity`) or a clone location is new
-  when the base has no counterpart: the same rule, base path (through renames) and function name; for clones, the
-  same base path and `structural_hash`. Counted as multisets: with more at HEAD than at the base, those not starting
-  on new code take the counterparts first.
+  when the base has no counterpart: the same rule, base path (through renames) and function name; for a clone's
+  place, a clone's place in the same base path between the same set of base paths. Not `structural_hash`: appending
+  code to a file whose whole module was a clone turned the clone into the function's, with another hash. Counted as
+  multisets: with more at HEAD than at the base, those not starting on new code take the counterparts first.
 - The base's smells: `git read-tree` of the base into a temporary index, `checkout-index --prefix` into a temporary
   directory, `git init` there, the same `.qlty/qlty.toml`, `qlty smells <base paths>`, only when a function, file or
   clone finding needs a counterpart.
@@ -85,11 +90,9 @@ eff3ct0/nixos-config#46, #50 and #52. The research behind #46 is `docs/research/
 
 ## Remaining steps
 
-1. Packages and flake outputs; a sandboxed check that `qlty --version` runs.
-2. `assay findings` in `assay.sh`, test-first in `test/findings.bats` (real qlty; radarlint in as few tests as
-   possible, it is a JVM).
-3. `assay builtin findings`; the module's options, loosenings, default check; `test/defaults/*.json` (and a Python
-   one); `nix/checks.nix` expectations; delegation test; existing tests that count or list the built-in checks.
-4. assay's own devenv brings radarlint for the suite; README, AGENTS.md, usage text.
-5. `nix flake check`, `nix develop -c bats test`, `nix develop -c bats test/devenv`, shellcheck; a critic; remove this
-   file once the last critic passes.
+Done: packages, `assay findings`, `assay builtin findings`, the module's options, loosenings and default check,
+`test/findings.bats`, `nix/checks.nix`, delegation, `test/devenv/module.bats`, README, AGENTS.md, adoption guide.
+`nix develop -c bats test`, `nix develop -c bats test/devenv`, shellcheck and `nix flake check` passed.
+
+1. `devenv test` in the worktree; the code review; a critic, as the global rules ask.
+2. Remove this file once the last critic passes; squash-free history is fine (p3rkins merges).

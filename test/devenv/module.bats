@@ -168,22 +168,30 @@ load helpers
   run --separate-stderr nix run . -- check --list
   echo "$stderr"
   [ "$status" -eq 0 ]
-  [ "$output" = "$(printf '%s\n' 'actionlint (fast)' 'agents-md (fast)' bats 'commit-trailers (fast)' 'gitleaks (fast)' \
-    'oxfmt (fast)' 'suppressions (fast)')" ]
+  [ "$output" = "$(printf '%s\n' 'actionlint (fast)' 'agents-md (fast)' bats 'commit-trailers (fast)' findings \
+    'gitleaks (fast)' 'oxfmt (fast)' 'suppressions (fast)')" ]
   run git commit --allow-empty -m "an empty commit"
   echo "$output"
   [ "$status" -eq 0 ]
   [[ $output == *"assay check --fast"*Passed* ]]
 }
 
-@test "a repo that imports assay's module runs the built-in checks, fast, with their tools in its devenv" {
+@test "a repo that imports assay's module runs the built-in checks, all fast but findings, with their tools in its devenv" {
   consumer
   shape
   run --separate-stderr devenv shell -- assay check --list
   echo "$stderr"
-  [ "$output" = "$(printf '%s (fast)\n' actionlint agents-md commit-trailers gitleaks oxfmt suppressions)" ]
-  run --separate-stderr devenv shell -- bash -c 'command -v oxfmt gitleaks actionlint'
+  [ "$output" = "$(printf '%s\n' 'actionlint (fast)' 'agents-md (fast)' 'commit-trailers (fast)' findings \
+    'gitleaks (fast)' 'oxfmt (fast)' 'suppressions (fast)')" ]
+  run --separate-stderr devenv shell -- bash -c 'command -v oxfmt gitleaks actionlint qlty'
   [ "$status" -eq 0 ]
+  # radarlint, a JVM, only for Python or Scala: the profile has qlty, not radarlint.
+  run --separate-stderr devenv shell -- bash -c 'test -x "$DEVENV_PROFILE/bin/qlty" && test ! -e "$DEVENV_PROFILE/bin/radarlint"'
+  [ "$status" -eq 0 ]
+  devenv_nix '{ languages.python.enable = true; }'
+  run --separate-stderr devenv shell -- bash -c 'test -x "$DEVENV_PROFILE/bin/radarlint"'
+  [ "$status" -eq 0 ]
+  devenv_nix '{ }'
   run devenv test
   echo "$output"
   [ "$status" -eq 0 ]
@@ -213,4 +221,33 @@ load helpers
   [ "$status" -eq 1 ]
   [[ $output == *" 'frontend/**/*.{js,"* ]]
   [[ $output == *"frontend/x.json"* && $output != *"backend/x.json"* ]]
+}
+
+@test "outside the devenv, assay findings runs qlty from the repo's devenv; raising a smell threshold needs a reason, which the header lists" {
+  consumer
+  shape
+  mkdir src
+  cp "$BATS_TEST_DIRNAME/../fixtures/findings/tangled.py" src/app.py
+  run --separate-stderr "$ASSAY/assay.sh" findings
+  echo "$output$stderr"
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "src/app.py:1: qlty/function-complexity: Function with high complexity (count = 27): tangled" ]
+  [ -z "$(git status --porcelain --untracked-files=all -- .qlty)" ]
+  run --separate-stderr devenv shell -- assay check findings
+  [ "$status" -eq 1 ]
+  devenv_nix '{ assay.findings.smells.function_complexity.threshold = 30; }'
+  run devenv shell -- true
+  echo "$output"
+  [ "$status" -ne 0 ]
+  [[ $output == *"a loosening of the analyzer needs a reason; set:"* ]]
+  [[ $output == *"- assay.findings.smells.function_complexity.reason: smells.function_complexity.threshold is 30, above qlty's 18"* ]]
+  devenv_nix '{
+    assay.findings.smells.function_complexity = { threshold = 30; reason = "a parser"; };
+    assay.findings.smells.nested_control_flow = { threshold = 7; reason = "a parser"; };
+  }'
+  run --separate-stderr devenv shell -- assay check findings
+  echo "$output$stderr"
+  [ "$status" -eq 0 ]
+  [ "${lines[1]}" = "  loosening: findings smells.function_complexity.threshold is 30, above qlty's 18: a parser" ]
+  [ "${lines[2]}" = "  loosening: findings smells.nested_control_flow.threshold is 7, above qlty's 5: a parser" ]
 }
