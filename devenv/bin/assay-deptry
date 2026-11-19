@@ -3,7 +3,8 @@
 # see the project's environment to map distributions to the modules they install. pytest's conftest.py files are left
 # out on top of what the repo leaves out: deptry leaves tests/ out by default but not conftest.py, which imports
 # development dependencies (Python's preset's imports hypothesis). deptry's --extend-exclude replaces
-# [tool.deptry] extend_exclude rather than adding to it, so the repo's own list goes along.
+# [tool.deptry] extend_exclude rather than adding to it, so the repo's own list goes along. deptry colours its output
+# even when it is not a terminal's: --no-ansi.
 set -euo pipefail
 
 root=$(git rev-parse --show-toplevel)
@@ -23,5 +24,5 @@ except FileNotFoundError:
 print(",".join(config.get("tool", {}).get("deptry", {}).get("extend_exclude", [])))
 PY
 )
-echo "\$ deptry . --extend-exclude '${extend:+$extend,}(.*/)?conftest\.py'"
-exec deptry . --extend-exclude "${extend:+$extend,}(.*/)?conftest\.py"
+echo "\$ deptry . --no-ansi --extend-exclude '${extend:+$extend,}(.*/)?conftest\.py'"
+exec deptry . --no-ansi --extend-exclude "${extend:+$extend,}(.*/)?conftest\.py"

@@ -676,7 +676,7 @@ in
         chmod -R u+w src
         cd src
         patchShebangs assay.sh test/stub devenv/bin
-        shellcheck assay.sh nix/rules-check.sh test/assert.bash test/helpers.bash test/devenv/helpers.bash test/stub/devenv devenv/bin/*
+        shellcheck assay.sh nix/rules-check.sh test/assert.bash test/helpers.bash test/devenv/helpers.bash test/stub/* devenv/bin/*
         bats test
         touch $out
       '';

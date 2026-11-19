@@ -61,7 +61,7 @@ EOF
 	# The same module with each language's default checks alone, without the built-in ones.
 	export ASSAY_LANGUAGES=$BATS_FILE_TMPDIR/assay-languages
 	copy_assay "$ASSAY_LANGUAGES"
-	echo 'args: import ./languages/nix.nix args // import ./languages/bash.nix args' \
+	echo 'args: import ./languages/nix.nix args // import ./languages/bash.nix args // import ./languages/python.nix args' \
 		>"$ASSAY_LANGUAGES/devenv/defaults.nix"
 	git -C "$ASSAY_LANGUAGES" commit --quiet -am "the languages' default checks alone"
 	# The same module shipping the rule pack of assay's tests, demo, as a pack of its own.

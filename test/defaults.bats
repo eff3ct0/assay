@@ -263,7 +263,7 @@ fake_deptry() {
 	run --separate-stderr "$bin/assay-deptry"
 	echo "$output"
 	[ "$status" -eq 0 ]
-	output_is "\$ deptry . --extend-exclude '(.*/)?conftest\\.py'" . --extend-exclude '(.*/)?conftest\.py'
+	output_is "\$ deptry . --no-ansi --extend-exclude '(.*/)?conftest\\.py'" . --no-ansi --extend-exclude '(.*/)?conftest\.py'
 	cd "$T/work"
 	printf '%s\n' '[project]' 'name = "demo"' '' '[tool.deptry]' 'extend_exclude = ["scripts", "docs/.*"]' >pyproject.toml
 	run --separate-stderr env DEPTRY_EXIT=1 "$bin/assay-deptry"

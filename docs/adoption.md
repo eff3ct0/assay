@@ -34,10 +34,12 @@ setup actions in CI. Two sources drift, and then CI and the agent check with dif
 ### Tool configuration
 
 The repo's own tool configuration stays the source; assay injects none at run time. The adoption runs `assay preset`,
-which writes the presets' files the repo lacks, keeps the ones it has and shows each against the preset (exit 1 when
-they differ), and records the versions it took in `.assay-preset.json`, which is committed. The adoption then extends
-each kept file by hand to hold what the preset holds, keeping the repo's own settings; what the tree cannot meet yet is
-debt, held as below. The built-in `preset` check fails while an enabled language whose preset applies is missing from
+which adds the presets' development dependencies the project lacks with its own package manager (`uv add --dev` for
+Python), writes the presets' files the repo lacks, keeps the ones it has and shows each against the preset (exit 1 when
+they differ), and records the versions it took in `.assay-preset.json`, which is committed. A tool the repo configures
+in a section of another file (`[tool.ruff]` in `pyproject.toml`, say) keeps that section, and the preset's file is
+shown in its place. The adoption then extends each kept file or section by hand to hold what the preset holds, keeping
+the repo's own settings; what the tree cannot meet yet is debt, held as below. The built-in `preset` check fails while an enabled language whose preset applies is missing from
 the record.
 
 ### CI

@@ -92,12 +92,14 @@ declares `coverage`.
 
 ```
 assay check [--fast] [--base <rev>] [<check>...]    run the repo's checks
-assay check --list                                  list them, fast ones marked
+assay check --list                                  list them, fast and off ones marked
 ```
 
 - Every selected check runs, one after another in name order, without stopping at the first failure. `--fast` selects
   the fast checks; names select those checks. A check runs over the whole working tree, never over the staged or
   changed files only.
+- `--list` prints every check in name order, with `(fast)`, `(off)` or `(fast, off)` after its name: an off check is
+  one the repo can turn on.
 - Output, on stdout: a header with the mode and the base, the loosenings and the skipped checks; one line per check
   (`ok`, `FAIL` or `skip`, its name, its seconds, and for a check with `coverage` how many new lines its report
   covers); for each failure its command, the first 100 lines of its output (of diff-cover's report, when it failed
@@ -133,12 +135,22 @@ assay preset [<language>...]    write the languages' presets into the repo, or m
 ```
 
 A language's **preset** is the configuration files and development dependencies its default checks need in a repo
-(bash's has no dependency). assay holds every version of each, under [`preset/`](preset/README.md); `assay preset` writes the version the repo pins (the highest) into the repo,
-which owns the files from then on, and merges later versions in. assay injects no configuration at run time.
+(bash's has no dependency). assay holds every version of each, under [`preset/`](preset/README.md); `assay preset`
+writes the version the repo pins (the highest) into the repo, which owns the files from then on, and merges later
+versions in. assay injects no configuration at run time.
 
 - With no language named, it takes every language the repo's devenv enables whose preset applies: bash's once the
-  repo tracks a shell script, as `shfmt -f` finds them. Nix has no preset. A language named is taken as given; one
-  assay has no preset for is exit 2.
+  repo tracks a shell script, as `shfmt -f` finds them; Python's once `pyproject.toml` is at the root (tracked, or
+  untracked and not ignored). Nix has no preset. A language named is taken as given; one assay has no preset for is
+  exit 2.
+- Development dependencies come first, with the project's own package manager, so that they land in its manifest and
+  lockfile (Python: `uv add --dev`, into `[dependency-groups] dev`). A dependency the project lacks is added; one whose
+  spec the preset changed since the recorded version is upgraded (added again with the new spec); one the preset
+  dropped since then is removed, when the project still has it. A dependency only one check needs (Python's
+  `import-linter`) is added while that check is on, and never removed. The project's own spec of a dependency it already
+  has is left alone. Everything is worked out before anything is written: without the manifest (`pyproject.toml`), or
+  without the package manager when something is to change, `assay preset` exits 2 and changes nothing; a package
+  manager that fails is exit 2 with its output.
 - A file the repo lacks is written from the pinned preset.
 - A file the repo has at an older recorded version is merged three ways with `git merge-file`: the base is the
   recorded version's file, theirs the pinned one's, ours the repo's. A conflict is left as markers, with the base
@@ -146,17 +158,23 @@ which owns the files from then on, and merges later versions in. assay injects n
   (exit 1) until they are gone.
 - A file the repo has with no version recorded (an adoption) is kept, and shown against the preset: the lines with `+`
   are the preset's. The agent extends it by hand.
-- When the repo configures the tool in another file the tool reads (`shellcheckrc` for shellcheck), that file is the
-  tool's: the preset writes none of its own beside it, which would silently replace it, and merges into it and shows
-  it instead.
+- When the repo configures the tool in another file the tool reads first (`shellcheckrc` for shellcheck, `.ruff.toml`
+  for ruff), that file is the tool's: the preset writes none of its own beside it, which would silently replace it,
+  and merges into it and shows it instead.
+- When the repo configures the tool in a section of a file of another format (`[tool.ruff]`, `[tool.pyright]` or
+  `[tool.coverage]` in `pyproject.toml`; `[coverage:*]` in `setup.cfg` or `tox.ini`), that section is the tool's too:
+  the preset writes no file beside it, and since it can merge into neither, it shows the preset's file the first time
+  (`kept pyproject.toml [tool.ruff]`, exit 1), and a later version's change to it, for a person to fold in by hand, in
+  the section's own syntax.
 - It records the version it took in `.assay-preset.json` at the root, `{"<language>": <version>}`, written with jq
   (so oxfmt accepts it as is) and tracked. The version is recorded whatever the outcome, so that a conflict once
   resolved, or a kept file once extended, is not merged again. A record newer than the pinned preset, or naming a
   version assay lacks, is exit 2; languages it records that assay does not know are kept.
-- Output, on stdout: one line per file, `wrote`, `merged`, `conflict` or `kept` and its path, and one for the record
+- Output, on stdout: one line per file or section, `wrote`, `merged`, `conflict` or `kept` and its path; one per
+  dependency, `added dependency <spec>`, `upgraded dependency <spec>` or `removed dependency <name>`; and one for the record
   when it changed (a language with nothing to do says `<language>'s preset <version>: up to date`); then the kept
   files' differences and what is left to do.
-- Exit codes: `0` everything applied, `1` a conflict or a kept file that differs from the preset, `2` it could not
+- Exit codes: `0` everything applied, `1` a conflict, a kept file that differs from the preset or a kept section, `2` it could not
   run.
 
 ```sh
@@ -280,13 +298,17 @@ assay builtin gitleaks                              secrets in the files git see
 assay builtin preset                                the enabled languages' presets are recorded
 assay builtin suppressions [--base <rev>]           new suppressions name their rule and give a reason
 assay builtin findings [--base <rev>]               no new finding on the change
+assay builtin osv-scanner [--base <rev>] <lockfile>...
+                                                    no advisory on a dependency version the change adds or changes
 assay new-code [--base <rev>]                       the change's new code, as JSON
 ```
 
 The built-in checks that are assay's own code run as `assay builtin <check>`, which is their `exec`; an agent can run
-one alone. The base is `assay check`'s, from `ASSAY_BASE` when `assay check` runs them. Exit codes: `0` passed, `1`
-failed, `2` could not run, `127` the check's tool (gitleaks, ast-grep, qlty, radarlint) is missing. Outside the repo's
-devenv they re-execute themselves through it, as `assay check` does.
+one alone. So does the advisory comparison the languages' `osv-scanner` checks run,
+[`assay builtin osv-scanner`](#advisories-on-the-change), though it is no built-in check. The base is `assay check`'s,
+from `ASSAY_BASE` when `assay check` runs them. Exit codes: `0` passed, `1` failed, `2` could not run, `127` the
+check's tool (gitleaks, ast-grep, qlty, radarlint, osv-scanner) is missing. Outside the repo's devenv they re-execute
+themselves through it, as `assay check` does.
 
 ## `assay findings`
 
@@ -374,14 +396,16 @@ every language (it replaces qlty's own 50 for Rust: values are per repo, not per
 
 Each language's checks are on when the repo enables the language in devenv (`languages.<language>.enable`), are named
 after their tool, and bring their tools into the devenv. They are default checks: turning one off, redefining its
-`exec` or changing its `coverage` is a loosening. Each runs over the files git sees (tracked, or untracked and
-not ignored), though `bats` runs only the tracked `.bats` files as tests; none runs over `.`, so `.devenv/` and other
-ignored files are never read; with nothing to check, it passes.
+`exec` or changing its `coverage` is a loosening. Nix's and bash's run over the files git sees (tracked, or untracked
+and not ignored), though `bats` runs only the tracked `.bats` files as tests; none runs over `.`, so `.devenv/` and
+other ignored files are never read. Python's tools walk the tree from the root, each kept out of `.devenv/` and the
+venvs (below). With nothing to check, a check passes.
 
-| Language                       | `--fast`                                   | full run only                                               |
-| ------------------------------ | ------------------------------------------ | ----------------------------------------------------------- |
-| Nix, `languages.nix.enable`    | `nixfmt`, `statix`, `deadnix`, `nixf-tidy` | `nix-flake-check` (`nix flake check`), requires `flake.nix` |
-| bash, `languages.shell.enable` | `shellcheck`, `shfmt`                      | `bats`, with `coverage`                                     |
+| Language                          | `--fast`                                                                   | full run only                                               |
+| --------------------------------- | -------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| Nix, `languages.nix.enable`       | `nixfmt`, `statix`, `deadnix`, `nixf-tidy`                                 | `nix-flake-check` (`nix flake check`), requires `flake.nix` |
+| bash, `languages.shell.enable`    | `shellcheck`, `shfmt`                                                      | `bats`, with `coverage`                                     |
+| Python, `languages.python.enable` | `ruff-check`, `ruff-format`, `vulture`, `deptry`; `import-linter`, when on | `pyright`, `pytest` with `coverage`, `osv-scanner`          |
 
 - Nix's checks run over the `.nix` files; `nixf-tidy` runs with `--variable-lookup` on each file, and any diagnostic
   fails it, whatever its severity. Nix has no coverage tool, so a Nix repo has no coverage check.
@@ -392,8 +416,56 @@ ignored files are never read; with nothing to check, it passes.
   `$ASSAY_DIR/kcov/bats/cobertura.xml`, lists every shell script, those no test runs included, and nothing else.
   nixpkgs has kcov for Linux only: elsewhere `bats` fails on the missing tool until the repo turns it off with a
   reason.
-- The commands call three helpers the module puts on the PATH (`devenv/bin`): `assay-files [<glob>...]` (the files
-  git sees that exist, NUL-terminated), `assay-nixf-tidy <file>...` and `assay-bats <dir>`.
+- Python's checks each require `pyproject.toml` at the root, and run from it. The standalone CLIs come from nixpkgs:
+  - `ruff-check`: `ruff check --no-fix --extend-select RUF100`. RUF100 fails a `noqa` that no longer silences
+    anything; `--no-fix` keeps a repo's `fix = true` from editing the tree.
+  - `ruff-format`: `ruff format --check`.
+  - `vulture`: `vulture . --exclude .venv,.devenv`, since vulture ignores `.gitignore`. A public function nothing in
+    the repo uses is dead code to it, a library's own API included, until a test uses it: `uv init --lib`'s `hello()`
+    fails it until it has a test.
+  - `pyright`: `pyright --warnings`, strict through the preset's `pyrightconfig.json`, since pyright takes no flag for
+    its mode or a rule; warnings fail too.
+  - `osv-scanner`: `assay builtin osv-scanner uv.lock`, [on the change](#advisories-on-the-change).
+- What loads the project's code runs from its venv, which the project's lockfile fills and Python's preset adds to:
+  `deptry`, `pytest` and `import-linter`. So the devenv puts the venv first on the PATH and installs the lockfile into
+  it: `languages.python.venv.enable`, with `uv.enable` and `uv.sync.enable`.
+  - `deptry`: `assay-deptry`, deptry over the project with pytest's `conftest.py` files left out, since they import
+    development dependencies (deptry leaves `tests/` out by itself), on top of the repo's own
+    `[tool.deptry] extend_exclude`, which deptry's command line would otherwise replace.
+  - `pytest`: `assay-pytest "$ASSAY_DIR/pytest"`, which runs `coverage run --source=. -m pytest
+    --hypothesis-profile=ci` (Hypothesis's own `ci` profile: derandomized, no example database, no deadline) and
+    writes coverage.py's Cobertura report, `$ASSAY_DIR/pytest/coverage.xml`, its data beside it. pytest's exit 5, no
+    test collected, passes, while the new lines of the sources stay uncovered. With the preset's `.coveragerc`, the
+    report lists every Python file under the root but the venvs', those no test loads at 0%, a `src/` layout's
+    included. With no Python file at all coverage.py writes no report: an empty one stands for it.
+  - `import-linter`: `lint-imports`, off until the repo turns it on with its contracts (`.importlinter`, or
+    `[tool.importlinter]` in `pyproject.toml`), which is a tightening. Then `assay preset python` adds `import-linter`
+    to the project's development dependencies; until it has, the check fails saying so.
+- The commands call helpers the module puts on the PATH (`devenv/bin`): `assay-files [<glob>...]` (the files git sees
+  that exist, NUL-terminated), `assay-nixf-tidy <file>...`, `assay-bats <dir>`, `assay-deptry` and
+  `assay-pytest <dir>`.
+
+### Advisories on the change
+
+```
+assay builtin osv-scanner [--base <rev>] <lockfile>...
+```
+
+The advisory database changes without the code, so an advisory check over the whole tree would fail a change that
+passed yesterday, and block work that touches no dependency. So a language's `osv-scanner` check (Python's, on
+`uv.lock`) holds on the change: it fails only on an advisory on a dependency version the change adds or changes, with
+no severity threshold.
+
+- One osv-scanner run scans each lockfile as the working tree has it and its copy at the base. An advisory, with its
+  aliases, is new when the base's copy has none of its ids on the same package version (ecosystem, name, version):
+  the same version with the same advisory at the base is no new finding, while a version the change moves to is.
+- A lockfile the working tree lacks has nothing to check; one the base lacks makes all of its advisories new.
+- Advisories on the versions the change leaves alone are never shown, by `assay check` or by `assay findings`: they
+  reach the user through GitHub's Dependabot.
+- Output: one line per new advisory, `<lockfile>: <package> <version> (<ecosystem>): <ids>: <summary>; fixed in
+  <versions>`, then their count. The fix is a version that fixes it, or leaving the dependency out of the change; an
+  advisory that does not apply goes in the repo's `osv-scanner.toml`, with its reason.
+- It needs the network (the OSV API), so the check runs in the full run only; osv-scanner failing is exit 2.
 
 ## Code rules
 

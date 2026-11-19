@@ -71,12 +71,20 @@ Issue #7 is the specification; it links eff3ct0/nixos-config#58, #50, #52, #54 a
   pyproject.toml, `[coverage:*]` in setup.cfg or tox.ini: the preset writes no file of its own, shows the preset's
   file (or its change between versions) and exits 1. `.ruff.toml` is ruff's other file of the same format.
 
+- vulture at its default confidence, as the issue gives the command: `uv init --lib`'s placeholder `hello()` fails it
+  until a test uses it, so the acceptance's "devenv test passes" holds once that test exists (test/devenv/python.bats
+  shows both). Open for p3rkins: `--min-confidence` would keep only what ruff already finds.
+- deptry colours its output even into a file: `assay-deptry` passes `--no-ansi`.
+- Hypothesis writes `.hypothesis/constants/` whatever the profile; the `ci` profile keeps no `.hypothesis/examples`.
+- The devenv fixtures commit with `--no-verify` (commit_all): the consumer's pre-commit hook runs the fast checks, and a
+  fixture's commit may hold what the test then shows failing; `devenv test` in the fresh-project test runs the hooks.
+
 ## Remaining steps
 
-1. preset/python/1 and its dependencies; `assay preset` for python (tests with a stub uv).
-2. `assay builtin osv-scanner` (tests with a stub osv-scanner).
-3. `--list` off marks.
-4. devenv/languages/python.nix, the helpers, nix/checks.nix, test/defaults/python.json, test-tools.
-5. test/devenv/python.bats: the fixture, real tools, network.
-6. Docs: README, preset/README.md, AGENTS.md, GLOSSARY.md if a term is new.
-7. Full suite, code review, critic, PR.
+1. Done: preset/python/1 and its dependencies; `assay preset` for python (test/preset-python.bats).
+2. Done: `assay builtin osv-scanner` (test/osv-scanner.bats).
+3. Done: `--list` off marks.
+4. Done: devenv/languages/python.nix, the helpers, nix/checks.nix, test/defaults/python.json, test-tools.
+5. test/devenv/python.bats: written; make it pass.
+6. Done: docs (README, preset/README.md, AGENTS.md, docs/adoption.md).
+7. Full suite (`nix flake check`, `nix develop -c bats test/devenv`, `devenv test`), code review, critic, PR.
