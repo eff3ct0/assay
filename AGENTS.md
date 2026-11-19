@@ -23,10 +23,10 @@ repo's GitHub issues: read it, and the specifications it links, before changing 
     the module's options (`programs.assay.enable`, `package`, `rules` with its rule format, the read-only
     `rulesFile`), the global git hooks it registers in `programs.git.settings` and the `ASSAY_HITS_LOG` it sets; on
     `assay guard`'s answers in Claude Code's hook JSON (an adapter, such as an OpenCode plugin, builds the same JSON),
-    and its exit 1 that fails open; on `assay git-hook`'s exit codes and messages; on `lib.rulesCheck { pkgs, rules, assay }`
-    and its examples' fixture; on `assay` re-executing itself through the repo's `devenv shell` when `ASSAY_CONFIG` is
-    unset, and its exit 2 naming `docs/adoption.md` in a repo that has not adopted assay; and on the hits log's lines
-    (`ASSAY_HITS_LOG`, `ASSAY_AGENT`).
+    and its exit 1 that fails open; on `assay git-hook`'s exit codes and messages; on
+    `lib.rulesCheck { pkgs, rules, assay }` and its examples' fixture; on `assay` re-executing itself through the
+    repo's `devenv shell` when `ASSAY_CONFIG` is unset, and its exit 2 naming `docs/adoption.md` in a repo that has not
+    adopted assay; and on the hits log's lines (`ASSAY_HITS_LOG`, `ASSAY_AGENT`).
 
 ## Run
 

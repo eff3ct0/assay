@@ -182,7 +182,8 @@ let
         type = types.either types.nonEmptyStr (types.attrsOf types.anything);
         description = ''
           For `command`, an ast-grep rule for bash (the value of a rule file's `rule:`), or a rule file's body
-          (`rule` with `constraints`, `utils`, `transform`), matched against the command's structure. For `path`, a glob or `main-checkout`. For `commit-msg`, a regex in jq's syntax. For `pre-push`,
+          (`rule` with `constraints`, `utils`, `transform`), matched against the command's structure. For `path`, a
+          glob or `main-checkout`. For `commit-msg`, a regex in jq's syntax. For `pre-push`,
           `agent-branch` or `agents-md`. For `stop`, `unsaved-work`.
         '';
       };
@@ -207,7 +208,9 @@ let
         type = types.nullOr types.nonEmptyStr;
         default = null;
         example = "main-checkout";
-        description = "A command rule's cwd: a glob or `main-checkout`; the rule runs only when the event's cwd matches it.";
+        description = ''
+          A command rule's cwd: a glob or `main-checkout`; the rule runs only when the event's cwd matches it.
+        '';
       };
       fileContent = mkOption {
         type = types.nullOr types.nonEmptyStr;

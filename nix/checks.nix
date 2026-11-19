@@ -420,19 +420,24 @@ in
         # The rendered list is the one the bats suite reads.
         jq -S . ${rulesFile} >rendered.json
         jq -S . ${../test/rules/example.json} >example.json
-        diff rendered.json example.json || { echo "FAIL: the rendered rules differ from test/rules/example.json" >&2; exit 1; }
+        diff rendered.json example.json || {
+          echo "FAIL: the rendered rules differ from test/rules/example.json" >&2
+          exit 1
+        }
         # assay is on the user's PATH.
         test -x ${home.activationPackage}/home-path/bin/assay
         # The generated git config holds both hooks.
         gitconfig=${home.activationPackage}/home-files/.config/git/config
-        [ "$(git config -f "$gitconfig" hook.assay-commit-msg.event)" = commit-msg ]
-        [ "$(git config -f "$gitconfig" hook.assay-commit-msg.command)" = "${assayExe} git-hook --rules ${rulesFile} commit-msg" ]
-        [ "$(git config -f "$gitconfig" hook.assay-pre-push.event)" = pre-push ]
-        [ "$(git config -f "$gitconfig" hook.assay-pre-push.command)" = "${assayExe} git-hook --rules ${rulesFile} pre-push" ]
+        for hook in commit-msg pre-push; do
+          [ "$(git config -f "$gitconfig" "hook.assay-$hook.event")" = "$hook" ]
+          command=$(git config -f "$gitconfig" "hook.assay-$hook.command")
+          [ "$command" = "${assayExe} git-hook --rules ${rulesFile} $hook" ]
+        done
         # With it as the global git config, in a throwaway repo: a commit whose message matches a commit-msg rule is
         # rejected with the rule's message, and the repo's own commit-msg hook still runs.
         export HOME=$PWD/home GIT_CONFIG_GLOBAL=$gitconfig GIT_CONFIG_NOSYSTEM=1
-        export GIT_AUTHOR_NAME=Test GIT_AUTHOR_EMAIL=test@example.com GIT_COMMITTER_NAME=Test GIT_COMMITTER_EMAIL=test@example.com
+        export GIT_AUTHOR_NAME=Test GIT_AUTHOR_EMAIL=test@example.com
+        export GIT_COMMITTER_NAME=Test GIT_COMMITTER_EMAIL=test@example.com
         mkdir "$HOME"
         git init --quiet repo
         printf '#!/bin/sh\necho ran >>"%s"\n' "$PWD/own-hook.log" >repo/.git/hooks/commit-msg
