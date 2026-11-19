@@ -64,7 +64,7 @@ the same CLI version, so local edits stay local. When only the CLI changes, upda
 fast check directs. A mismatch stops at scalafmt's version check, before it can invoke the downloading runner.
 
 `test/devenv/scala.bats` prints timings. On the Scala 3.10.1 fixture (sbt 2.0.12, scalafmt 3.11.5, warm dependencies),
-scalafmt took 0.53 s, within the fast set's 5 s budget. Compilation took 4.00 s, scalafix 2.99 s, and tests with
-coverage 5.78 s (5.06 s on repeat). The coverage run disables sbt's task cache: after `clean`, restoring instrumented
+scalafmt took 0.50 s, within the fast set's 5 s budget. Compilation took 4.63 s, scalafix 3.05 s, and tests with
+coverage 5.89 s (5.88 s on repeat). The coverage run uses an in-memory task cache: after `clean`, restoring instrumented
 classes alone cannot restore their scoverage metadata. It runs `testFull` and maps each Cobertura class through the
 report's real source roots before diff-cover measures it.

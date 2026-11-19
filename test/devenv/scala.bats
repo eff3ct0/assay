@@ -6,7 +6,7 @@ scala_check() {
 	local expected=$1
 	shift
 	run --separate-stderr devenv shell -- assay check --base HEAD "$@"
-	printf '%s\n' "$output" >&3
+	printf '# %s\n' "${lines[@]}" >&3
 	[ "$status" -eq "$expected" ]
 }
 
