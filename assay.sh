@@ -1020,7 +1020,7 @@ preset_pinned() {
 }
 
 # preset_applies <language>: whether the language's preset applies to the repo (the current directory, its root),
-# with applies_why set to what makes it apply. bash's applies once git sees a shell script.
+# with applies_why set to what makes it apply. bash's applies once the repo tracks a shell script.
 applies_why=
 preset_applies() {
 	case $1 in
@@ -1029,33 +1029,47 @@ preset_applies() {
 	esac
 }
 
-# has_shell_script: git sees a shell script in the working tree (tracked, or untracked and not ignored), as shfmt -f
-# finds them (by extension or shebang, .bats files included): the files bash's checks run on.
+# has_shell_script: the repo tracks a shell script that is in the working tree, as shfmt -f finds them (by extension
+# or shebang, .bats files included), the way bash's checks find the files they run on. Without shfmt it exits
+# missing_tool_exit: 2, or 127 for `assay builtin preset`, as for any built-in check whose tool is missing.
+missing_tool_exit=2
 has_shell_script() {
 	local list found f i
 	local -a files=()
 	tmp_file list
 	tmp_file found
-	git ls-files -z --cached --others --exclude-standard --deduplicate >"$list" || die "cannot list the working tree"
+	git ls-files -z --cached --deduplicate >"$list" || die "cannot list the files git tracks"
 	while IFS= read -r -d '' f; do
 		if [ -f "$f" ]; then files+=("./$f"); fi
 	done <"$list"
 	[ ${#files[@]} -gt 0 ] || return 1
-	command -v shfmt >/dev/null || die "cannot find shfmt on the PATH, which tells shell scripts apart"
+	if ! command -v shfmt >/dev/null; then
+		echo "assay: cannot find shfmt on the PATH, which tells shell scripts apart" >&2
+		finish "$missing_tool_exit"
+	fi
 	for ((i = 0; i < ${#files[@]}; i += 1000)); do
-		shfmt -f "${files[@]:i:1000}" >"$found" || die "shfmt -f failed on the working tree's files"
+		shfmt -f "${files[@]:i:1000}" >"$found" || die "shfmt -f failed on the tracked files"
 		if IFS= read -r f <"$found"; then
-			applies_why="git sees the shell script ${f#./}"
+			applies_why="the repo tracks the shell script ${f#./}"
 			return 0
 		fi
 	done
 	return 1
 }
 
-# load_record: the record at the repo root (the current directory) into rec, <language> => <version>; empty when the
-# repo has none. Returns 1, with record_error set, when it is not one JSON object whose values are positive integers;
-# read_record dies then.
-declare -A rec=()
+# absent <path>: nothing is at the path, not even a dangling symlink.
+absent() { [ ! -e "$1" ] && [ ! -L "$1" ]; }
+
+# has_markers <file> <language>: the file holds the closing marker of a conflict with the language's preset, which
+# apply_preset leaves for a person to resolve.
+has_markers() {
+	awk -v closing=">>>>>>> $2's preset " 'index($0, closing) == 1 { found = 1; exit } END { exit !found }' "$1"
+}
+
+# load_record: the record at the repo root (the current directory) into recorded, <language> => <version>; empty
+# when the repo has none. Returns 1, with record_error set, when it is not one JSON object whose values are positive
+# integers.
+declare -A recorded=()
 record_error=
 # shellcheck disable=SC2016 # jq's $variables, not the shell's
 record_jq='
@@ -1067,36 +1081,37 @@ def fail($m): "\($m)\n" | halt_error(1);
 | if (.key | test($name_re) | not) then fail("bad language name \(.key | tojson)")
   elif (.value | type) != "number" or .value != (.value | floor) or .value < 1 or .value > 999999999 then
     fail("\(.key): the version must be a positive integer, not \(.value | tojson)")
-  else "rec[\(.key | @sh)]=\(.value | floor)" end
+  else "recorded[\(.key | @sh)]=\(.value | floor)" end
 '
 load_record() {
 	local out
-	rec=()
-	if [ ! -e "$record_file" ] && [ ! -L "$record_file" ]; then return 0; fi
+	recorded=()
+	if absent "$record_file"; then return 0; fi
 	if ! out=$(jq -n -r --arg name_re "$name_re" "$record_jq" "$record_file" 2>&1); then
 		record_error=$out
 		return 1
 	fi
 	eval "$out"
 }
+# read_record: load_record, dying when the record cannot be read.
 read_record() {
 	load_record || die "cannot read $record_file: $record_error"
 }
 
-# presets_behind: the header line of `assay check` for each language the devenv enables whose recorded preset version
-# is behind the pinned one. A version behind fails nothing. A record that cannot be read adds no line: the preset
-# check fails on it.
+# presets_behind: the header line of `assay check` for each language whose recorded preset version is behind the
+# pinned one. A version behind fails nothing. A record that cannot be read adds no line: the preset check fails on it.
 presets_behind() {
-	local lang
-	if [ ${#c_languages[@]} -eq 0 ]; then return 0; fi
+	local d lang
 	load_record || return 0
-	if [ ${#rec[@]} -eq 0 ]; then return 0; fi
+	if [ ${#recorded[@]} -eq 0 ]; then return 0; fi
 	find_presets
-	for lang in "${c_languages[@]}"; do
-		[ -n "${rec[$lang]+set}" ] || continue
+	for d in "$presets"/*/; do
+		lang=${d%/}
+		lang=${lang##*/}
+		[ -n "${recorded[$lang]+set}" ] || continue
 		preset_pinned "$lang"
-		if [ "${rec[$lang]}" -lt "$pinned" ]; then
-			echo "  preset behind: $lang ${rec[$lang]} → $pinned (assay preset $lang)"
+		if [ "${recorded[$lang]}" -lt "$pinned" ]; then
+			echo "  preset behind: $lang ${recorded[$lang]} → $pinned (assay preset $lang)"
 		fi
 	done
 }
@@ -1106,13 +1121,14 @@ builtin_preset() {
 	local lang
 	local -a missing=()
 	[ $# -eq 0 ] || usage_error "preset takes no argument"
+	missing_tool_exit=127
 	load_config
 	find_repo
 	find_presets
 	read_record
 	for lang in "${c_languages[@]}"; do
 		preset_pinned "$lang"
-		if [ "$pinned" -eq 0 ] || [ -n "${rec[$lang]+set}" ]; then continue; fi
+		if [ "$pinned" -eq 0 ] || [ -n "${recorded[$lang]+set}" ]; then continue; fi
 		if preset_applies "$lang"; then
 			missing+=("$lang")
 			echo "$lang's preset applies ($applies_why), and $record_file does not list $lang"
@@ -1154,19 +1170,21 @@ same_content() {
 }
 
 # What `assay preset` did, filled by apply_preset: a line per file it wrote, merged or kept; the diffs of the kept
-# files that differ from the preset, and the last lines, saying what is left to do.
+# files that differ from the preset; the last lines, saying what is left to do; whether a version it recorded changed.
 preset_lines=()
 preset_shown=
 preset_todo=()
+record_changed=0
 
 # apply_preset <language>: the language's pinned preset into the repo (the current directory, its root), file by
-# file, and its version into rec. A file the repo lacks is written. With no version recorded (an adoption), a file the
-# repo has is kept, and shown against the preset when they differ. With an older version recorded, the repo's file is
-# merged three ways (git merge-file): the base is the recorded version's file, theirs the pinned one's, ours the
-# repo's; a conflict leaves its markers in the file. The version is recorded whatever the outcome, so that a conflict
-# once resolved, or a kept file once extended, is not merged again.
+# file, and its version into recorded. A file the repo lacks is written. With no version recorded (an adoption), a file
+# the repo has is kept, and shown against the preset when they differ. With an older version recorded, the repo's file
+# is merged three ways (git merge-file): the base is the recorded version's file, theirs the pinned one's, ours the
+# repo's; a conflict leaves its markers in the file, and every later run reports them until they are resolved. The
+# version is recorded whatever the outcome, so that a conflict once resolved, or a kept file once extended, is not
+# merged again.
 apply_preset() {
-	local lang=$1 from=${rec[$1]:-} to f target other theirs base merged files diff rc todo changed=0
+	local lang=$1 from=${recorded[$1]:-} to f target other theirs base merged files diff rc todo changed=0
 	preset_pinned "$lang"
 	to=$pinned
 	if [ -n "$from" ] && [ "$from" -gt "$to" ]; then
@@ -1183,16 +1201,16 @@ apply_preset() {
 	while IFS= read -r -d '' f; do
 		theirs=$presets/$lang/$to/$f
 		target=$f
-		if [ ! -e "$f" ] && [ ! -L "$f" ]; then
+		if absent "$f"; then
 			preset_others "$lang" "$f"
 			for other in "${others[@]}"; do
-				if [ -e "$other" ] || [ -L "$other" ]; then
+				if ! absent "$other"; then
 					target=$other
 					break
 				fi
 			done
 		fi
-		if [ ! -e "$target" ] && [ ! -L "$target" ]; then
+		if absent "$target"; then
 			if [[ $target == */* ]]; then mkdir -p -- "${target%/*}" || die "cannot create ${target%/*}"; fi
 			cat -- "$theirs" >"$target" || die "cannot write $target"
 			preset_lines+=("wrote $target")
@@ -1215,7 +1233,14 @@ apply_preset() {
 			preset_todo+=("$todo above), keeping what the repo needs of its own")
 			continue
 		fi
-		if [ "$from" = "$to" ]; then continue; fi
+		if [ "$from" = "$to" ]; then
+			if has_markers "$target" "$lang"; then
+				preset_lines+=("conflict $target")
+				changed=1
+				preset_todo+=("$target holds the markers of a conflict with $lang's preset: resolve them")
+			fi
+			continue
+		fi
 		if [ -f "$presets/$lang/$from/$f" ]; then
 			cat -- "$presets/$lang/$from/$f" >"$base" || die "cannot read $lang's preset $from"
 		else
@@ -1239,18 +1264,17 @@ apply_preset() {
 		fi
 	done <"$files"
 	if [ "$from" != "$to" ]; then
-		rec[$lang]=$to
+		recorded[$lang]=$to
 		record_changed=1
 	elif [ "$changed" = 0 ]; then
 		preset_lines+=("$lang's preset $to: up to date")
 	fi
 }
 
-# write_record: rec into the record, its keys sorted, as jq prints it (which is how oxfmt formats JSON).
-record_changed=0
+# write_record: recorded into the record, its keys sorted, as jq prints it (which is how oxfmt formats JSON).
 write_record() {
 	local lang json
-	json=$(for lang in "${!rec[@]}"; do printf '%s\t%s\n' "$lang" "${rec[$lang]}"; done |
+	json=$(for lang in "${!recorded[@]}"; do printf '%s\t%s\n' "$lang" "${recorded[$lang]}"; done |
 		jq -n -R -S '[inputs | split("\t") | {key: .[0], value: (.[1] | tonumber)}] | from_entries') ||
 		die "cannot build $record_file"
 	printf '%s\n' "$json" >"$record_file" || die "cannot write $record_file"

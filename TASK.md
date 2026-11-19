@@ -20,8 +20,8 @@ The issue links its spec: eff3ct0/nixos-config#58 (its resolution comment) and #
   `assay_tools`); run from a checkout, they are `preset/` beside the script, through symlinks.
 - The module writes `languages` into the configuration (`bash` with `languages.shell.enable`, `nix` with
   `languages.nix.enable`); the CLI reads it, optional (absent means none).
-- bash's preset applies when git sees a shell script (tracked, or untracked and not ignored) as `shfmt -f` finds
-  them: the files bash's checks run on.
+- bash's preset applies when the repo tracks a shell script, as `shfmt -f` finds them (the spec's "first tracked
+  shell script", taken literally after the review).
 - `assay preset <language>...` takes the languages named (they need a preset, nothing else); with none, every enabled
   language whose preset applies.
 - The record is raised for every language processed, conflicts and kept files included, so a resolved conflict is
@@ -30,8 +30,10 @@ The issue links its spec: eff3ct0/nixos-config#58 (its resolution comment) and #
   file's format, so they are merged and shown like it.
 - A record newer than the pinned preset, or naming a version assay does not hold, is exit 2. Unknown languages in the
   record are kept.
-- Header line: `preset behind: <language> <recorded> → <pinned> (assay preset <language>)`; an unreadable record is
-  left to the `preset` check.
+- Header line: `preset behind: <language> <recorded> → <pinned> (assay preset <language>)`, for every recorded
+  language behind, enabled or not; an unreadable record is left to the `preset` check.
+- Conflict markers a merge left are reported (exit 1) by every later run until they are resolved; shellcheck also
+  fails on a `.shellcheckrc` that holds them. Without shfmt, `assay builtin preset` exits 127.
 - assay's own repo: a cleanup commit makes its scripts pass the preset's optional shellcheck checks (a file-level
   `SC2310` suppression with its reason in `assay.sh`, whose predicates and git wrapper are conditions on purpose, two
   line-level ones in `nix/rules-check.sh`; every other finding fixed), then `assay preset bash` is run and committed.
@@ -45,5 +47,7 @@ The issue links its spec: eff3ct0/nixos-config#58 (its resolution comment) and #
    `test/devenv/defaults.bats` built with `assay preset bash`, a real-devenv test in `test/devenv/module.bats`. (done)
 5. Docs: README, `preset/README.md`, `docs/adoption.md`, AGENTS.md. (done)
 6. Cleanup of the optional checks' findings in every shell file (the `.bats` files of `test/` by three subagents,
-   one set of files each); `assay preset bash` on assay itself. (in progress)
-7. `devenv test`, `bats test/devenv`, `nix flake check`; commits; critic; pull request. (pending)
+   one set of files each); `assay preset bash` on assay itself. (done)
+7. `devenv test`, `bats test/devenv`, `nix flake check`; commits. (done: `devenv test` passed, 206 tests, new code
+   87% covered)
+8. Review (`code-review` skill): fixes applied. Critic, then the pull request. (in progress)

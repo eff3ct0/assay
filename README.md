@@ -129,17 +129,18 @@ The machine-level subcommands, [`guard` and `git-hook`](#on-a-machine-the-guard-
 assay preset [<language>...]    write the languages' presets into the repo, or merge newer versions in
 ```
 
-A language's **preset** is the configuration files its default checks need in a repo. assay holds every version of
-each, under [`preset/`](preset/README.md); `assay preset` writes the version the repo pins (the highest) into the repo,
+A language's **preset** is the configuration files and development dependencies its default checks need in a repo
+(bash's has no dependency). assay holds every version of each, under [`preset/`](preset/README.md); `assay preset` writes the version the repo pins (the highest) into the repo,
 which owns the files from then on, and merges later versions in. assay injects no configuration at run time.
 
-- With no language named, it takes every language the repo's devenv enables whose preset applies: bash's once git
-  sees a shell script (tracked, or untracked and not ignored), as `shfmt -f` finds them. Nix has no preset. A language
-  named is taken as given; one assay has no preset for is exit 2.
+- With no language named, it takes every language the repo's devenv enables whose preset applies: bash's once the
+  repo tracks a shell script, as `shfmt -f` finds them. Nix has no preset. A language named is taken as given; one
+  assay has no preset for is exit 2.
 - A file the repo lacks is written from the pinned preset.
 - A file the repo has at an older recorded version is merged three ways with `git merge-file`: the base is the
   recorded version's file, theirs the pinned one's, ours the repo's. A conflict is left as markers, with the base
-  between `|||||||` and `=======`, for a person, or an agent asked to, to resolve.
+  between `|||||||` and `=======`, for a person, or an agent asked to, to resolve; every later run reports the markers
+  (exit 1) until they are gone.
 - A file the repo has with no version recorded (an adoption) is kept, and shown against the preset: the lines with `+`
   are the preset's. The agent extends it by hand.
 - When the repo configures the tool in another file the tool reads (`shellcheckrc` for shellcheck), that file is the
@@ -161,8 +162,8 @@ wrote .shellcheckrc
 wrote .assay-preset.json
 ```
 
-When the record of an enabled language is behind the pinned preset, `assay check`'s header says so on every run, as
-it lists loosenings and skipped checks; a version behind fails nothing:
+When the record holds a language whose version is behind the pinned preset, `assay check`'s header says so on every
+run, as it lists loosenings and skipped checks; a version behind fails nothing:
 
 ```
 assay check · base origin/main@ab03c18 (fork-point)
@@ -203,7 +204,7 @@ They are default checks: turning one off or redefining its `exec` is a loosening
   checked type (a sops file, say) goes in the repo's `.oxfmtrc.json` under `ignorePatterns`, which is no loosening.
 
 - `preset`: every language the repo's devenv enables whose preset applies is in `.assay-preset.json`. It fails with
-  the command that fixes it, `assay preset <language>`.
+  the command that fixes it, `assay preset <language>`; without shfmt, which tells shell scripts apart, it exits 127.
 - `suppressions`: a suppression (a comment or attribute that silences a finding at its place) added on new code
   names the rule it silences and gives a reason. Old suppressions never block a change: one on a line the change
   leaves alone is not read, and one the change also removes from the same file, with the same marker and rules (a

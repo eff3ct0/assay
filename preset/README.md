@@ -27,9 +27,8 @@ tool's defaults.
 
 - `assay preset` with no language takes every language the repo's devenv enables whose preset applies; the `preset`
   check fails while such a language is missing from the record.
-- bash's applies once git sees a shell script (tracked, or untracked and not ignored), as `shfmt -f` finds them: the
-  files bash's checks run on. Its files go at the repo root, since shellcheck reads `.shellcheckrc` from each
-  script's directory upward.
+- bash's applies once the repo tracks a shell script, as `shfmt -f` finds them (by extension or shebang). Its files
+  go at the repo root, since shellcheck reads `.shellcheckrc` from each script's directory upward.
 - A tool may read another file in place of a preset file: shellcheck reads `shellcheckrc` where a directory has no
   `.shellcheckrc`. When the repo has such a file, it is the tool's: the preset writes none of its own beside it, which
   would silently replace it, and merges into it and shows it instead. `preset_others` in `assay.sh` lists these files;

@@ -235,7 +235,7 @@ source "${BATS_TEST_DIRNAME:?}/helpers.bash"
 	run --separate-stderr devenv shell -- assay check preset
 	echo "$output"
 	[ "$status" -eq 1 ]
-	[[ $output == *"bash's preset applies (git sees the shell script build.sh), and .assay-preset.json does not list bash"* ]]
+	[[ $output == *"bash's preset applies (the repo tracks the shell script build.sh), and .assay-preset.json does not list bash"* ]]
 	[[ $output == *$'\nrun: assay preset bash\n'* ]]
 	# From outside the devenv, through it.
 	run --separate-stderr "$ASSAY/assay.sh" preset
