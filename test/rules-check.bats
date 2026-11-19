@@ -35,6 +35,21 @@ edited() {
 	[ "$last" = "rules check: 9 rules, 29 examples, all as expected" ]
 }
 
+@test "workspaceRoot scopes both path and command examples to physical main checkouts" {
+	cd "$T"
+	# shellcheck disable=SC2016 # $on is a jq binding.
+	edited '.rules |= map(select(.name | startswith("main-checkout-"))
+      | .workspaceRoot = "/deployment/workspace"
+      | .on as $on
+      | def events: map(if $on == "path" then {path: (. + "/new/file.md")}
+                        else {command: "git commit -m x", cwd: .} end);
+      .deny = (["workspace/repo", "alias"] | events)
+      | .allow = (["outside", "workspace-other", "workspace/worktree"] | events))'
+	check_rules "$T/rules.json"
+	[ "$status" -eq 0 ]
+	[[ $output == *'2 rules, 10 examples, all as expected'* ]]
+}
+
 @test "an allow example that is denied fails the check, naming the rule, the example and the reason" {
 	cd "$T"
 	edited '(.rules[] | select(.name == "no-clone") | .allow) += [{command: "git clone z"}]'

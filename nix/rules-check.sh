@@ -103,6 +103,18 @@ fixture() {
 	examples=$((examples + 1))
 	root=$work/example$examples
 	cp -a "$template" "$root" || fail "cannot copy the fixture to $root"
+	# Stand in for the deployment directory without consulting it. Leave malformed roots
+	# unchanged so guard validation still reports them.
+	if jq -e '.workspaceRoot | strings | startswith("/")' <<<"$rule" >/dev/null; then
+		{
+			mkdir "$root/workspace" &&
+				mv "$root/repo" "$root/worktree" "$root/workspace/" &&
+				ln -s workspace/repo "$root/alias" &&
+				mv "$root/local" "$root/outside" &&
+				cp -a "$root/outside" "$root/workspace-other" &&
+				jq --arg ws "$root/workspace" '{version: 1, rules: [. + {workspaceRoot: $ws}]}' <<<"$rule" >"$one_rule"
+		} || fail "cannot prepare scoped fixture in $root"
+	fi
 }
 
 # file_entries <files object> <file>: each file as two NUL-terminated records written to <file>, its path and its

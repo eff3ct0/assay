@@ -545,18 +545,19 @@ security boundary: matching command text can be evaded (`bash -c`, variables), a
 
 ### Rules
 
-| Field         | What it holds                                                                                         |
-| ------------- | ----------------------------------------------------------------------------------------------------- |
-| `name`        | The rule's stable id, which the hits log records. `[A-Za-z0-9][A-Za-z0-9._-]*`, unique.               |
-| `on`          | `command`, `path`, `commit-msg`, `pre-push` or `stop`: what the rule judges, and which entrypoint.    |
-| `match`       | What breaks the rule, by `on` (below).                                                                |
-| `message`     | One line: what is wrong and what to do instead.                                                       |
-| `note`        | Why, Fix, Not a fix, and the closing line (default empty).                                            |
-| `who`         | `agents` (the default): the rule runs only when `ASSAY_AGENT` is non-empty. `everyone`: always.       |
-| `cwd`         | A `command` rule only: a glob or `main-checkout`; the rule runs only when the event's cwd matches it. |
-| `fileContent` | A `command` rule only: a regex over the file the match binds to `$FILE` (below).                      |
-| `deny`        | Examples the rule must deny, at least one: the corrected command, path, message, push or state.       |
-| `allow`       | Examples the rule must let through, at least one: its fix, plus a near miss.                          |
+| Field           | What it holds                                                                                                                                        |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`          | The rule's stable id, which the hits log records. `[A-Za-z0-9][A-Za-z0-9._-]*`, unique.                                                              |
+| `on`            | `command`, `path`, `commit-msg`, `pre-push` or `stop`: what the rule judges, and which entrypoint.                                                   |
+| `match`         | What breaks the rule, by `on` (below).                                                                                                               |
+| `message`       | One line: what is wrong and what to do instead.                                                                                                      |
+| `note`          | Why, Fix, Not a fix, and the closing line (default empty).                                                                                           |
+| `who`           | `agents` (the default): the rule runs only when `ASSAY_AGENT` is non-empty. `everyone`: always.                                                      |
+| `workspaceRoot` | Optional absolute directory for a `main-checkout` path match or command `cwd`. The physical checkout root must equal this directory or be inside it. |
+| `cwd`           | A `command` rule only: a glob or `main-checkout`; the rule runs only when the event's cwd matches it.                                                |
+| `fileContent`   | A `command` rule only: a regex over the file the match binds to `$FILE` (below).                                                                     |
+| `deny`          | Examples the rule must deny, at least one: the corrected command, path, message, push or state.                                                      |
+| `allow`         | Examples the rule must let through, at least one: its fix, plus a near miss.                                                                         |
 
 By `on`:
 
@@ -662,7 +663,11 @@ and is in no repository:
   from it, and `stop` examples run in it;
 - `local/`: a repo with one commit and no remote, where a `stop` example with `remote = false` runs.
 
-So a `main-checkout` path rule takes `repo/README.md` as a `deny` example and `worktree/README.md` as an `allow` one.
+For rules with `workspaceRoot`, the harness substitutes its own `workspace/` for the configured root. Use
+`workspace/repo` for the main checkout, `alias` for a symlink to it, `workspace/worktree` for its linked worktree,
+and `outside` and `workspace-other` for unrelated main checkouts.
+
+For an unscoped rule, a `main-checkout` path rule takes `repo/README.md` as a `deny` example and `worktree/README.md` as an `allow` one.
 
 ## The hits log
 
