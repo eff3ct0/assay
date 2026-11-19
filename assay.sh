@@ -1572,7 +1572,8 @@ findings_prepare() {
 	exclude=$(git rev-parse --path-format=absolute --git-path info/exclude) || die "cannot find .git/info/exclude"
 	if ! grep -qxF .qlty/ "$exclude" 2>/dev/null; then
 		# Empty when the file is missing, empty, or ends in a newline.
-		last=$(tail -c 1 "$exclude" 2>/dev/null) || last=
+		last=
+		if [ -s "$exclude" ]; then last=$(tail -c 1 "$exclude") || last=; fi
 		{
 			mkdir -p "$(dirname "$exclude")" &&
 				if [ -n "$last" ]; then echo >>"$exclude"; fi &&
