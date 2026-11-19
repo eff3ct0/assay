@@ -91,6 +91,22 @@ A rule about a repo's contents, kept in that repo.
 **Guard rule**:
 A rule about what an agent does, kept in the machine's rule list.
 
+**Rule list**:
+A machine's guard rules and global git hook rules, one list in its home-manager configuration, rendered into the file
+that the agent guard and the global git hooks read.
+
+**Example**:
+A command, path, message, push or session state that a rule in the rule list must deny or allow; the check builder
+feeds each one to the entrypoint that judges it.
+
+**Agent guard**:
+`assay guard`: reads one harness hook event and allows a tool call, denies it, or keeps a turn going. A guardrail
+against habits, not a security boundary.
+
+**Global git hook**:
+A git hook registered in the user's global git config, which runs in every repo beside the repo's own hooks and leaves
+no trace in it.
+
 **Agent marker**:
 What tells assay's hooks that an agent, not a person, is acting.
 

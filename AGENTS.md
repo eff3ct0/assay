@@ -1,10 +1,13 @@
 # assay
 
-A repo's named checks, run the same way from pre-commit, `devenv test` and an agent's shell: a bash CLI, with jq and awk
-(`assay.sh`: `assay check`, the built-in checks that are its own code as `assay builtin <check>`, and
-`assay new-code`), the devenv module repos import (`devenv/`, the built-in checks in `devenv/defaults.nix`), and a Nix
-flake with the CLI's package (`nix/`). `README.md` says how a repo uses it, `docs/adoption.md` how an existing repo
-adopts it, and `GLOSSARY.md` holds the vocabulary. assay adopts itself: its `devenv.yaml` imports its own module by
+A repo's named checks, run the same way from pre-commit, `devenv test` and an agent's shell, and a machine's agent
+guard and global git hooks: a bash CLI, with jq and awk (`assay.sh`: `assay check`, the built-in checks that are its own
+code as `assay builtin <check>`, `assay new-code`, and the machine-level `assay guard` and `assay git-hook`, which read
+a rule list and match command rules with ast-grep), the devenv module repos import (`devenv/`, the built-in checks in
+`devenv/defaults.nix`), and a Nix flake (`nix/`) with the CLI's package, the home-manager module that holds a
+machine's rule list (`nix/home-manager.nix`) and the check builder that tests one (`nix/rules-check.nix`, running
+`nix/rules-check.sh`). `README.md` says how a repo and a machine use it, `docs/adoption.md` how an existing repo adopts
+it, and `GLOSSARY.md` holds the vocabulary. assay adopts itself: its `devenv.yaml` imports its own module by
 path (`imports: [ ./devenv ]`), so each change is checked by the version it ships. Each change implements one of this
 repo's GitHub issues: read it, and the specifications it links, before changing behaviour.
 
@@ -16,9 +19,13 @@ repo's GitHub issues: read it, and the specifications it links, before changing 
     on the module's options (`assay.checks.<name>`, `assay.seed`), the `ASSAY_CONFIG` and `ASSAY_SEED` variables,
     the pre-commit hook and `enterTest` it adds, the built-in checks with the tools they bring into the devenv
     (actionlint, gitleaks, oxfmt), and the output and exit codes of `assay check` and `assay builtin`;
-  - home-manager configurations, through the package and `homeManagerModules.default` (not exported yet: the guard's
-    issue adds it). They rely on `assay` re-executing itself through the repo's `devenv shell` when `ASSAY_CONFIG` is
-    unset, its exit 2 naming `docs/adoption.md` in a repo that has not adopted assay, and the hits log's lines
+  - home-manager configurations, through the package, `homeManagerModules.default` and `lib.rulesCheck`. They rely on
+    the module's options (`programs.assay.enable`, `package`, `rules` with its rule format, the read-only
+    `rulesFile`), the global git hooks it registers in `programs.git.settings` and the `ASSAY_HITS_LOG` it sets; on
+    `assay guard`'s answers in Claude Code's hook JSON (an adapter, such as an OpenCode plugin, builds the same JSON),
+    and its exit 1 that fails open; on `assay git-hook`'s exit codes and messages; on `lib.rulesCheck { pkgs, rules }`
+    and its examples' fixture; on `assay` re-executing itself through the repo's `devenv shell` when `ASSAY_CONFIG` is
+    unset, and its exit 2 naming `docs/adoption.md` in a repo that has not adopted assay; and on the hits log's lines
     (`ASSAY_HITS_LOG`, `ASSAY_AGENT`).
 
 ## Run
@@ -29,6 +36,9 @@ repo's GitHub issues: read it, and the specifications it links, before changing 
 - From this checkout without devenv: `ASSAY_CONFIG=<file> ./assay.sh check`, with git, jq and awk on the PATH. The file
   has the shape `devenv/module.nix` writes; `test/helpers.bash` builds one by hand.
 - One built-in check alone: `assay builtin <check>` (its `exec`); a change's new code as JSON: `assay new-code`.
+- The guard and the git hooks, from anywhere: `echo '<hook event>' | assay guard --rules <file>` and
+  `assay git-hook --rules <file> <hook> [<git's arguments>]`, with ast-grep on the PATH too; `test/rules/example.json`
+  is a rule list. `bash nix/rules-check.sh <file>` runs a rule list's examples, with `assay` on the PATH.
 - `nix build .#assay` builds the CLI.
 
 ## Test
@@ -38,17 +48,23 @@ repo's GitHub issues: read it, and the specifications it links, before changing 
   [<check>...]`; `git commit` runs `assay check --fast`.
 - `nix develop -c bats test`: the CLI against hand-written configurations in throwaway repos, with a stub `devenv`
   (`test/stub/devenv`); the base of the change in `test/base.bats`, delegation in `test/delegate.bats`, the hits log
-  in `test/hits.bats`, new code in `test/new-code.bats`, each built-in check that is assay's own code in a file of its
+  in `test/hits.bats`, new code in `test/new-code.bats`, the guard in `test/guard.bats`, the git hooks in
+  `test/git-hook.bats`, the check builder's script in `test/rules-check.bats` (the last three over the example rule
+  list `test/rules/example.json`, which `nix flake check` compares with the home-manager module's rendering of
+  `test/rules/example.nix`), each built-in check that is assay's own code in a file of its
   own (`test/agents-md.bats`, `test/commit-trailers.bats`, `test/gitleaks.bats`, `test/suppressions.bats`), and the
   built-in checks as the module configures them in `test/builtin.bats`, from `test/defaults/*.json`, which
-  `nix flake check` compares with the module's. The dev shell brings the built-in checks' tools from the flake's
-  nixpkgs, older than the devenv's (oxfmt 0.45 against 0.75): the suite passes with both. New behaviour gets a test
+  `nix flake check` compares with the module's. The dev shell brings the built-in checks' tools and ast-grep from the
+  flake's nixpkgs, older than the devenv's (oxfmt 0.45 against 0.75, ast-grep 0.42 against 0.51): the suite passes
+  with both. New behaviour gets a test
   there.
 - `nix develop -c bats test/devenv`: the devenv module in throwaway repos that import a `git+file:` copy of this
   working tree, and assay's own adoption, through the `devenv` on the PATH (2.4.0 or later). It needs the network the
   first time and takes about a minute.
-- `nix develop -c shellcheck assay.sh test/helpers.bash test/devenv/helpers.bash test/stub/devenv`
-- `nix flake check`: shellcheck, `bats test`, the CLI's build and the module's evaluation against a stand-in for
-  devenv's options (`nix/checks.nix`), in the sandbox. It does not run `test/devenv`.
+- `nix develop -c shellcheck assay.sh nix/rules-check.sh test/helpers.bash test/devenv/helpers.bash test/stub/devenv`
+- `nix flake check`: shellcheck, `bats test`, the CLI's build, the devenv module's evaluation against a stand-in for
+  devenv's options, and the home-manager module in a home built with the flake's `home-manager` input (its option
+  checks, its git config driving a real commit, and `lib.rulesCheck` passing on the example list and failing on a
+  broken one), all in `nix/checks.nix`, in the sandbox. It does not run `test/devenv`.
 
 Keep everything generic: no machine names, people, secrets backends or absolute paths outside test fixtures.
