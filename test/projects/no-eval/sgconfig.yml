@@ -1,0 +1,5 @@
+# An ast-grep project the tests copy into a repo, as `assay rule new` lays one out: the rule no-eval and its tests.
+ruleDirs:
+  - rules
+testConfigs:
+  - testDir: rule-tests

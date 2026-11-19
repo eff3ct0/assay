@@ -70,6 +70,8 @@ a `reason`, and `assay check` lists every loosening with its reason in its heade
 `assay.seed` (a positive 32-bit integer, `42` unless set) is exported as `ASSAY_SEED`, so that property-based tests run
 with a fixed seed.
 
+`assay.rulePacks` (default `[]`) names the [rule packs](#rule-packs) the repo turns on.
+
 ### Coverage of new code
 
 A check that declares `coverage` is measured on the change. `assay check` removes the report before the check runs;
@@ -114,10 +116,11 @@ assay check --list                                  list them, fast ones marked
 ### From outside the devenv
 
 `assay` knows it runs inside the repo's devenv when `ASSAY_CONFIG` is set. Outside it, as in a shell that does not
-activate direnv, `assay check <args>` re-executes itself as `devenv shell -- assay check <args>` from the repo root,
-so the version the repo pins always decides; `nix run github:eff3ct0/assay -- check` behaves the same, and so do
-`assay preset`, `assay builtin` and `assay new-code`. Outside a git repo, each of them exits 2. A repo without
-`devenv.nix`, or whose devenv does not import assay's module, is exit 2: the message names
+activate direnv, `assay check <args>` re-executes itself as `devenv shell -- assay check <args>`, entering the devenv
+from the repo root and running from the caller's directory, so the version the repo pins always decides and a path
+among the arguments means what the caller meant; `nix run github:eff3ct0/assay -- check` behaves the same. So do
+`assay preset`, `assay builtin`, `assay new-code` and `assay rule new`; outside a git repo, each of them exits 2. A repo
+without `devenv.nix`, or whose devenv does not import assay's module, is exit 2: the message names
 [docs/adoption.md](docs/adoption.md) and says that an adoption is a change of its own, made before other work.
 
 The machine-level subcommands, [`guard` and `git-hook`](#on-a-machine-the-guard-and-the-global-git-hooks) and
@@ -173,7 +176,8 @@ assay check · base origin/main@ab03c18 (fork-point)
 ## Built-in checks
 
 Every repo that imports the module runs these, whatever its languages, and all of them are fast. The tools they run
-(actionlint, gitleaks and oxfmt, from the repo's nixpkgs) join the repo's devenv, so the fix commands run there too.
+(actionlint, ast-grep, gitleaks and oxfmt, from the repo's nixpkgs) join the repo's devenv, so the fix commands run
+there too.
 They are default checks: turning one off or redefining its `exec` is a loosening.
 
 - `actionlint`: the GitHub workflows, skipped without `.github/workflows/*`: their syntax, their expressions, and
@@ -184,6 +188,19 @@ They are default checks: turning one off or redefining its `exec` is a loosening
   identical one. The file that holds the instructions has a "Related repos" heading, of any level; whether what it
   says is right stays prose. `assay builtin agents-md <commit>` reads a commit's tree instead of the working tree,
   with the same answers.
+- `ast-grep`: the repo's [code rules](#code-rules) and the rule packs it turns on, skipped without `sgconfig.yml` at
+  the root unless a pack is on: writing that configuration is the repo's opt-in, and an existing one is respected,
+  whatever directories it names. Three steps, in order, each run whatever the one before found, so that one run shows
+  every failure; only a placeholder ends the check after the first:
+  1. a plain text search of the files git sees, which fails on any `ast-grep-ignore` outside the rule directories (the
+     `ruleDirs`, `utilDirs` and test directories `sgconfig.yml` names): a bare `ast-grep-ignore` on a line also
+     silences a rule written to forbid it, so exceptions live in the rule's own file. It also fails on any placeholder
+     `assay rule new` left in the rule directories, `<fill in: …>`: the rule is not written yet, and ast-grep would
+     take its placeholder pattern for code;
+  2. `ast-grep test --skip-snapshot-tests`, for the repo and for each pack: snapshots only restate the message, and
+     without them `ast-grep test` exits 4;
+  3. `ast-grep scan`, for the repo and for each pack, which fails on a finding of an `error` rule. A pack's fix runs
+     with the command the failure prints, `ast-grep scan -c <pack>/sgconfig.yml -U`.
 - `commit-trailers`: no commit in `base..HEAD` has a line that starts with `Co-Authored-By:`, in any case. In CI it
   catches what slipped past local hooks (`--no-verify`, commits made on GitHub).
 - `gitleaks`: gitleaks over the files git sees in the working tree, tracked or untracked but not ignored (a local
@@ -256,6 +273,7 @@ $ assay new-code
 
 ```
 assay builtin agents-md [<commit>]                  the AGENTS.md / CLAUDE.md shape, of the working tree or a commit
+assay builtin ast-grep                              the repo's ast-grep rules and the rule packs it turns on
 assay builtin commit-trailers [--base <rev>]        no Co-Authored-By in base..HEAD
 assay builtin gitleaks                              secrets in the files git sees
 assay builtin preset                                the enabled languages' presets are recorded
@@ -265,7 +283,8 @@ assay new-code [--base <rev>]                       the change's new code, as JS
 
 The built-in checks that are assay's own code run as `assay builtin <check>`, which is their `exec`; an agent can run
 one alone. The base is `assay check`'s, from `ASSAY_BASE` when `assay check` runs them. Exit codes: `0` passed, `1`
-failed, `2` could not run, `127` the check's tool (gitleaks) is missing. Outside the repo's devenv they re-execute themselves through it, as `assay check` does.
+failed, `2` could not run, `127` the check's tool (gitleaks, ast-grep) is missing. Outside the repo's devenv they
+re-execute themselves through it, as `assay check` does.
 
 ## Each language's checks
 
@@ -291,6 +310,59 @@ ignored files are never read; with nothing to check, it passes.
   reason.
 - The commands call three helpers the module puts on the PATH (`devenv/bin`): `assay-files [<glob>...]` (the files
   git sees that exist, NUL-terminated), `assay-nixf-tidy <file>...` and `assay-bats <dir>`.
+
+## Code rules
+
+A **code rule** is a check born from a correction, about a repo's contents and kept in that repo. Most are a line in a
+tool's configuration (a lint turned on, a ban list, a boundary); a shape of the code is an ast-grep rule, which the
+`ast-grep` check runs. The [`assay-rule` skill](skills/assay-rule/SKILL.md) holds the procedure an agent follows.
+
+### `assay rule new`
+
+```
+assay rule new <kebab-name> [--lang <lang>] [--from <file>:<line>[-<line>]]
+```
+
+It scaffolds an ast-grep rule in ast-grep's own layout, and only that: a native rule is a line in its tool's
+configuration, and a guard rule a Nix entry, both written by hand.
+
+- `sgconfig.yml`, when the root has none, with relative paths (`ast-grep new project` writes absolute ones):
+  `ruleDirs: [rules]` and `testConfigs: [{testDir: rule-tests}]`. An existing one is left as it is, and the files go
+  into its first rule directory and its first test directory; one that names neither is exit 2.
+- `rules/<name>.yml`, severity `error`, with the `message` and the `note` skeleton (Why, Fix, Not a fix, and the
+  closing line), and comments saying what each field holds.
+- `rule-tests/<name>-test.yml`, whose first `invalid` case is `--from`'s lines, dedented, and whose `valid` cases wait
+  for the fix and a near miss.
+- `--from`'s path is relative to the current directory. `--lang` defaults to the language of `--from`'s file, the one
+  ast-grep parses it as (by its extension, or `sgconfig.yml`'s `languageGlobs`), or `bash` for a script with no
+  extension whose shebang names a shell; else to the repo's single enabled language among `languages.javascript`,
+  `typescript`, `python`, `rust`, `scala`, `nix` and `shell` (`bash`): ast-grep's languages by devenv's names, so a
+  repo that enables JavaScript for TypeScript code passes `--lang typescript` or `--from` a `.ts` file. With neither,
+  exit 2 asking for it.
+- Every value left to fill in is a placeholder, `<fill in: …>`, and the `ast-grep` check fails while one is left, so a
+  half-written rule cannot be committed. The scaffold passes `oxfmt`.
+- It prints the paths it created on stdout, one per line, relative to the current directory (absolute outside the
+  repo). Exit `1` when a rule of that name
+  already exists (its file, its tests, or a rule file with that `id` in a directory `sgconfig.yml` names), writing
+  nothing; `2` on usage, and when it cannot run.
+
+### Rule packs
+
+A **rule pack** is an opt-in set of ast-grep rules that assay ships in `packs/<name>/`, each an ast-grep project of
+its own ([packs/README.md](packs/README.md)), for rules that hold for every repo of a language. A repo turns packs on
+in its `devenv.nix`:
+
+```nix
+{
+  assay.rulePacks = [ "<name>" ];
+}
+```
+
+The `ast-grep` check then tests each pack and scans the repo with its rules, beside the repo's own, and runs even
+without `sgconfig.yml`. A name assay does not ship fails evaluation. Turning a pack on adds rules: what they find is
+cleaned up in the same change. A pack's rules take no exception from a repo, since they live in assay: a repo whose
+existing occurrences cannot all be cleaned up keeps its own copy of the rule, with their files in its `ignores`, and
+turns the pack on once they are gone. assay ships no pack yet.
 
 ## On a machine: the guard and the global git hooks
 
@@ -344,6 +416,10 @@ security boundary: matching command text can be evaded (`bash -c`, variables), a
   `pre-push`. With `programs.git.enable` off they are not written, and evaluation warns.
 - `ASSAY_HITS_LOG` set to `$XDG_STATE_HOME/assay/hits.jsonl` in the user's environment (`home.sessionVariables`), so
   only this machine records [hits](#the-hits-log).
+- assay's skills (`skills/<name>/SKILL.md`, today [`assay-rule`](skills/assay-rule/SKILL.md)), linked at
+  `~/.claude/skills/<name>`, where Claude Code loads them and `/<name>` invokes one, and at
+  `$XDG_CONFIG_HOME/opencode/skills/<name>`, where OpenCode does. OpenCode also reads `~/.claude/skills` and lists a
+  skill found in both places once.
 - The harness's hooks call `assay guard --rules <rulesFile>`: Claude Code's `PreToolUse` (Bash, Edit, Write,
   NotebookEdit) and `Stop` hooks, or an OpenCode plugin that builds the same JSON. Wiring them, and setting the agent
   marker `ASSAY_AGENT` to the harness's name in the agent's environment, is the machine's configuration.

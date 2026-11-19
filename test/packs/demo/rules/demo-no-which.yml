@@ -1,0 +1,12 @@
+id: demo-no-which
+language: bash
+severity: error
+message: Find a command with `command -v`, not `which`.
+note: |
+  Why: which is not part of POSIX, and some systems lack it or print to stdout when the command is missing.
+  Fix: `command -v <name>`.
+  Not a fix: an alias or a function named which, or calling it through another program.
+  If the rule is wrong here, stop and tell the user; exceptions go in the rule's own file.
+rule:
+  pattern: which $$$ARGS
+fix: command -v $$$ARGS

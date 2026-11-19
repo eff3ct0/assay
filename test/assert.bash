@@ -7,6 +7,14 @@ output_is() {
 	[ "${output?}" = "$expected" ]
 }
 
+# prints <expected> <command>...: the command succeeds and prints the expected text, trailing newlines aside.
+prints() {
+	local expected=$1 actual
+	shift
+	actual=$("$@")
+	[ "$actual" = "$expected" ]
+}
+
 # holds <file> <line>...: the file holds these lines.
 holds() {
 	local file=$1 expected actual

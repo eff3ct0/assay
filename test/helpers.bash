@@ -170,3 +170,28 @@ checkouts() {
 	git init --quiet "$T/local"
 	commit_file "$T/local" README.md "# local"
 }
+
+# config_set <jq filter> [<jq argument>...]: the configuration, rewritten by the filter into a copy in $T, which
+# ASSAY_CONFIG then names.
+config_set() {
+	local filter=$1
+	shift
+	jq "$filter" "$@" <"$ASSAY_CONFIG" >"$T/config-set.next"
+	mv "$T/config-set.next" "$T/config-set.json"
+	export ASSAY_CONFIG=$T/config-set.json
+}
+
+# sg_project: an ast-grep project at the current directory, as `assay rule new` lays one out: test/projects/no-eval
+# (sgconfig.yml, the rule no-eval, bash's eval, in rules/ and its tests in rule-tests/), and a script it passes.
+sg_project() {
+	cp -r "$BATS_TEST_DIRNAME/projects/no-eval/." .
+	echo 'run() { "$@"; }' >script.sh
+}
+
+# rule_packs <name>...: the configuration with the rule packs of test/packs/ named turned on, as assay's devenv module
+# writes them.
+rule_packs() {
+	# shellcheck disable=SC2016 # jq's variables, not the shell's
+	config_set '.rulePacks = (reduce $ARGS.positional[] as $p ({}; .[$p] = "\($dir)/\($p)"))' \
+		--arg dir "$BATS_TEST_DIRNAME/packs" --args "$@"
+}

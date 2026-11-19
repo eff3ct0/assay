@@ -1,0 +1,6 @@
+id: no-eval
+invalid:
+  - eval "$cmd"
+valid:
+  - '"${cmd[@]}"'
+  - echo eval

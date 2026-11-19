@@ -1,0 +1,14 @@
+id: no-eval
+language: bash
+severity: error
+message: Call the command by name, not through eval.
+note: |
+  Why: eval runs whatever its string holds.
+  Fix: call the command by name, with its arguments in an array.
+  Not a fix: `bash -c`, or eval in a function of another name.
+  If the rule is wrong here, stop and tell the user; exceptions go in the rule's own file.
+rule:
+  kind: command
+  has:
+    field: name
+    regex: ^eval$

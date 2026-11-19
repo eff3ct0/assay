@@ -1,8 +1,9 @@
 # assay's home-manager module, flake.nix's homeManagerModules.default: the CLI on the user's PATH, the machine's rule
 # list (programs.assay.rules) rendered into the one JSON file that `assay guard` and `assay git-hook` read with
-# --rules, the global git hooks registered in the user's git config, and the hits log's path. assay ships no rules:
-# a machine's live in its own configuration. A harness's hooks (Claude Code's managed settings, an OpenCode plugin)
-# call `assay guard --rules <rulesFile>`; wiring them is the machine's.
+# --rules, the global git hooks registered in the user's git config, the hits log's path, and assay's skills
+# (skills/) where Claude Code and OpenCode load them. assay ships no rules: a machine's live in its own configuration.
+# A harness's hooks (Claude Code's managed settings, an OpenCode plugin) call `assay guard --rules <rulesFile>`;
+# wiring them is the machine's.
 self:
 {
   config,
@@ -13,6 +14,17 @@ self:
 let
   cfg = config.programs.assay;
   inherit (lib) mkOption types;
+
+  # assay's skills: each directory of skills/, holding its SKILL.md.
+  skills = lib.attrNames (
+    lib.filterAttrs (_: type: type == "directory") (builtins.readDir ../skills)
+  );
+  # skillFiles <directory>: each skill, linked at <directory>/<name>.
+  skillFiles =
+    dir:
+    lib.listToAttrs (
+      map (name: lib.nameValuePair "${dir}/${name}" { source = ../skills + "/${name}"; }) skills
+    );
 
   # What an example of each kind of rule holds. A string stands for the first field; a stop example has none.
   exampleFields = {
@@ -259,7 +271,15 @@ in
   };
 
   config = lib.mkIf cfg.enable {
-    home.packages = [ cfg.package ];
+    home = {
+      packages = [ cfg.package ];
+      # Only this machine records hits: CI and other machines leave ASSAY_HITS_LOG unset.
+      sessionVariables.ASSAY_HITS_LOG = lib.mkDefault "${config.xdg.stateHome}/assay/hits.jsonl";
+      # The skills, where Claude Code loads a user's skills (which `/<name>` also invokes) and where OpenCode does
+      # (below). OpenCode reads ~/.claude/skills too, and lists a skill found in both places once.
+      file = skillFiles ".claude/skills";
+    };
+    xdg.configFile = skillFiles "opencode/skills";
 
     # Config-based hooks (git 2.54): they run in every repo beside the repo's own hooks and leave no trace in it.
     programs.git.settings.hook = lib.listToAttrs (
@@ -276,9 +296,6 @@ in
           "pre-push"
         ]
     );
-
-    # Only this machine records hits: CI and other machines leave ASSAY_HITS_LOG unset.
-    home.sessionVariables.ASSAY_HITS_LOG = lib.mkDefault "${config.xdg.stateHome}/assay/hits.jsonl";
 
     warnings = lib.optional (!config.programs.git.enable) ''
       programs.assay: the global git hooks live in home-manager's git configuration, which programs.git.enable is
