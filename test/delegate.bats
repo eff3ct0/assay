@@ -165,3 +165,20 @@ not_adopted() {
 	[[ $(sed -n 1p "$T/devenv.calls") == *" builtin agents-md" ]]
 	[[ $(sed -n 2p "$T/devenv.calls") == *" new-code --base HEAD" ]]
 }
+
+@test "outside the devenv, assay rule new runs inside it from the caller's directory: --from's path is the caller's" {
+	local_repo
+	devenv_files yes
+	mkdir -p src
+	printf '%s\n' 'fn main() {' '    let home = std::env::var("HOME");' '}' >src/a.rs
+	outside_devenv
+	cd src
+	run --separate-stderr "$assay" rule new no-env-var --from a.rs:2
+	echo "$stderr"
+	[ "$status" -eq 0 ]
+	[ "$output" = "$(printf '%s\n' sgconfig.yml rules/no-env-var.yml rule-tests/no-env-var-test.yml)" ]
+	[ "$(wc -l <"$T/devenv.calls")" -eq 1 ]
+	[[ $(cat "$T/devenv.calls") == "$(printf %q "$T/work") shell -- "* ]]
+	[ "$(yq -o=json '.invalid[0]' ../rule-tests/no-env-var-test.yml)" = '"let home = std::env::var(\"HOME\");\n"' ]
+	[ "$(yq '.language' ../rules/no-env-var.yml)" = rust ]
+}

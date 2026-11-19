@@ -170,7 +170,7 @@ source "$BATS_TEST_DIRNAME/helpers.bash"
 	run --separate-stderr nix run . -- check --list
 	echo "$stderr"
 	[ "$status" -eq 0 ]
-	[ "$output" = "$(printf '%s\n' 'actionlint (fast)' 'agents-md (fast)' bats 'commit-trailers (fast)' 'deadnix (fast)' \
+	[ "$output" = "$(printf '%s\n' 'actionlint (fast)' 'agents-md (fast)' 'ast-grep (fast)' bats 'commit-trailers (fast)' 'deadnix (fast)' \
 		'gitleaks (fast)' nix-flake-check 'nixf-tidy (fast)' 'nixfmt (fast)' 'oxfmt (fast)' 'shellcheck (fast)' \
 		'shfmt (fast)' 'statix (fast)' 'suppressions (fast)')" ]
 	run git commit --allow-empty -m "an empty commit"
@@ -184,8 +184,8 @@ source "$BATS_TEST_DIRNAME/helpers.bash"
 	shape
 	run --separate-stderr devenv shell -- assay check --list
 	echo "$stderr"
-	[ "$output" = "$(printf '%s (fast)\n' actionlint agents-md commit-trailers gitleaks oxfmt suppressions)" ]
-	run --separate-stderr devenv shell -- bash -c 'command -v oxfmt gitleaks actionlint'
+	[ "$output" = "$(printf '%s (fast)\n' actionlint agents-md ast-grep commit-trailers gitleaks oxfmt suppressions)" ]
+	run --separate-stderr devenv shell -- bash -c 'command -v oxfmt gitleaks actionlint ast-grep'
 	[ "$status" -eq 0 ]
 	run devenv test
 	echo "$output"

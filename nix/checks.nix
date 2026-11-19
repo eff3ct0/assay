@@ -30,6 +30,12 @@ let
           };
           nix.enable = lib.mkEnableOption "Nix";
           shell.enable = lib.mkEnableOption "shell";
+          # The other languages the module reads, for assay rule new's default language, and one it does not.
+          typescript.enable = lib.mkEnableOption "TypeScript";
+          python.enable = lib.mkEnableOption "Python";
+          rust.enable = lib.mkEnableOption "Rust";
+          scala.enable = lib.mkEnableOption "Scala";
+          go.enable = lib.mkEnableOption "Go";
         };
         packages = lib.mkOption {
           type = lib.types.listOf lib.types.package;
@@ -56,17 +62,19 @@ let
       };
     };
 
-  # The module with the given default checks, and a repo's own definitions.
-  evalModule =
-    defaults: repo:
+  # The module with the given rule packs' directory and default checks, and a repo's own definitions.
+  evalModuleWith =
+    packs: defaults: repo:
     (lib.evalModules {
       modules = [
         devenvStub
-        (import ../devenv/module.nix { inherit defaults; })
+        (import ../devenv/module.nix { inherit defaults packs; })
         { _module.args.pkgs = pkgs; }
         repo
       ];
     }).config;
+  # With the rule packs of assay's tests, test/packs/.
+  evalModule = evalModuleWith ../test/packs;
 
   # The module with two default checks, `demo` and `tested` (which writes a coverage report and needs a tool).
   evalWith = evalModule (_: {
@@ -95,10 +103,23 @@ let
     };
   builtinFrontend = javascriptIn "./frontend";
   oxfmtExec = config: config.assay.checks.oxfmt.exec;
+  builtinDemoPack = evalBuiltin { assay.rulePacks = [ "demo" ]; };
+  languagesOn = evalWith {
+    languages = {
+      javascript.enable = true;
+      typescript.enable = true;
+      shell.enable = true;
+      rust.enable = true;
+      go.enable = true;
+    };
+  };
 
   # Whether the configuration file can be produced.
   evaluates = repo: (builtins.tryEval (evalWith repo).env.ASSAY_CONFIG).success;
   evaluatesBuiltin = repo: (builtins.tryEval (evalBuiltin repo).env.ASSAY_CONFIG).success;
+  # With the packs assay ships, packs/.
+  evaluatesShipped =
+    repo: (builtins.tryEval (evalModuleWith ../packs (_: { }) repo).env.ASSAY_CONFIG).success;
 
   plain = evalWith { };
   off = evalWith {
@@ -299,9 +320,18 @@ let
       map lib.getName builtinPlain.packages == [
         "assay"
         "actionlint"
+        "ast-grep"
         "gitleaks"
         "oxfmt"
       ];
+    "the ast-grep check requires sgconfig.yml, until a rule pack is on" =
+      builtinPlain.assay.checks.ast-grep.requires == "sgconfig.yml"
+      && builtinDemoPack.assay.checks.ast-grep.requires == null;
+    "a rule pack assay does not ship fails evaluation, and an assertion" =
+      !evaluates { assay.rulePacks = [ "nope" ]; }
+      && builtins.any (a: !a.assertion) (evalWith { assay.rulePacks = [ "nope" ]; }).assertions;
+    "with the packs assay ships, none yet, no pack can be turned on" =
+      evaluatesShipped { } && !evaluatesShipped { assay.rulePacks = [ "demo" ]; };
     "a JavaScript directory given absolute, relative or with a trailing slash is the same pattern" =
       lib.all (d: oxfmtExec (javascriptIn d) == oxfmtExec builtinFrontend)
         [
@@ -525,8 +555,14 @@ in
           checks: {
             demo: {exec: "true", fast: true, enable: true, requires: null, coverage: null},
             tested: {exec: "run-tests", fast: false, enable: true, requires: null, coverage: "$ASSAY_DIR/t.xml"}},
-          coverage: {newCode: 80}, loosenings: []}' \
+          coverage: {newCode: 80}, loosenings: [], languages: [], rulePacks: {}}' \
           ${plain.env.ASSAY_CONFIG}
+        # The enabled languages among assay's six, by ast-grep's names, sorted, each once; Go is none of them.
+        jq -e '.languages == ["bash", "rust", "typescript"]' ${languagesOn.env.ASSAY_CONFIG}
+        # A pack turned on is its directory, an ast-grep project.
+        demo=$(jq -r '.rulePacks.demo' ${builtinDemoPack.env.ASSAY_CONFIG})
+        [ "$(jq -c '.rulePacks | keys' ${builtinDemoPack.env.ASSAY_CONFIG})" = '["demo"]' ]
+        test -f "$demo/sgconfig.yml" -a -f "$demo/rules/demo-no-which.yml"
         jq -e '.checks.demo.enable == false and .loosenings == [{check: "demo", kind: "off", reason: "off for the test"}]' \
           ${off.env.ASSAY_CONFIG}
         jq -e '.checks.demo.exec == "echo mine" and .loosenings == [{check: "demo", kind: "exec", reason: "mine for the test"}]' \

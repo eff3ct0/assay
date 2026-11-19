@@ -161,3 +161,43 @@ checkouts() {
 	git init --quiet "$T/local"
 	commit_file "$T/local" README.md "# local"
 }
+
+# sg_project: an ast-grep project at the current directory, as `assay rule new` lays one out: sgconfig.yml, the rule
+# no-eval (bash's eval) in rules/ and its tests in rule-tests/, and a script that passes it.
+sg_project() {
+	printf '%s\n' 'ruleDirs:' '  - rules' 'testConfigs:' '  - testDir: rule-tests' >sgconfig.yml
+	mkdir -p rules rule-tests
+	cat >rules/no-eval.yml <<'RULE'
+id: no-eval
+language: bash
+severity: error
+message: Call the command by name, not through eval.
+note: |
+  Why: eval runs whatever its string holds.
+  Fix: call the command by name, with its arguments in an array.
+  Not a fix: `bash -c`, or eval in a function of another name.
+  If the rule is wrong here, stop and tell the user; exceptions go in the rule's own file.
+rule:
+  kind: command
+  has:
+    field: name
+    regex: ^eval$
+RULE
+	cat >rule-tests/no-eval-test.yml <<'TESTS'
+id: no-eval
+invalid:
+  - eval "$cmd"
+valid:
+  - '"${cmd[@]}"'
+  - echo eval
+TESTS
+	echo 'run() { "$@"; }' >script.sh
+}
+
+# rule_packs <name>...: the configuration, copied to $T, with the rule packs of test/packs/ named turned on, as
+# assay's devenv module writes them.
+rule_packs() {
+	jq --arg dir "$BATS_TEST_DIRNAME/packs" --args '.rulePacks = (reduce $ARGS.positional[] as $p ({}; .[$p] = "\($dir)/\($p)"))' \
+		"$@" <"$ASSAY_CONFIG" >"$T/packs-config.json"
+	export ASSAY_CONFIG=$T/packs-config.json
+}
