@@ -1,16 +1,9 @@
 # shellcheck disable=SC2016 # the models' TLA+ text is literal
 bats_require_minimum_version 1.5.0
 # shellcheck source=test/helpers.bash
-source "$BATS_TEST_DIRNAME/helpers.bash"
+source "${BATS_TEST_DIRNAME:?}/helpers.bash"
 
 # The tla check (`assay builtin tla`), with the real TLC (tlaplus18), over models in throwaway repos.
-
-# tla_checks: the built-in checks' configuration with the tla check turned on, as a repo's devenv.nix turns it on.
-tla_checks() {
-	export ASSAY_CONFIG=$T/tla.json
-	jq '.checks.tla.enable = true' "$BATS_TEST_DIRNAME/defaults/plain.json" >"$ASSAY_CONFIG"
-	PATH=$DEVENV_STUB_PROFILE:$PATH
-}
 
 # counter <atomic|racy>: tla/Counter.tla and tla/Counter.cfg, a model of processes that each add one to a shared
 # counter, either in one atomic step or as a read followed by a write, which loses an update when two interleave.
@@ -46,9 +39,12 @@ counter() {
 # same from run to run (TLC's header and timestamps vary).
 trace() { sed -n '/^Error: /,/ states generated, /p' "$1"; }
 
+# tlc_lines: the configuration and spec of each TLC run the output shows, one per line.
+tlc_lines() { sed -n 's/^\$ tlc .* -config //p' <<<"$output"; }
+
 @test "a correct model passes, fast, and leaves the tree as it was: no states/, no trace module" {
 	shaped_repo
-	tla_checks
+	tla_on
 	counter atomic
 	git add tla
 	git commit --quiet -m model
@@ -58,38 +54,38 @@ trace() { sed -n '/^Error: /,/ states generated, /p' "$1"; }
 	[ "$status" -eq 0 ]
 	[ "$SECONDS" -lt 60 ]
 	[[ ${lines[1]} == "ok   tla "* ]]
-	local log
-	log=$(git rev-parse --absolute-git-dir)/assay/tla.log
-	grep -qF 'Model checking completed. No error has been found.' "$log"
-	grep -qF -- "\$ tlc -workers 1 -fp 0 -noGenerateSpecTE -metadir $(git rev-parse --absolute-git-dir)/assay/tla" "$log"
-	[ -z "$(git status --porcelain --ignored)" ]
+	git_dir=$(git rev-parse --absolute-git-dir)
+	grep -qF 'Model checking completed. No error has been found.' "$git_dir/assay/tla.log"
+	grep -qF -- "\$ tlc -workers 1 -fp 0 -noGenerateSpecTE -metadir $git_dir/assay/tla -config tla/Counter.cfg" \
+		"$git_dir/assay/tla.log"
+	prints '' git status --porcelain --ignored
 }
 
 @test "a broken invariant fails the check, its log holds the trace, and two runs give the same trace" {
 	shaped_repo
-	tla_checks
+	tla_on
 	counter racy
 	git add tla
 	git commit --quiet -m model
-	local log
-	log=$(git rev-parse --absolute-git-dir)/assay/tla.log
+	git_dir=$(git rev-parse --absolute-git-dir)
 	run --separate-stderr "$assay" check tla
 	echo "$output"
 	[ "$status" -eq 1 ]
 	[[ ${lines[1]} == "FAIL tla "*" (exit 1)" ]]
 	[[ $output == *"Error: Invariant NoLostUpdate is violated."* ]]
 	[[ $output == *"tla/Counter.cfg: TLC exit 12"* ]]
-	grep -qF 'Error: Invariant NoLostUpdate is violated.' "$log"
-	grep -qF 'State 5: <Write ' "$log"
-	trace "$log" >"$T/first"
+	grep -qF 'Error: Invariant NoLostUpdate is violated.' "$git_dir/assay/tla.log"
+	grep -qF 'State 5: <Write ' "$git_dir/assay/tla.log"
+	trace "$git_dir/assay/tla.log" >"$T/first"
 	run --separate-stderr "$assay" check tla
 	[ "$status" -eq 1 ]
-	trace "$log" >"$T/second"
+	trace "$git_dir/assay/tla.log" >"$T/second"
 	[ -s "$T/first" ]
 	diff "$T/first" "$T/second"
-	# TLC leaves its states in the git directory after a violation, and the next run starts from an empty one.
-	[ -z "$(git status --porcelain --ignored)" ]
-	[ "$(find "$(git rev-parse --absolute-git-dir)/assay/tla" -name '*.st' | wc -l)" -ge 1 ]
+	prints '' git status --porcelain --ignored
+	# TLC leaves its states in the git directory after a violation; the next run starts from an empty directory.
+	states=$(find "$git_dir/assay/tla" -name '*.st')
+	[ -n "$states" ]
 }
 
 @test "every configuration runs in name order: MC<Name> extends its spec; a deadlock, a parse error, a configuration error and a .cfg with no .tla each fail" {
@@ -108,15 +104,14 @@ trace() { sed -n '/^Error: /,/ states generated, /p' "$1"; }
 	run --separate-stderr "$assay" builtin tla
 	echo "$output"
 	[ "$status" -eq 1 ]
-	[ "$(grep '^\$ tlc ' <<<"$output" | sed 's/.* -config //')" = "$(printf '%s\n' \
-		'tla/Broken.cfg tla/Broken.tla' 'tla/Counter.cfg tla/Counter.tla' 'tla/MCCounter.cfg tla/MCCounter.tla' \
-		'tla/Stuck.cfg tla/Stuck.tla' 'tla/Unset.cfg tla/Unset.tla')" ]
+	prints "$(printf '%s\n' 'tla/Broken.cfg tla/Broken.tla' 'tla/Counter.cfg tla/Counter.tla' \
+		'tla/MCCounter.cfg tla/MCCounter.tla' 'tla/Stuck.cfg tla/Stuck.tla' 'tla/Unset.cfg tla/Unset.tla')" tlc_lines
 	[[ $output == *"Error: Deadlock reached."* ]]
 	[[ $output == *"The constant parameter Procs is not assigned a value by the configuration file."* ]]
-	[ "$(tail -n 6 <<<"$output")" = "$(printf '%s\n' 'tla/Broken.cfg: TLC exit 150' \
-		'tla/Orphan.cfg: no tla/Orphan.tla beside it' 'tla/Stuck.cfg: TLC exit 11' 'tla/Unset.cfg: TLC exit 151' \
-		'4 of 6 TLA+ configurations failed')" ]
-	[ "$(git status --porcelain --ignored)" = '?? tla/' ]
+	prints "$(printf '%s\n' 'tla/Broken.cfg: TLC exit 150' 'tla/Orphan.cfg: no tla/Orphan.tla beside it' \
+		'tla/Stuck.cfg: TLC exit 11' 'tla/Unset.cfg: TLC exit 151' '4 of 6 TLA+ configurations failed')" \
+		tail -n 5 <<<"$output"
+	prints '?? tla/' git status --porcelain --ignored
 }
 
 @test "the configurations are the tla/*.cfg git sees: an ignored one, and one in a subdirectory, are not run" {
@@ -131,15 +126,14 @@ trace() { sed -n '/^Error: /,/ states generated, /p' "$1"; }
 	run --separate-stderr "$assay" builtin tla
 	echo "$output"
 	[ "$status" -eq 0 ]
-	[ "$(grep -c '^\$ tlc ' <<<"$output")" -eq 1 ]
-	[[ $output == *"-config tla/Counter.cfg tla/Counter.tla"* ]]
+	prints 'tla/Counter.cfg tla/Counter.tla' tlc_lines
 }
 
 @test "with no tla/*.cfg, assay builtin tla passes and says so; it takes no argument" {
 	local_repo
 	run --separate-stderr "$assay" builtin tla
 	[ "$status" -eq 0 ]
-	[ "$output" = "no tla/*.cfg to check" ]
+	output_is "no tla/*.cfg to check"
 	run --separate-stderr "$assay" builtin tla extra
 	[ "$status" -eq 2 ]
 	[ "${stderr_lines[0]}" = "assay: tla takes no argument" ]
@@ -151,11 +145,14 @@ trace() { sed -n '/^Error: /,/ states generated, /p' "$1"; }
 	check tla "\"$assay\" builtin tla"
 	# Only the tools assay check itself needs.
 	mkdir "$T/bin"
-	for t in bash git jq head tail wc mkdir rm; do ln -s "$(command -v "$t")" "$T/bin/$t"; done
+	for t in bash git jq head tail wc mkdir rm; do
+		target=$(command -v "$t")
+		ln -s "$target" "$T/bin/$t"
+	done
 	PATH=$T/bin run "$assay" check
 	[ "$status" -eq 1 ]
 	[[ ${lines[1]} == "FAIL tla "*"(exit 127: tool not found)" ]]
-	PATH=$T/bin run --separate-stderr "$assay" builtin tla
+	PATH=$T/bin run -127 --separate-stderr "$assay" builtin tla
 	[ "$status" -eq 127 ]
 	[ "$stderr" = "assay: cannot find tlc on the PATH" ]
 }

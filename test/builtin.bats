@@ -18,9 +18,7 @@ untimed() { sed -E 's/ [0-9]+\.[0-9]{2}s/ Ns/g' <<<"$output"; }
 
 @test "the tla check, turned on in a repo with no tla/*.cfg, is skipped" {
 	shaped_repo
-	export ASSAY_CONFIG=$T/tla.json
-	jq '.checks.tla.enable = true' "$BATS_TEST_DIRNAME/defaults/plain.json" >"$ASSAY_CONFIG"
-	PATH=$DEVENV_STUB_PROFILE:$PATH
+	tla_on
 	mkdir tla
 	echo '---- MODULE Lone ----' >tla/Lone.tla
 	run --separate-stderr "$assay" check tla
