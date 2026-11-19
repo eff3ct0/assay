@@ -124,6 +124,16 @@ let
     ++ lib.optional (
       predicates ? ${rule.on} && !(lib.elem rule.match predicates.${rule.on})
     ) "${where}: a ${rule.on} rule's match is one of ${lib.concatStringsSep ", " predicates.${rule.on}}"
+    ++ lib.optional (
+      rule.workspaceRoot != null
+      && !(
+        lib.hasPrefix "/" rule.workspaceRoot
+        && (
+          (rule.on == "path" && rule.match == "main-checkout")
+          || (rule.on == "command" && rule.cwd == "main-checkout")
+        )
+      )
+    ) "${where}: workspaceRoot needs an absolute path and a main-checkout predicate"
     ++ lib.optional (rule.on != "command" && rule.cwd != null) "${where}: only a command rule has a cwd"
     ++ lib.optional (
       rule.on != "command" && rule.fileContent != null
@@ -141,20 +151,23 @@ let
     ${lib.concatMapStringsSep "\n" (p: "  - ${p}") problems}'';
 
   normalise = on: ex: if builtins.isString ex then { ${stringField.${on}} = ex; } else ex;
-  render = rule: {
-    inherit (rule)
-      name
-      on
-      match
-      message
-      note
-      who
-      cwd
-      fileContent
-      ;
-    deny = map (normalise rule.on) rule.deny;
-    allow = map (normalise rule.on) rule.allow;
-  };
+  render =
+    rule:
+    {
+      inherit (rule)
+        name
+        on
+        match
+        message
+        note
+        who
+        cwd
+        fileContent
+        ;
+      deny = map (normalise rule.on) rule.deny;
+      allow = map (normalise rule.on) rule.allow;
+    }
+    // lib.optionalAttrs (rule.workspaceRoot != null) { inherit (rule) workspaceRoot; };
 
   # What --rules reads. It cannot be produced while the list has a problem, whatever asks for it.
   rulesFile =
@@ -223,6 +236,11 @@ let
         description = ''
           A command rule's cwd: a glob or `main-checkout`; the rule runs only when the event's cwd matches it.
         '';
+      };
+      workspaceRoot = mkOption {
+        type = types.nullOr types.nonEmptyStr;
+        default = null;
+        description = "Restrict main-checkout to checkouts physically under this absolute directory.";
       };
       fileContent = mkOption {
         type = types.nullOr types.nonEmptyStr;

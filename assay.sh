@@ -2564,6 +2564,10 @@ def rule_ok($i):
     fail("rule \($n): who must be agents or everyone, not \(.who | tojson)")
   elif .cwd != null and (.on != "command" or (.cwd | text | not)) then
     fail("rule \($n): cwd belongs to a command rule, a glob or main-checkout")
+  elif .workspaceRoot != null and (((.workspaceRoot | type) != "string") or
+    (.workspaceRoot | startswith("/") | not) or
+    ((.on == "path" and .match == "main-checkout" or .on == "command" and .cwd == "main-checkout") | not)) then
+    fail("rule \($n): workspaceRoot needs an absolute path and a main-checkout predicate")
   elif .fileContent != null and (.on != "command" or (.fileContent | text | not)) then
     fail("rule \($n): fileContent belongs to a command rule, a regex")
   else . end;
@@ -2582,6 +2586,7 @@ def rule_ok($i):
       "r_match+=(\(if .on != "command" then .match elif .match | has("rule") then .match | tojson
         else {rule: .match} | tojson end | @sh))",
       "r_message+=(\(.message | @sh)) r_note+=(\(.note // "" | @sh))",
+      "r_workspace+=(\(.workspaceRoot // "" | @sh))",
       "r_cwd+=(\(.cwd // "" | @sh)) r_file_content+=(\(.fileContent // "" | @sh))"),
   "rules_loaded=1"
 '
@@ -2592,6 +2597,7 @@ r_who=()
 r_match=()
 r_message=()
 r_note=()
+r_workspace=()
 r_cwd=()
 r_file_content=()
 rules_loaded=0
@@ -2771,8 +2777,15 @@ in_main_checkout() {
 
 # path_matches <glob or main-checkout> <path>: a path rule's match, or a command rule's cwd.
 path_matches() {
-	local abs
+	local abs workspace
 	[ -n "$2" ] || return 1
+	if [ -n "$3" ]; then
+		abs=$(realpath -m -- "$2") || return 1
+		in_main_checkout "$abs" || return 1
+		workspace=$(realpath -e -- "$3") && checkout_root=$(realpath -e -- "$checkout_root") || return 1
+		[[ $checkout_root == "$workspace" || $checkout_root == "${workspace%/}/"* ]]
+		return
+	fi
 	abs=$(realpath -m -s -- "$2") || die "cannot resolve the path $2"
 	if [ "$1" = main-checkout ]; then in_main_checkout "$abs"; else glob_matches "$1" "$abs"; fi
 }
@@ -2832,7 +2845,7 @@ guard_command() {
 	local -a matched=()
 	active_rules command
 	for i in "${active[@]}"; do
-		if [ -n "${r_cwd[$i]}" ] && ! path_matches "${r_cwd[$i]}" "$ev_cwd"; then continue; fi
+		if [ -n "${r_cwd[$i]}" ] && ! path_matches "${r_cwd[$i]}" "$ev_cwd" "${r_workspace[$i]}"; then continue; fi
 		# r_match holds a rule file's body, an object: the id, the language and the severity go first.
 		inline+="$sep{\"id\": \"r$i\", \"language\": \"bash\", \"severity\": \"hint\", ${r_match[$i]:1}"
 		sep=$'\n---\n'
@@ -2865,7 +2878,7 @@ guard_path() {
 	abs=$(realpath -m -s -- "$ev_path") || die "cannot resolve the path $ev_path"
 	active_rules path
 	for i in "${active[@]}"; do
-		if path_matches "${r_match[$i]}" "$abs"; then
+		if path_matches "${r_match[$i]}" "$ev_path" "${r_workspace[$i]}"; then
 			if [ "${r_match[$i]}" = main-checkout ]; then
 				violate "$i" "$abs is in the main checkout $checkout_root"
 			else
