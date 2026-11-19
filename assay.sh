@@ -4,8 +4,9 @@
 # whose path is ASSAY_CONFIG.
 set -euo pipefail
 
-# The package sets assay_tools (git, jq, gawk, coreutils, ast-grep) on the line before this script. assay's own commands find them
-# first; each check runs with the PATH assay was called with, so it sees the devenv's tools, not assay's.
+# The package sets assay_tools (git, jq, gawk, coreutils, ast-grep) on the line before this script. assay's own
+# commands find them first; each check runs with the PATH assay was called with, so it sees the devenv's tools, not
+# assay's.
 caller_path=$PATH
 if [ -n "${assay_tools:-}" ]; then PATH=$assay_tools:$PATH; fi
 
