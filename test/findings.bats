@@ -203,3 +203,81 @@ fixture() {
   [ -z "$(find "$HOME/.qlty/cache/tools" -type f ! -name '*.lock' 2>/dev/null)" ]
   [ "$(cat .qlty/configs/radarlint.properties)" = "$(printf '%s\n' radarlint.rules.python.S3776=false radarlint.rules.scala.S3776=false)" ]
 }
+
+# without <tool>...: the PATH, less those tools: a new directory of links to everything else on it, first one first.
+without() {
+  local d f name bin
+  bin=$(mktemp -d "$T/without.XXXXXX")
+  IFS=: read -ra dirs <<<"$PATH"
+  for d in "${dirs[@]}"; do
+    for f in "$d"/*; do
+      name=${f##*/}
+      if [ -x "$f" ] && [ ! -e "$bin/$name" ] && [[ " $* " != *" $name "* ]]; then ln -s "$f" "$bin/$name"; fi
+    done
+  done
+  PATH=$bin
+}
+
+@test "without qlty, or radarlint when the configuration runs it: assay findings exits 2, the findings check 127" {
+  local_repo
+  builtin_checks python
+  local path=$PATH
+  without qlty
+  run --separate-stderr "$assay" findings
+  [ "$status" -eq 2 ]
+  [ "$stderr" = "assay: cannot find qlty on the PATH" ]
+  run -127 --separate-stderr "$assay" builtin findings
+  [ "$stderr" = "assay: cannot find qlty on the PATH" ]
+  run --separate-stderr "$assay" check findings
+  [ "$status" -eq 1 ]
+  [[ ${lines[1]} == "FAIL findings "*" (exit 127: tool not found)" ]]
+  PATH=$path
+  without radarlint
+  run -127 --separate-stderr "$assay" builtin findings
+  [ "$stderr" = "assay: cannot find radarlint on the PATH, which the findings run for python" ]
+}
+
+@test "qlty failing is exit 2 with its message, never a pass or a finding" {
+  local_repo
+  builtin_checks plain
+  mkdir "$T/bin"
+  printf '%s\n' '#!/usr/bin/env bash' 'echo "qlty broke" >&2' 'exit 99' >"$T/bin/qlty"
+  chmod +x "$T/bin/qlty"
+  PATH=$T/bin:$PATH
+  run --separate-stderr "$assay" findings
+  [ "$status" -eq 2 ]
+  [ "${stderr_lines[0]}" = "qlty broke" ]
+  [ "${stderr_lines[-1]}" = "assay: qlty check failed (exit 99)" ]
+  run --separate-stderr "$assay" builtin findings
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+}
+
+@test "a repo that tracks .qlty/qlty.toml is exit 2, the file left as it was" {
+  local_repo
+  builtin_checks plain
+  mkdir .qlty
+  echo 'config_version = "0"' >.qlty/qlty.toml
+  git add .qlty
+  git commit --quiet -m qlty
+  run --separate-stderr "$assay" findings
+  [ "$status" -eq 2 ]
+  [[ $stderr == "assay: the repo tracks .qlty/qlty.toml, which assay writes on every run from assay.findings:"* ]]
+  [ "$(cat .qlty/qlty.toml)" = 'config_version = "0"' ]
+  [ -z "$(git status --porcelain)" ]
+}
+
+@test "the findings check's base is assay check's: --base, else ASSAY_BASE, else the fork point" {
+  upstream
+  builtin_checks plain
+  fixture tangled.py src/app.py
+  git add src
+  git commit --quiet -m tangled
+  run --separate-stderr "$assay" check findings
+  [ "$status" -eq 1 ]
+  [[ $output == *"src/app.py:1: qlty/function-complexity: "* ]]
+  ASSAY_BASE=HEAD run --separate-stderr "$assay" check findings
+  [ "$status" -eq 0 ]
+  ASSAY_BASE=HEAD run --separate-stderr "$assay" findings --base HEAD~1
+  [ "${lines[0]}" = "src/app.py:1: qlty/function-complexity: Function with high complexity (count = 27): tangled" ]
+}

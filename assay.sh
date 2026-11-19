@@ -13,6 +13,9 @@ if [ -n "${assay_tools:-}" ]; then PATH=$assay_tools:$PATH; fi
 fast_budget=5
 # Check names become log file names.
 name_re='^[A-Za-z0-9][A-Za-z0-9._-]*$'
+# qlty's smells, which the configuration's findings.smells may set.
+smell_kinds='["boolean_logic", "file_complexity", "function_complexity", "function_parameters", "identical_code",
+  "nested_control_flow", "return_statements", "similar_code"]'
 
 usage_text() {
   cat <<'EOF'
@@ -22,6 +25,8 @@ usage: assay check [--fast] [--base <rev>] [<check>...]    run the repo's checks
        assay builtin commit-trailers [--base <rev>]
        assay builtin gitleaks
        assay builtin suppressions [--base <rev>]
+       assay builtin findings [--base <rev>]
+       assay findings [--base <rev>] [--sarif]             the analyzer's findings on the change
        assay new-code [--base <rev>]                       the change's new code, as JSON
 
 Outside the repo's devenv (ASSAY_CONFIG unset), these run themselves inside it, from the repo root:
@@ -29,7 +34,8 @@ devenv shell -- assay <command>, so the version the repo pins decides.
 The base of the change: --base, else ASSAY_BASE, else GitHub's event (GITHUB_EVENT_PATH), else the
 fork point of HEAD from the default branch, else their merge base. assay never fetches.
 Exit codes: 0 every selected check passed, 1 at least one failed, 2 assay could not run;
-assay builtin exits 127 when the tool its check runs is missing.
+assay builtin exits 127 when the tool its check runs is missing; assay findings exits 0
+whenever it ran, with findings or without.
 EOF
 }
 
@@ -139,9 +145,30 @@ def check_ok($n):
   else . end;
 def loosening_ok($checks):
   if type != "object" then fail("a loosening is not an object")
+  elif .kind == "setting" then
+    # A setting of the analyzer, which names the check it feeds; a hand-written configuration may leave it out.
+    if (.check | text | not) then fail("a loosening of a setting names no check")
+    elif (.what | text | not) then fail("loosening of a setting of \(.check) does not say what it is")
+    elif (.reason | text | not) then fail("loosening of \(.check) has no reason")
+    else . end
   elif (.check | type) != "string" or (.check as $k | $checks | has($k) | not) then fail("loosening of an unknown check \(.check | tojson)")
   elif (.kind | IN("off", "exec") | not) then fail("loosening of \(.check): unknown kind \(.kind | tojson)")
   elif (.reason | text | not) then fail("loosening of \(.check) has no reason")
+  else . end;
+def positive: type == "number" and . >= 1 and . == floor;
+def smell_ok:
+  type == "object" and (.enable | type) == "boolean" and (.threshold | positive);
+def findings_ok:
+  if . == null then .
+  elif type != "object" then fail("findings must be an object")
+  elif (.radarlint // [] | type != "array" or any(.[]; IN("python", "scala") | not)) then
+    fail("findings.radarlint must list python or scala")
+  elif (.rules // {} | type != "object" or any(to_entries[]; (.key | test("^[a-z]+:[A-Za-z0-9_-]+$") | not) or (.value | type) != "boolean")) then
+    fail("findings.rules must map Sonar rule keys (python:S3776) to true or false")
+  elif (.smells // {} | type != "object" or any(to_entries[]; (.key | IN($smells[]) | not) or (.value | smell_ok | not))) then
+    fail("findings.smells must map qlty smells (\($smells | join(", "))) to {enable, threshold}, a positive integer")
+  elif .duplication != null and (.duplication | type != "object" or (.nodes_threshold | positive | not)) then
+    fail("findings.duplication.nodes_threshold must be a positive integer")
   else . end;
 def validate:
   if type != "object" then fail("not a JSON object")
@@ -154,6 +181,7 @@ def validate:
         if ($n | test($name_re) | not) then fail("bad check name \($n | tojson)")
         else ($c.checks[$n] | check_ok($n)) | null end)
     | reduce $c.loosenings[] as $l (null; ($l | loosening_ok($c.checks)) | null)
+    | ($c.findings | findings_ok)
     | $c
   end;
 [inputs]
@@ -165,7 +193,8 @@ def validate:
       "c_fast[\($n | @sh)]=\(if $c.fast then 1 else 0 end)",
       "c_enable[\($n | @sh)]=\(if $c.enable then 1 else 0 end)",
       "c_requires[\($n | @sh)]=\($c.requires // "" | @sh)"),
-  (.loosenings[] | "loose_check+=(\(.check | @sh)) loose_kind+=(\(.kind | @sh)) loose_reason+=(\(.reason | @sh))"),
+  (.loosenings[] | "loose_check+=(\(.check | @sh)) loose_kind+=(\(.kind | @sh)) loose_reason+=(\(.reason | @sh))"
+    + " loose_what+=(\(.what // "" | @sh))"),
   "config_loaded=1"
 '
 
@@ -174,13 +203,14 @@ declare -A c_exec=() c_fast=() c_enable=() c_requires=()
 loose_check=()
 loose_kind=()
 loose_reason=()
+loose_what=()
 config_loaded=0
 
 # Only ever called with ASSAY_CONFIG set: without it, main delegates.
 load_config() {
   local cfg=$ASSAY_CONFIG out
   if [ ! -f "$cfg" ] || [ ! -r "$cfg" ]; then die "cannot read the configuration $cfg (ASSAY_CONFIG)"; fi
-  if ! out=$(jq -n -r --arg name_re "$name_re" "$config_jq" "$cfg" 2>&1); then
+  if ! out=$(jq -n -r --arg name_re "$name_re" --argjson smells "$smell_kinds" "$config_jq" "$cfg" 2>&1); then
     die "invalid configuration $cfg: $out"
   fi
   eval "$out"
@@ -1335,6 +1365,7 @@ run_checks() {
     case ${loose_kind[$i]} in
       off) what="is off" ;;
       exec) what="runs the repo's own exec" ;;
+      setting) what=${loose_what[$i]} ;;
     esac
     echo "  loosening: ${loose_check[$i]} $what: ${loose_reason[$i]//$'\n'/ }"
   done

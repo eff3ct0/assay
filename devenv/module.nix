@@ -143,11 +143,19 @@ let
   );
   badNamesMessage = "assay: check names must match [A-Za-z0-9][A-Za-z0-9._-]*: ${lib.concatStringsSep ", " badNames}";
 
+  # radarlint's rule keys become lines of a properties file.
+  badRules = builtins.filter (k: builtins.match "[a-z]+:[A-Za-z0-9_-]+" k == null) (
+    lib.attrNames cfg.findings.rules
+  );
+  badRulesMessage = "assay: assay.findings.rules takes Sonar's rule keys, like python:S3776: ${lib.concatStringsSep ", " badRules}";
+
   # What `assay check` reads, through ASSAY_CONFIG. It cannot be produced while a check name is bad or a loosening
   # has no reason, whatever path of devenv's evaluation asks for it.
   configFile =
     if badNames != [ ] then
       throw badNamesMessage
+    else if badRules != [ ] then
+      throw badRulesMessage
     else if unreasoned != [ ] then
       throw unreasonedMessage
     else
@@ -351,6 +359,10 @@ in
       {
         assertion = badNames == [ ];
         message = badNamesMessage;
+      }
+      {
+        assertion = badRules == [ ];
+        message = badRulesMessage;
       }
       {
         assertion = unreasoned == [ ];

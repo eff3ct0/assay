@@ -81,6 +81,17 @@ let
   builtinPlain = evalBuiltin { };
   builtinJavascript = evalBuiltin { languages.javascript.enable = true; };
   builtinPython = evalBuiltin { languages.python.enable = true; };
+  builtinLoosened = evalBuiltin {
+    assay.findings.smells.function_complexity = {
+      threshold = 25;
+      reason = "parsers are one big match";
+    };
+    assay.findings.rules."python:S1481" = {
+      enable = false;
+      reason = "generated code";
+    };
+    assay.findings.rules."python:S3776".enable = true;
+  };
   javascriptIn =
     directory:
     evalBuiltin {
@@ -158,9 +169,58 @@ let
       map lib.getName builtinPlain.packages == [
         "assay"
         "actionlint"
+        "qlty"
         "gitleaks"
         "oxfmt"
       ];
+    "radarlint joins the devenv of a repo with Python or Scala only" =
+      lib.all (c: lib.elem "radarlint" (map lib.getName c.packages)) [
+        builtinPython
+        (evalBuiltin { languages.scala.enable = true; })
+      ]
+      && !(lib.elem "radarlint" (map lib.getName builtinJavascript.packages));
+    "the findings check runs in the full run only" =
+      builtinPlain.assay.checks.findings.exec == "assay builtin findings"
+      && !builtinPlain.assay.checks.findings.fast;
+    "raising a smell threshold without a reason fails evaluation" =
+      !evaluatesBuiltin {
+        assay.findings.smells.function_complexity.threshold = 25;
+      };
+    "raising a smell threshold without a reason fails an assertion" =
+      builtins.any (a: !a.assertion)
+        (evalBuiltin { assay.findings.smells.identical_code.threshold = 30; }).assertions;
+    "raising a smell threshold with a reason evaluates" = evaluatesBuiltin {
+      assay.findings.smells.function_complexity = {
+        threshold = 25;
+        reason = "why";
+      };
+    };
+    "lowering a smell threshold is no loosening" = evaluatesBuiltin {
+      assay.findings.smells.function_complexity.threshold = 10;
+      assay.findings.smells.duplication.nodes_threshold = 40;
+    };
+    "turning a smell off without a reason fails evaluation" =
+      !evaluatesBuiltin {
+        assay.findings.smells.nested_control_flow.enable = false;
+      };
+    "raising duplication's nodes_threshold without a reason fails evaluation" =
+      !evaluatesBuiltin {
+        assay.findings.smells.duplication.nodes_threshold = 100;
+      };
+    "turning a radarlint rule off without a reason fails evaluation" =
+      !evaluatesBuiltin {
+        assay.findings.rules."python:S1481".enable = false;
+      };
+    "turning S3776 back on is no loosening" = evaluatesBuiltin {
+      assay.findings.rules."python:S3776".enable = true;
+    };
+    "a rule key that is not Sonar's fails evaluation" =
+      !evaluatesBuiltin {
+        assay.findings.rules."python S1" = {
+          enable = false;
+          reason = "why";
+        };
+      };
     "a JavaScript directory given absolute, relative or with a trailing slash is the same pattern" =
       lib.all (d: oxfmtExec (javascriptIn d) == oxfmtExec builtinFrontend)
         [
@@ -184,17 +244,21 @@ in
   tests =
     pkgs.runCommand "assay-tests"
       {
-        nativeBuildInputs = with pkgs; [
-          bats
-          shellcheck
-          git
-          jq
-          coreutils
-          gawk
-          actionlint
-          gitleaks
-          oxfmt
-        ];
+        nativeBuildInputs =
+          with pkgs;
+          [
+            bats
+            shellcheck
+            git
+            jq
+            coreutils
+            gawk
+            actionlint
+            gitleaks
+            oxfmt
+            (callPackage ./radarlint.nix { })
+          ]
+          ++ lib.optional (lib.meta.availableOn pkgs.stdenv.hostPlatform qlty) qlty;
       }
       ''
         cp -r ${src} src
@@ -214,7 +278,8 @@ in
       ''
         ${lib.concatMapStrings (f: "echo ${lib.escapeShellArg "FAIL: ${f}"} >&2\n") failed}
         ${lib.optionalString (failed != [ ]) "exit 1"}
-        jq -e '. == {version: 1, checks: {demo: {exec: "true", fast: true, enable: true, requires: null}}, loosenings: []}' \
+        jq -e 'del(.findings)
+          == {version: 1, checks: {demo: {exec: "true", fast: true, enable: true, requires: null}}, loosenings: []}' \
           ${plain.env.ASSAY_CONFIG}
         jq -e '.checks.demo.enable == false and .loosenings == [{check: "demo", kind: "off", reason: "off for the test"}]' \
           ${off.env.ASSAY_CONFIG}
@@ -232,6 +297,14 @@ in
         same ${builtinJavascript.env.ASSAY_CONFIG} ${../test/defaults/javascript.json}
         same ${builtinFrontend.env.ASSAY_CONFIG} ${../test/defaults/javascript-frontend.json}
         same ${builtinPython.env.ASSAY_CONFIG} ${../test/defaults/python.json}
+        # A loosening of the analyzer, with what it is; a tightening, none.
+        jq -e '.loosenings == [
+            {check: "findings", kind: "setting", reason: "parsers are one big match",
+             what: "smells.function_complexity.threshold is 25, above qlty'"'"'s 18"},
+            {check: "findings", kind: "setting", reason: "generated code", what: "rule python:S1481 is off"}]
+          and .findings.smells.function_complexity == {enable: true, threshold: 25}
+          and .findings.rules == {"python:S1481": false, "python:S3776": true, "scala:S3776": false}' \
+          ${builtinLoosened.env.ASSAY_CONFIG}
         touch $out
       '';
 }

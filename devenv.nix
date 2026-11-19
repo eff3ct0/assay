@@ -5,6 +5,8 @@
     bats
     git
     jq
+    # The suite runs radarlint, which the module brings only to repos with Python or Scala.
+    (callPackage ./nix/radarlint.nix { })
   ];
 
   # assay's bats suite (test/), until the bash default checks replace it.
