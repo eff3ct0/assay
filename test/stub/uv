@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# A stand-in for uv in the CLI's tests: `uv add --dev <spec>...` and `uv remove --dev <name>...` append a line to
+# UV_STUB_CALLS (its arguments), then edit pyproject.toml's [dependency-groups] dev the way uv writes it, one spec per
+# line: add appends each spec, replacing a line of the same name; remove deletes the lines of each name. Names are
+# compared as written. With UV_STUB_FAIL set, it fails as a resolution does: exit 1, with a message, changing nothing.
+set -euo pipefail
+
+echo "$*" >>"${UV_STUB_CALLS:?}"
+if [ $# -lt 3 ] || [ "$2" != --dev ] || { [ "$1" != add ] && [ "$1" != remove ]; }; then
+	echo "uv stub: unexpected arguments: $*" >&2
+	exit 64
+fi
+if [ -n "${UV_STUB_FAIL:-}" ]; then
+	echo "error: No solution found when resolving dependencies" >&2
+	exit 1
+fi
+command=$1
+shift 2
+[ -f pyproject.toml ] || {
+	echo "error: No \`pyproject.toml\` found" >&2
+	exit 2
+}
+
+# name_of <spec>: the name a spec starts with.
+name_of() {
+	local re='^([A-Za-z0-9][A-Za-z0-9._-]*)'
+	[[ $1 =~ $re ]]
+	echo "${BASH_REMATCH[1]}"
+}
+
+if ! grep -qx 'dev = \[' pyproject.toml; then
+	printf '\n%s\n%s\n%s\n' '[dependency-groups]' 'dev = [' ']' >>pyproject.toml
+fi
+for arg; do
+	name=$(name_of "$arg")
+	# Drop the group's line for that name; add puts the spec back at the group's end.
+	awk -v name="$name" '
+    /^dev = \[$/ { in_dev = 1 }
+    in_dev && /^\]$/ { in_dev = 0 }
+    in_dev && index($0, "    \"" name) == 1 && substr($0, 6 + length(name), 1) ~ /[^A-Za-z0-9._-]/ { next }
+    { print }
+  ' pyproject.toml >pyproject.toml.next
+	if [ "$command" = add ]; then
+		awk -v line="    \"$arg\"," '
+      /^dev = \[$/ { in_dev = 1 }
+      in_dev && /^\]$/ { print line; in_dev = 0 }
+      { print }
+    ' pyproject.toml.next >pyproject.toml
+		rm pyproject.toml.next
+	else
+		mv pyproject.toml.next pyproject.toml
+	fi
+done

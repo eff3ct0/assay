@@ -1,0 +1,7 @@
+# Python's development dependencies, version 1. `assay preset` adds each one the project lacks with `uv add --dev`,
+# as uv takes it; one followed by "when <check> is on" only while that check is on.
+pytest
+coverage
+hypothesis
+deptry
+import-linter when import-linter is on

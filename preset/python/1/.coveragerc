@@ -1,0 +1,10 @@
+# Every Python file under the root is measured (the test check runs coverage run --source=.), the virtual
+# environments aside, and the ones no test loads are reported at 0%.
+[run]
+omit =
+    .venv/*
+    .devenv/*
+
+[report]
+# A src/ layout has no __init__.py in src/: without this, its files no test loads are left out of the report.
+include_namespace_packages = true

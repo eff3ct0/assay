@@ -1,0 +1,24 @@
+# Every rule ruff has that finds defects; what only sets style is the formatter's.
+[lint]
+select = ["ALL"]
+ignore = [
+  # Docstrings.
+  "D",
+  # Complexity, whose one source is qlty's smells: mccabe, and pylint's PLR0904 to PLR0917.
+  "C90",
+  "PLR09",
+  # What the formatter decides.
+  "COM812",
+  "ISC001",
+  "E501",
+  # Copyright notices, and the shape of TODO comments.
+  "CPY",
+  "TD",
+]
+
+[lint.per-file-ignores]
+# Tests: pytest checks with assert, and an expected value is a literal.
+"**/test_*.py" = ["S101", "PLR2004"]
+"**/*_test.py" = ["S101", "PLR2004"]
+"**/tests/**" = ["S101", "PLR2004"]
+"**/conftest.py" = ["S101", "PLR2004"]

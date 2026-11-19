@@ -1089,13 +1089,28 @@ preset_pinned() {
 }
 
 # preset_applies <language>: whether the language's preset applies to the repo (the current directory, its root),
-# with applies_why set to what makes it apply. bash's applies once the repo tracks a shell script.
+# with applies_why set to what makes it apply. bash's applies once the repo tracks a shell script; python's once
+# pyproject.toml is at the root.
 applies_why=
 preset_applies() {
 	case $1 in
 	bash) has_shell_script ;;
+	python)
+		sees_file pyproject.toml || return 1
+		applies_why="the repo has pyproject.toml"
+		;;
 	*) return 1 ;;
 	esac
+}
+
+# sees_file <path>: a file at the path, from the root, that git sees in the working tree (tracked, or untracked and
+# not ignored), as a check's `requires` finds one.
+sees_file() {
+	local list
+	tmp_file list
+	git ls-files -z --cached --others --exclude-standard -- ":(top,literal)$1" >"$list" ||
+		die "cannot look for $1 in the working tree"
+	[ -s "$list" ] && [ -f "$1" ]
 }
 
 # has_shell_script: the repo tracks a shell script that is in the working tree, as shfmt -f finds them (by extension
@@ -1208,16 +1223,49 @@ builtin_preset() {
 	finish 1
 }
 
-# preset_others <language> <file>: sets others to the other files the tool of a preset file reads in its place, in
-# the tool's order. When the repo has one and not the preset's file, that one is the tool's: the preset writes no file
-# of its own beside it, which would silently replace it, and merges into it and shows it as it would its own file
-# (each has the preset file's format). shellcheck reads shellcheckrc where a directory has no .shellcheckrc.
-others=()
-preset_others() {
-	others=()
+# preset_reads <language> <file>: sets reads to where the tool of a preset file reads its configuration, in the
+# tool's order, the preset's file among them. Each is a file of the preset file's format (shellcheck reads shellcheckrc
+# where a directory has no .shellcheckrc; ruff reads .ruff.toml before ruff.toml), or a section of a file of another
+# format, written "<file> [<section>]": a TOML table, or the INI sections whose names start with a prefix
+# ("setup.cfg [coverage:*]"). The first one the repo has is the tool's: the preset writes no file of its own beside
+# it, which would silently replace it. A file is merged into and shown as the preset's own would be; a section can
+# take neither, so the preset's file, or its change between two versions, is shown for a person to fold in by hand.
+reads=()
+preset_reads() {
 	case $1/$2 in
-	bash/.shellcheckrc) others=(shellcheckrc) ;;
+	bash/.shellcheckrc) reads=(.shellcheckrc shellcheckrc) ;;
+	python/ruff.toml) reads=(.ruff.toml ruff.toml "pyproject.toml [tool.ruff]") ;;
+	python/pyrightconfig.json) reads=(pyrightconfig.json "pyproject.toml [tool.pyright]") ;;
+	# coverage.py reads the first of these that configures it.
+	python/.coveragerc)
+		reads=(.coveragerc "setup.cfg [coverage:*]" "tox.ini [coverage:*]" "pyproject.toml [tool.coverage]")
+		;;
+	*) reads=("$2") ;;
 	esac
+}
+
+# is_section <entry>: an entry of preset_reads is a section of a file, not a file.
+is_section() { [[ $1 == *" ["*"]" ]]; }
+
+# has_section <entry>: the repo has the section an entry of preset_reads names.
+has_section() {
+	local file=${1%% \[*} section=${1#* \[} json found
+	section=${section%]}
+	[ -f "$file" ] || return 1
+	if [[ $section == *:\* ]]; then
+		grep -q "^[[:space:]]*\[${section%\*}" -- "$file"
+		return
+	fi
+	toml_json json "$file"
+	found=$(jq -r --arg s "$section" '(try getpath($s | split(".")) catch null) != null' <<<"$json") ||
+		die "cannot read $file"
+	[ "$found" = true ]
+}
+
+# toml_json <var> <file>: a TOML file as JSON, in <var>. Dies when yq cannot read it.
+toml_json() {
+	local -n toml_var=$1
+	toml_var=$(yq -p toml -o json . "$2" 2>&1) || die "cannot read $2 as TOML: ${toml_var//$'\n'/ }"
 }
 
 # preset_files <dir>: the files under a version's directory, relative to it, NUL-terminated, in byte order.
@@ -1253,15 +1301,9 @@ record_changed=0
 # version is recorded whatever the outcome, so that a conflict once resolved, or a kept file once extended, is not
 # merged again.
 apply_preset() {
-	local lang=$1 from=${recorded[$1]:-} to f target other theirs base merged files diff rc todo changed=0
-	preset_pinned "$lang"
-	to=$pinned
-	if [ -n "$from" ] && [ "$from" -gt "$to" ]; then
-		die "$record_file records $lang's preset $from, newer than this assay's $to: update assay (devenv update assay)"
-	fi
-	if [ -n "$from" ] && [ ! -d "$presets/$lang/$from" ]; then
-		die "$record_file records $lang's preset $from, which this assay does not hold"
-	fi
+	local lang=$1 from to f target entry theirs base merged files diff rc todo changed=0
+	preset_span "$lang"
+	from=$span_from to=$span_to
 	tmp_file files
 	tmp_file merged
 	tmp_file diff
@@ -1270,14 +1312,43 @@ apply_preset() {
 	while IFS= read -r -d '' f; do
 		theirs=$presets/$lang/$to/$f
 		target=$f
-		if absent "$f"; then
-			preset_others "$lang" "$f"
-			for other in "${others[@]}"; do
-				if ! absent "$other"; then
-					target=$other
+		preset_reads "$lang" "$f"
+		for entry in "${reads[@]}"; do
+			if is_section "$entry"; then
+				if has_section "$entry"; then
+					target=$entry
 					break
 				fi
-			done
+			elif ! absent "$entry"; then
+				target=$entry
+				break
+			fi
+		done
+		if is_section "$target"; then
+			if [ "$from" = "$to" ]; then continue; fi
+			: >"$base"
+			if [ -n "$from" ] && [ -f "$presets/$lang/$from/$f" ]; then
+				cat -- "$presets/$lang/$from/$f" >"$base" || die "cannot read $lang's preset $from"
+			fi
+			if [ -n "$from" ] && same_content "$base" "$theirs"; then continue; fi
+			preset_lines+=("kept $target")
+			changed=1
+			todo="$target holds what $lang's preset puts in $f, which it therefore does not write:"
+			if [ -z "$from" ]; then
+				preset_shown+=$'\n'"--- $target, kept, against $lang's preset $to's $f (the + lines are the preset's)"$'\n'
+				preset_shown+=$(sed 's/^/+/' -- "$theirs") || die "cannot read $theirs"
+				preset_todo+=("$todo extend it by hand to hold what $f holds (the + lines above), in its own syntax")
+			else
+				rc=0
+				git -c core.quotePath=false diff --no-index --no-color --no-ext-diff --no-textconv -U3 -- "$base" "$theirs" \
+					>"$diff" || rc=$?
+				[ "$rc" -eq 1 ] || die "cannot compare $lang's preset $from with $to (git diff exit $rc)"
+				preset_shown+=$'\n'"--- $f, from $lang's preset $from to $to, for $target (the + lines are $to's)"$'\n'
+				preset_shown+=$(awk '/^@@/ { on = 1 } on' "$diff") || die "cannot read the comparison of $f"
+				preset_todo+=("$todo make the change above to it by hand, in its own syntax")
+			fi
+			preset_shown+=$'\n'
+			continue
 		fi
 		if absent "$target"; then
 			if [[ $target == */* ]]; then mkdir -p -- "${target%/*}" || die "cannot create ${target%/*}"; fi
@@ -1332,12 +1403,180 @@ apply_preset() {
 			preset_todo+=("$todo preset $from, >>>>>>> $lang's preset $to)")
 		fi
 	done <"$files"
+	if [ -n "${plan_lines[$lang]:-}" ]; then
+		mapfile -t -O "${#preset_lines[@]}" preset_lines <<<"${plan_lines[$lang]}"
+		changed=1
+	fi
 	if [ "$from" != "$to" ]; then
 		recorded[$lang]=$to
 		record_changed=1
 	elif [ "$changed" = 0 ]; then
 		preset_lines+=("$lang's preset $to: up to date")
 	fi
+}
+
+# preset_span <language>: sets span_from to the version of the language's preset the record holds (empty when it holds
+# none) and span_to to the pinned one. Dies when the record's is newer, or one assay does not hold.
+span_from=
+span_to=
+preset_span() {
+	span_from=${recorded[$1]:-}
+	preset_pinned "$1"
+	span_to=$pinned
+	if [ -n "$span_from" ] && [ "$span_from" -gt "$span_to" ]; then
+		die "$record_file records $1's preset $span_from, newer than this assay's $span_to: update assay" \
+			"(devenv update assay)"
+	fi
+	if [ -n "$span_from" ] && [ ! -d "$presets/$1/$span_from" ]; then
+		die "$record_file records $1's preset $span_from, which this assay does not hold"
+	fi
+}
+
+# Development dependencies. A version of a language's preset may declare the ones its default checks need, in
+# preset/<language>/<version>.dependencies: one per line, as the language's package manager adds it, followed by
+# "when <check> is on" for one that only that check needs; a line starting with # is a comment. `assay preset` adds
+# them to the project's manifest and lockfile with that package manager, never by editing a file itself.
+
+# preset_manager <language>: sets manager to the package manager that adds the development dependencies of the
+# language's preset (uv for python), empty for a language whose preset declares none.
+manager=
+preset_manager() {
+	case $1 in
+	python) manager=uv ;;
+	*) manager= ;;
+	esac
+}
+
+# dependency_name <spec>: sets dep_raw to the package a spec names, as written, and dep_name to it normalized as the
+# package manager compares names (uv: PEP 503, lowercase with runs of - _ . as one -). Returns 1 when it names none.
+dep_raw=
+dep_name=
+dependency_name() {
+	local re='^([A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?)'
+	[[ $1 =~ $re ]] || return 1
+	dep_raw=${BASH_REMATCH[1]}
+	dep_name=${dep_raw,,}
+	dep_name=${dep_name//[._]/-}
+	while [[ $dep_name == *--* ]]; do dep_name=${dep_name//--/-}; done
+}
+
+# read_dependencies <language> <version> <out>: the development dependencies a version of the language's preset
+# declares, in their order, as "<name>\t<spec>\t<check>" lines into <out>: the name normalized (dependency_name), the
+# check empty for one that holds whatever the checks. Nothing when the version declares none.
+read_dependencies() {
+	local file=$presets/$1/$2.dependencies line n=0 spec check
+	local re='^[[:space:]]*([^[:space:]]+)([[:space:]]+when[[:space:]]+([^[:space:]]+)[[:space:]]+is[[:space:]]+on)?[[:space:]]*$'
+	: >"$3"
+	[ -f "$file" ] || return 0
+	while IFS= read -r line || [ -n "$line" ]; do
+		n=$((n + 1))
+		if [[ $line =~ ^[[:space:]]*(#|$) ]]; then continue; fi
+		[[ $line =~ $re ]] || die "cannot read line $n of $file: $line"
+		spec=${BASH_REMATCH[1]} check=${BASH_REMATCH[3]}
+		dependency_name "$spec" || die "line $n of $file names no package: $line"
+		if [ -n "$check" ] && ! [[ $check =~ $name_re ]]; then die "line $n of $file names no check: $line"; fi
+		printf '%s\t%s\t%s\n' "$dep_name" "$spec" "$check"
+	done <"$file" >"$3"
+}
+
+# project_dependencies <out>: the normalized names of the project's development dependencies, one per line, where its
+# package manager adds them: for uv, pyproject.toml's [dependency-groups] dev and [tool.uv] dev-dependencies.
+project_dependencies() {
+	local json spec specs
+	tmp_file specs
+	toml_json json pyproject.toml
+	jq -r '[(."dependency-groups"?.dev? // []), (.tool?.uv?."dev-dependencies"? // [])] | flatten | .[] | strings' \
+		<<<"$json" >"$specs" || die "cannot read the development dependencies in pyproject.toml"
+	while IFS= read -r spec; do
+		spec=${spec#"${spec%%[![:space:]]*}"}
+		if dependency_name "$spec"; then echo "$dep_name"; fi
+	done <"$specs" >"$1"
+}
+
+# What plan_dependencies found to do for each language: the specs to add (one per line), the names to remove, and the
+# lines `assay preset` prints for them.
+declare -A plan_add=() plan_remove=() plan_lines=()
+
+# plan_dependencies <language>: what the development dependencies of the language's pinned preset change in the
+# project, worked out before anything is written. A dependency the project lacks is added; one whose spec the preset
+# changed since the recorded version is upgraded, added again with its new spec; one the preset dropped since the
+# recorded version is removed, when the project has it. One that only a check needs is added while that check is on,
+# and never removed. Dies when the package manager or its manifest is missing, and something is to change.
+plan_dependencies() {
+	local lang=$1 from to theirs base present name spec check
+	local -A have=() before=() declared=()
+	preset_manager "$lang"
+	[ -n "$manager" ] || return 0
+	preset_span "$lang"
+	from=$span_from to=$span_to
+	tmp_file theirs
+	tmp_file base
+	tmp_file present
+	read_dependencies "$lang" "$to" "$theirs"
+	: >"$base"
+	if [ -n "$from" ] && [ "$from" != "$to" ]; then read_dependencies "$lang" "$from" "$base"; fi
+	if [ ! -s "$theirs" ] && [ ! -s "$base" ]; then return 0; fi
+	[ -f pyproject.toml ] || die "$lang's preset adds development dependencies to pyproject.toml, which the repo" \
+		"does not have: create the project first (uv init)"
+	project_dependencies "$present"
+	while IFS= read -r name; do have[$name]=1; done <"$present"
+	while IFS=$'\t' read -r name spec check; do before[$name]=$spec; done <"$base"
+	while IFS=$'\t' read -r name spec check; do
+		declared[$name]=1
+		if [ -n "$check" ] && [ "${c_enable[$check]:-0}" != 1 ]; then continue; fi
+		if [ -z "${have[$name]:-}" ]; then
+			plan_add[$lang]+=$spec$'\n'
+			plan_lines[$lang]+="added dependency $spec"$'\n'
+		elif [ -n "${before[$name]+set}" ] && [ "${before[$name]}" != "$spec" ]; then
+			plan_add[$lang]+=$spec$'\n'
+			plan_lines[$lang]+="upgraded dependency $spec"$'\n'
+		fi
+	done <"$theirs"
+	while IFS=$'\t' read -r name spec check; do
+		if [ -n "${declared[$name]:-}" ] || [ -n "$check" ] || [ -z "${have[$name]:-}" ]; then continue; fi
+		dependency_name "$spec"
+		plan_remove[$lang]+=$dep_raw$'\n'
+		plan_lines[$lang]+="removed dependency $dep_raw"$'\n'
+	done <"$base"
+	plan_lines[$lang]=${plan_lines[$lang]:-}
+	plan_lines[$lang]=${plan_lines[$lang]%$'\n'}
+	if [ -n "${plan_lines[$lang]}" ] && ! PATH=$caller_path command -v "$manager" >/dev/null; then
+		die "cannot find $manager on the PATH, which adds $lang's development dependencies: turn on" \
+			"languages.$lang.$manager.enable in devenv.nix"
+	fi
+}
+
+# apply_dependencies <language>: the changes plan_dependencies found, made with the package manager from the root,
+# with the PATH assay was called with. Its output is shown only when it fails, which ends the run with exit 2.
+apply_dependencies() {
+	local lang=$1 log add=${plan_add[$1]:-} remove=${plan_remove[$1]:-}
+	local -a specs names
+	[ -n "${plan_lines[$1]:-}" ] || return 0
+	preset_manager "$lang"
+	tmp_file log
+	if [ -n "$add" ]; then
+		mapfile -t specs <<<"${add%$'\n'}"
+		run_manager "$log" add "${specs[@]}"
+	fi
+	if [ -n "$remove" ]; then
+		mapfile -t names <<<"${remove%$'\n'}"
+		run_manager "$log" remove "${names[@]}"
+	fi
+}
+
+# run_manager <log> <add|remove> <argument>...: one command of the package manager; exit 2 with its output when it
+# fails.
+run_manager() {
+	local log=$1 what=$2 rc=0
+	local -a argv
+	shift 2
+	case $manager in
+	uv) argv=(uv "$what" --dev "$@") ;;
+	esac
+	PATH=$caller_path "${argv[@]}" </dev/null >"$log" 2>&1 || rc=$?
+	[ "$rc" -eq 0 ] && return 0
+	cat -- "$log" >&2
+	die "${argv[*]} failed (exit $rc)"
 }
 
 # write_record: recorded into the record, its keys sorted, as jq prints it (which is how oxfmt formats JSON).
@@ -1350,8 +1589,9 @@ write_record() {
 }
 
 # assay preset [<language>...]: the pinned preset of each language named, or of every enabled language whose preset
-# applies, into the repo (apply_preset), then the versions taken into the record. Exits 0 when everything applied, 1
-# on a conflict or a kept file that differs from the preset.
+# applies, into the repo: its development dependencies (apply_dependencies), then its files (apply_preset), then the
+# versions taken into the record. Exits 0 when everything applied, 1 on a conflict or on a kept file or section that
+# differs from the preset.
 cmd_preset() {
 	local arg lang d
 	local -a langs=() known=()
@@ -1395,7 +1635,13 @@ cmd_preset() {
 		echo "no preset to apply: no language this repo's devenv enables has a preset that applies"
 		finish 0
 	fi
-	for lang in "${langs[@]}"; do apply_preset "$lang"; done
+	# Every language's dependencies are worked out before anything is written, so that a missing package manager or
+	# manifest leaves the repo as it was.
+	for lang in "${langs[@]}"; do plan_dependencies "$lang"; done
+	for lang in "${langs[@]}"; do
+		apply_dependencies "$lang"
+		apply_preset "$lang"
+	done
 	if [ "$record_changed" = 1 ]; then
 		write_record
 		preset_lines+=("wrote $record_file")
