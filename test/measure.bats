@@ -132,6 +132,19 @@ EOF
 	jq -e '.lint == [] and .smells == [] and .loc == null and .duplication == null' <<<"$output"
 }
 
+@test "measure reads an archived check's report at ASSAY_DIR/coverage" {
+	local_repo
+	archive_fixture
+	check test 'printf "%s\n" SF:a.txt LF:2 LH:1 end_of_record >"$ASSAY_DIR/coverage"' \
+		--coverage '$ASSAY_DIR/coverage'
+	run --separate-stderr measure_run
+	echo "$output"
+	echo "$stderr" >&2
+	[ "$status" -eq 0 ]
+	jq -es 'length == 1 and (.[0] | .failed == [] and .coverage == {test:{covered:1,total:2}})' <<<"$output"
+	[ ! -e .git ]
+}
+
 @test "measure in a checkout keeps its metadata and reports zero coverage alongside unavailable coverage" {
 	local_repo
 	mkdir report-is-directory

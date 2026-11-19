@@ -27,10 +27,13 @@ specifications it links, before changing behaviour.
     they bring into the devenv (actionlint, ast-grep, gitleaks, oxfmt, qlty, radarlint; nixfmt, statix, deadnix, nixf;
     shellcheck, shfmt, bats, kcov, diff-cover), the opt-in `tla` check (`assay.checks.tla.enable`, which brings
     tlaplus18) and its `tla/<Name>.cfg` layout, the `ast-grep` check's opt-in (`sgconfig.yml`) and its placeholder
-    marker, the `.qlty/` that `assay findings` writes and excludes through `.git/info/exclude`, the presets `assay
-    preset` writes into them and merges later versions of, the record `.assay-preset.json`, and the output and exit
+    marker, the `.qlty/` that `assay findings` writes and excludes through `.git/info/exclude`, the presets and
+    `.assay-preset.json` record that `assay preset` writes or updates, and the output and exit
     codes of `assay check`, `assay preset`, `assay builtin`, `assay findings` and `assay rule new` (the paths it
-    creates, the layout it writes);
+    creates, the layout it writes). The snapshot metrics command `assay measure` uses the same check configuration
+    and the devenv's analyzer tools (qlty, jscpd and scc; xmlstarlet reads Cobertura coverage);
+  - snapshot metrics consumers, through the JSON and exit codes of `assay measure` and its versioned contract,
+    `schema/measure.json` (installed as `share/assay/schema/measure.json` in the Nix package);
   - home-manager configurations, through the package, `homeManagerModules.default` and `lib.rulesCheck`. They rely on
     the module's options (`programs.assay.enable`, `package`, `rules` with its rule format, the read-only
     `rulesFile`), the global git hooks it registers in `programs.git.settings`, the `ASSAY_HITS_LOG` it sets and the
@@ -53,6 +56,8 @@ specifications it links, before changing behaviour.
 - One built-in check alone: `assay builtin <check>` (its `exec`); a change's new code as JSON: `assay new-code`; the
   analyzer's findings on the change: `assay findings [--base <rev>] [--sarif]`; an ast-grep rule's scaffold:
   `assay rule new <kebab-name> [--lang <lang>] [--from <file>:<line>[-<line>]]`.
+- Snapshot metrics: `devenv shell -- assay measure` in an adopted repo or a directory extracted with `git archive`.
+  It needs no base; see [the JSON contract and exit codes](README.md#assay-measure).
 - The guard and the git hooks, from anywhere: `echo '<hook event>' | assay guard --rules <file>` and
   `assay git-hook --rules <file> <hook> [<git's arguments>]`, with ast-grep on the PATH too; `test/rules/example.json`
   is a rule list. `bash nix/rules-check.sh <file>` runs a rule list's examples, with `assay` on the PATH.
@@ -85,17 +90,20 @@ specifications it links, before changing behaviour.
   (oxfmt 0.45 against 0.75, ast-grep 0.42 against 0.51): the suite passes with both. radarlint, which the module brings
   only to repos with Python or Scala, and TLC, which it brings only to repos that turn the `tla` check on, come from
   assay's own `devenv.nix` for the `bats` check. New behaviour gets a test there.
+- Snapshot metrics: `nix develop -c bats test/measure.bats` for the CLI and schema against synthetic archives, and
+  `nix develop -c bats -f 'measure:' test/devenv/defaults.bats` for archived Nix and Bash fixtures in real devenv.
 - `nix develop -c bats test/devenv`: the devenv module in throwaway repos that import a `git+file:` copy of this working
   tree, and assay's own adoption, through the `devenv` on the PATH (2.4.0 or later); the Nix and bash fixtures of the
   default checks in `test/devenv/defaults.bats`, bash's built by `assay preset bash`; a rule pack and `assay rule new`
   in `test/devenv/rules.bats`; the `tla` check off and turned on in `test/devenv/tla.bats`. It needs the network the
   first time and takes a few minutes.
 - `nix develop -c shellcheck assay.sh nix/rules-check.sh test/assert.bash test/helpers.bash test/devenv/helpers.bash test/stub/devenv devenv/bin/*`
-- `nix flake check`: shellcheck, `bats test`, the CLI's build, `qlty --version` with no network, the devenv module's
+- `nix flake check`: shellcheck, `bats test`, the CLI's build and installed schema, `qlty --version` with no network, the devenv module's
   evaluation against a stand-in for devenv's options (with `test/packs/` as its packs, and with the real
   `devenv/defaults.nix` and `packs/` too), and the home-manager module in a home built with the flake's `home-manager`
   input (its option checks, its git config driving a real commit, the skills it links, and `lib.rulesCheck` passing on
-  the example list and failing on a broken one), all in `nix/checks.nix`, in the sandbox. It does not run `test/devenv`.
+  the example list and failing on a broken one), in the sandbox. See `flake.nix` and `nix/checks.nix`. It does not
+  run `test/devenv`.
 - kcov is `nix/kcov.nix`: nixpkgs' kcov 43 with upstream's fix for ANSI-C quoted strings, without which bats 1.14
   loses all coverage after its first `run`. Drop the patch once nixpkgs' kcov has it.
 

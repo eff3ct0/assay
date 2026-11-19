@@ -2530,7 +2530,7 @@ snapshot_git() {
 }
 
 snapshot_checks() {
-	local dir=$1 n report rc start now secs
+	local dir=$1 artifacts=$2 n report rc start now secs
 	local -a checks_failed=()
 	now_us
 	start=$now
@@ -2545,13 +2545,13 @@ snapshot_checks() {
 		report=
 		if [ -n "${c_coverage[$n]}" ]; then
 			printf '%s\n' null >"$dir/coverage/$n"
-			report=$(report_path "${c_coverage[$n]}" "$dir")
+			report=$(report_path "${c_coverage[$n]}" "$artifacts")
 		fi
 		if [ -n "${c_requires[$n]}" ] && ! requires_met "${c_requires[$n]}" "$dir/requires"; then continue; fi
 		# Never consume a report from an earlier run, even if the check passes.
 		if [ -n "$report" ] && ! rm -f -- "$report"; then report=; fi
 		rc=0
-		PATH=$caller_path ASSAY_DIR=$dir "$BASH" -c "${c_exec[$n]}" </dev/null >"$dir/check.log" 2>&1 || rc=$?
+		PATH=$caller_path ASSAY_DIR=$artifacts "$BASH" -c "${c_exec[$n]}" </dev/null >"$dir/check.log" 2>&1 || rc=$?
 		if [ "$rc" -ne 0 ]; then
 			checks_failed+=("$n")
 			printf 'assay: measure: %s failed (exit %s)\n' "$n" "$rc" >&2
@@ -2667,10 +2667,12 @@ snapshot_prepare_qlty() {
 
 cmd_measure() {
 	[ $# -eq 0 ] || usage_error "measure takes no argument"
-	local dir report n qlty_ready=0 lint_ready=0 tool_missing='' radarlint_bin=''
+	local dir artifacts report n qlty_ready=0 lint_ready=0 tool_missing='' radarlint_bin=''
 	load_config
 	find_snapshot
 	tmp_file dir -d
+	# A check chooses its own names under ASSAY_DIR. Keep those separate from snapshot bookkeeping.
+	tmp_file artifacts -d
 	snapshot_git "$dir"
 	unset ASSAY_BASE ASSAY_HITS_LOG
 	mkdir "$dir/coverage"
@@ -2693,7 +2695,7 @@ cmd_measure() {
 	else
 		printf '%s\n' null >"$dir/lint.json"
 	fi
-	snapshot_checks "$dir"
+	snapshot_checks "$dir" "$artifacts"
 	for report in "$dir"/coverage/*; do
 		[ -f "$report" ] || continue
 		n=${report##*/}

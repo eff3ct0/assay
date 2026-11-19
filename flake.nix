@@ -63,6 +63,15 @@
         }
         // {
           package = self.packages.${pkgs.stdenv.hostPlatform.system}.assay;
+          measure-schema =
+            pkgs.runCommand "assay-measure-schema"
+              {
+                assay = self.packages.${pkgs.stdenv.hostPlatform.system}.assay;
+              }
+              ''
+                cmp ${./schema/measure.json} "$assay/share/assay/schema/measure.json"
+                touch "$out"
+              '';
         }
       );
 

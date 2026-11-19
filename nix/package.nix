@@ -28,6 +28,9 @@ writeShellApplication {
     assay_presets=${../preset}
   ''
   + builtins.readFile ../assay.sh;
+  derivationArgs.postCheck = ''
+    install -Dm644 ${../schema/measure.json} "$out/share/assay/schema/measure.json"
+  '';
   meta = {
     description = "A repo's named checks, run the same way from pre-commit, devenv test and an agent's shell";
     license = lib.licenses.mit;
