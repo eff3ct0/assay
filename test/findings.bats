@@ -115,3 +115,91 @@ fixture() {
   [ "$status" -eq 1 ]
   [[ $output == *$'\nsrc/my dir/ü.py:1: qlty/function-complexity: '* ]]
 }
+
+@test "--sarif prints one SARIF log with two runs, lint and smells, each result new or unchanged; exit 0" {
+  local_repo
+  builtin_checks plain
+  fixture tangled.py src/app.py
+  git add src
+  git commit --quiet -m tangled
+  fixture summarize.py src/report.py
+  run --separate-stderr "$assay" findings --base HEAD --sarif
+  echo "$stderr"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.version' <<<"$output")" = 2.1.0 ]
+  [ "$(jq '.runs | length' <<<"$output")" -eq 2 ]
+  [ "$(jq -c '.runs[0].results' <<<"$output")" = '[]' ]
+  [ "$(jq -c '[.runs[1].results[] | select(.ruleId == "qlty:function-complexity")
+    | [.locations[0].physicalLocation.artifactLocation.uri, .baselineState]]' <<<"$output")" = '[]' ]
+  fixture tangled.py src/more.py
+  run --separate-stderr "$assay" findings --base HEAD --sarif
+  [ "$status" -eq 0 ]
+  [ "$(jq -c '[.runs[1].results[] | select(.ruleId == "qlty:function-complexity")
+    | [.locations[0].physicalLocation.artifactLocation.uri, .baselineState]]' <<<"$output")" = '[["src/more.py","new"]]' ]
+  [ "$(jq -c '[.runs[1].results[] | select(.ruleId == "qlty:identical-code") | .baselineState]' <<<"$output")" = \
+    '["new"]' ]
+}
+
+@test "smells for TypeScript, Rust, Python and Scala only: not JavaScript or Go" {
+  local_repo
+  builtin_checks plain
+  for f in tangled.ts tangled.rs tangled.scala tangled.py tangled.js tangled.go; do fixture "$f" "src/$f"; done
+  run --separate-stderr "$assay" findings
+  echo "$output$stderr"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c 'qlty/function-complexity' <<<"$output")" -eq 4 ]
+  for f in tangled.ts tangled.rs tangled.scala tangled.py; do grep -q "^src/$f:[0-9]*: qlty/function-complexity: " <<<"$output"; done
+  [[ $output != *tangled.js* && $output != *tangled.go* ]]
+}
+
+@test "the smells' thresholds and switches come from the configuration" {
+  local_repo
+  builtin_checks plain
+  jq '.findings.smells.function_complexity.threshold = 30 | .findings.smells.nested_control_flow.enable = false' \
+    "$ASSAY_CONFIG" >"$T/config.json"
+  export ASSAY_CONFIG=$T/config.json
+  fixture tangled.py src/app.py
+  run --separate-stderr "$assay" findings
+  echo "$output$stderr"
+  [ "$status" -eq 0 ]
+  [ "$output" = "no findings on the change" ]
+  grep -qx 'threshold = 30' .qlty/qlty.toml
+  jq '.findings.smells.function_complexity.threshold = 20' "$T/config.json" >"$T/config2.json"
+  ASSAY_CONFIG=$T/config2.json run --separate-stderr "$assay" findings
+  [ "${lines[0]}" = "src/app.py:1: qlty/function-complexity: Function with high complexity (count = 27): tangled" ]
+}
+
+@test "radarlint for Python: a finding on new code fails, at any level; S3776 never shows; qlty runs no other linter" {
+  local_repo
+  builtin_checks python
+  printf '%s\n' 'def old(x):' '    y = 3' '    return x' >src_old.py
+  git add src_old.py
+  git commit --quiet -m old
+  echo 'LIMIT = 1' >>src_old.py
+  fixture tangled.py src/app.py
+  printf '%s\n' '' '' 'def fresh(z):' '    w = 2' '    return z' >>src/app.py
+  mkdir scripts
+  printf '%s\n' '#!/usr/bin/env bash' 'echo $FOO' >scripts/run.sh
+  run --separate-stderr "$assay" findings --base HEAD
+  echo "$output$stderr"
+  [ "$status" -eq 0 ]
+  # Lint first, then smells, in each file; the old unused variable is on no changed line.
+  [ "${lines[0]}" = 'src/app.py:23: radarlint-python/python:S1481: Remove the unused local variable "w".' ]
+  [ "${lines[1]}" = "src/app.py:1: qlty/function-complexity: Function with high complexity (count = 27): tangled" ]
+  [ "${lines[-1]}" = "3 findings on the change, 3 of them new: the findings check fails on those" ]
+  [[ $output != *S3776* && $output != *src_old.py* && $output != *shellcheck* && $output != *run.sh* ]]
+  run --separate-stderr "$assay" findings --base HEAD --sarif
+  [ "$status" -eq 0 ]
+  [ "$(jq -c '[.runs[0].results[] | [.ruleId, .baselineState]]' <<<"$output")" = \
+    '[["radarlint-python:python:S1481","new"]]' ]
+  [[ $output != *S3776* ]]
+  run --separate-stderr "$assay" check --base HEAD findings
+  echo "$output$stderr"
+  [ "$status" -eq 1 ]
+  [[ $output == *$'\nsrc/app.py:23: radarlint-python/python:S1481: Remove the unused local variable "w".\n'* ]]
+  # radarlint is the only plugin, run from the PATH: qlty downloaded nothing, its tools cache holds a lock at most.
+  [ "$(grep '^name = ' .qlty/qlty.toml)" = 'name = "radarlint-python"' ]
+  grep -q "^script = \"'$(readlink -f "$(command -v radarlint)")' python \${target}\"$" .qlty/qlty.toml
+  [ -z "$(find "$HOME/.qlty/cache/tools" -type f ! -name '*.lock' 2>/dev/null)" ]
+  [ "$(cat .qlty/configs/radarlint.properties)" = "$(printf '%s\n' radarlint.rules.python.S3776=false radarlint.rules.scala.S3776=false)" ]
+}

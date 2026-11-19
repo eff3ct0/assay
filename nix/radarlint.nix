@@ -6,9 +6,13 @@
   lib,
   stdenvNoCC,
   fetchurl,
+  coreutils,
   jdk25_headless,
   runtimeShell,
 }:
+let
+  share = "${placeholder "out"}/share/radarlint";
+in
 stdenvNoCC.mkDerivation (finalAttrs: {
   pname = "radarlint";
   version = "2.0.0";
@@ -20,16 +24,24 @@ stdenvNoCC.mkDerivation (finalAttrs: {
 
   sourceRoot = ".";
 
-  # radarlint.jar finds the analyzers in plugins/, beside it. Java takes its home from the password database, not
-  # HOME, and SonarLint keeps its storage there: HOME it is, which a sandbox can write. Its classes need Java 22 or
-  # later.
+  # radarlint.jar finds the analyzers in plugins/ beside it, and works in work/ beside it, through the jar's real path:
+  # each run gets a copy of the jar in a directory of its own, removed after it, while the analyzers stay here. qlty
+  # runs it with an empty PATH and no TMPDIR, and a sandbox may have no /tmp. Java takes its home from the password
+  # database, not HOME, and SonarLint keeps its storage there: HOME it is, which a sandbox can write. Its classes need
+  # Java 22 or later.
   installPhase = ''
     runHook preInstall
-    mkdir -p $out/share/radarlint $out/bin
-    cp -r radarlint.jar plugins $out/share/radarlint/
-    cat >$out/bin/radarlint <<EOF
+    mkdir -p ${share} $out/bin
+    cp -r radarlint.jar plugins ${share}/
+    cat >$out/bin/radarlint <<'EOF'
     #!${runtimeShell}
-    exec ${lib.getExe' jdk25_headless "java"} -Duser.home="\$HOME" -jar $out/share/radarlint/radarlint.jar "\$@"
+    tmp=''${TMPDIR:-/tmp}
+    if [ ! -d "$tmp" ] || [ ! -w "$tmp" ]; then tmp=$HOME; fi
+    dir=$(${coreutils}/bin/mktemp -d "$tmp/radarlint.XXXXXX") || exit 2
+    trap '${coreutils}/bin/rm -rf -- "$dir"' EXIT
+    ${coreutils}/bin/cp --reflink=auto ${share}/radarlint.jar "$dir/" &&
+      ${coreutils}/bin/ln -s ${share}/plugins "$dir/plugins" || exit 2
+    ${lib.getExe' jdk25_headless "java"} -Duser.home="$HOME" -jar "$dir/radarlint.jar" "$@"
     EOF
     chmod +x $out/bin/radarlint
     runHook postInstall
