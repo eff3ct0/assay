@@ -1,0 +1,115 @@
+{
+  "version": 1,
+  "checks": {
+    "actionlint": {
+      "exec": "actionlint",
+      "fast": true,
+      "enable": true,
+      "requires": ".github/workflows/*",
+      "coverage": null
+    },
+    "agents-md": {
+      "exec": "assay builtin agents-md",
+      "fast": true,
+      "enable": true,
+      "requires": null,
+      "coverage": null
+    },
+    "ast-grep": {
+      "exec": "assay builtin ast-grep",
+      "fast": true,
+      "enable": true,
+      "requires": "sgconfig.yml",
+      "coverage": null
+    },
+    "commit-trailers": {
+      "exec": "assay builtin commit-trailers",
+      "fast": true,
+      "enable": true,
+      "requires": null,
+      "coverage": null
+    },
+    "findings": {
+      "exec": "assay builtin findings",
+      "fast": false,
+      "enable": true,
+      "requires": null,
+      "coverage": null
+    },
+    "gitleaks": {
+      "exec": "assay builtin gitleaks",
+      "fast": true,
+      "enable": true,
+      "requires": null,
+      "coverage": null
+    },
+    "oxfmt": {
+      "exec": "oxfmt --check --no-error-on-unmatched-pattern '**/*.{md,mdx,yml,yaml}'",
+      "fast": true,
+      "enable": true,
+      "requires": null,
+      "coverage": null
+    },
+    "suppressions": {
+      "exec": "assay builtin suppressions",
+      "fast": true,
+      "enable": true,
+      "requires": null,
+      "coverage": null
+    }
+  },
+  "loosenings": [],
+  "coverage": {
+    "newCode": 80
+  },
+  "languages": [
+    "python"
+  ],
+  "rulePacks": {},
+  "findings": {
+    "duplication": {
+      "nodes_threshold": 64
+    },
+    "radarlint": [
+      "python"
+    ],
+    "rules": {
+      "python:S3776": false,
+      "scala:S3776": false
+    },
+    "smells": {
+      "boolean_logic": {
+        "enable": true,
+        "threshold": 4
+      },
+      "file_complexity": {
+        "enable": true,
+        "threshold": 50
+      },
+      "function_complexity": {
+        "enable": true,
+        "threshold": 18
+      },
+      "function_parameters": {
+        "enable": true,
+        "threshold": 6
+      },
+      "identical_code": {
+        "enable": true,
+        "threshold": 15
+      },
+      "nested_control_flow": {
+        "enable": true,
+        "threshold": 5
+      },
+      "return_statements": {
+        "enable": true,
+        "threshold": 6
+      },
+      "similar_code": {
+        "enable": true,
+        "threshold": 15
+      }
+    }
+  }
+}

@@ -119,8 +119,8 @@ sha() { git -C "${2:-.}" rev-parse "$1"; }
 short() { git -C "${2:-.}" rev-parse --short "$1"; }
 
 # builtin_checks <setup>: the configuration assay's devenv module writes for a devenv setup, test/defaults/<setup>.json
-# (plain, javascript or javascript-frontend; nix flake check compares each with the module's), with this checkout's
-# assay on the PATH for the checks that call it.
+# (plain, javascript, javascript-frontend or python; nix flake check compares each with the module's), with this
+# checkout's assay on the PATH for the checks that call it.
 builtin_checks() {
 	export ASSAY_CONFIG=$BATS_TEST_DIRNAME/defaults/$1.json
 	PATH=$DEVENV_STUB_PROFILE:$PATH

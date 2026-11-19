@@ -11,6 +11,8 @@
     ast-grep
     git
     jq
+    # The suite runs radarlint, which the module brings only to repos with Python or Scala.
+    (callPackage ./nix/radarlint.nix { })
     yq-go
   ];
 }

@@ -166,6 +166,18 @@ not_adopted() {
 	[[ $(sed -n 2p "$T/devenv.calls") == *" new-code --base HEAD" ]]
 }
 
+@test "outside the devenv, assay findings re-executes itself through devenv shell" {
+	local_repo
+	devenv_files yes
+	outside_devenv
+	run --separate-stderr "$assay" findings --base HEAD
+	echo "$output$stderr"
+	[ "$status" -eq 0 ]
+	[ "$output" = "no findings on the change" ]
+	[ "$(wc -l <"$T/devenv.calls")" -eq 1 ]
+	[[ $(cat "$T/devenv.calls") == *" findings --base HEAD" ]]
+}
+
 @test "outside the devenv, assay rule new runs inside it from the caller's directory: --from's path is the caller's" {
 	local_repo
 	devenv_files yes

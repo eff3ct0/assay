@@ -403,3 +403,40 @@ fails_closed() {
 	[ "$status" -eq 2 ]
 	[ "${lines[-1]}" = "assay: unexpected failure (exit 1)" ]
 }
+
+@test "a loosening of a setting of the analyzer is listed with its reason in the header" {
+	local_repo
+	check fmt true
+	jq '.loosenings += [{check: "findings", kind: "setting", reason: "parsers are one big match",
+    what: "smells.function_complexity.threshold is 25, above qlty'"'"'s 18"}]' "$ASSAY_CONFIG" >"$T/c.json"
+	mv "$T/c.json" "$ASSAY_CONFIG"
+	run "$assay" check fmt
+	[ "$status" -eq 0 ]
+	[ "${lines[1]}" = "  loosening: findings smells.function_complexity.threshold is 25, above qlty's 18: parsers are one big match" ]
+}
+
+@test "malformed findings settings exit 2" {
+	local_repo
+	check a "touch $T/ran"
+	good=$(jq -c '.findings = {radarlint: ["python"], rules: {"python:S3776": false},
+    smells: {function_complexity: {enable: true, threshold: 18}}, duplication: {nodes_threshold: 64}}' "$ASSAY_CONFIG")
+	printf '%s' "$good" >"$ASSAY_CONFIG"
+	run "$assay" check
+	[ "$status" -eq 0 ]
+	rm "$T/ran"
+	bad() {
+		printf '%s' "$2" >"$ASSAY_CONFIG"
+		fails_closed "$1"
+	}
+	bad "findings not an object" "$(jq -c '.findings = []' <<<"$good")"
+	bad "radarlint for another language" "$(jq -c '.findings.radarlint = ["java"]' <<<"$good")"
+	bad "a rule not on or off" "$(jq -c '.findings.rules["python:S1"] = "off"' <<<"$good")"
+	bad "a rule key that is not a Sonar key" "$(jq -c '.findings.rules["python:S1\nx=1"] = false' <<<"$good")"
+	bad "an unknown smell" "$(jq -c '.findings.smells.long_lines = {enable: true, threshold: 1}' <<<"$good")"
+	bad "a threshold of zero" "$(jq -c '.findings.smells.function_complexity.threshold = 0' <<<"$good")"
+	bad "a fractional threshold" "$(jq -c '.findings.smells.function_complexity.threshold = 1.5' <<<"$good")"
+	bad "enable not a boolean" "$(jq -c '.findings.smells.function_complexity.enable = 1' <<<"$good")"
+	bad "nodes_threshold not a number" "$(jq -c '.findings.duplication.nodes_threshold = "64"' <<<"$good")"
+	bad "a setting's loosening that says nothing" \
+		"$(jq -c '.loosenings = [{check: "findings", kind: "setting", reason: "r"}]' <<<"$good")"
+}
