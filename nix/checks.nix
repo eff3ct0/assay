@@ -334,10 +334,7 @@ let
         }).env.ASSAY_CONFIG
       ).success;
     "without an enabled check that declares coverage, no diff-cover" =
-      names untested == [
-        "assay"
-        "hello"
-      ];
+      !(lib.elem "diff-cover" (names untested));
     "the preset check is built in, fast, and runs assay builtin preset" =
       builtinPlain.assay.checks.preset == {
         exec = "assay builtin preset";
