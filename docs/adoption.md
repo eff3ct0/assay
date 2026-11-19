@@ -67,6 +67,9 @@ Whole-tree checks fail on day one wherever the tree already breaks them.
   `CLAUDE.md` (below), no secret in the tree, and `oxfmt` over Markdown and YAML, whose first run is such a reformat. A
   tool-written file of a type `oxfmt` checks (a sops file, say) goes in the repo's `.oxfmtrc.json` under
   `ignorePatterns`, which is no loosening.
+- The `findings` check holds on the change only: the tree's existing smells never block the adoption. A repo that
+  tracks `.qlty/qlty.toml` moves its settings to `assay.findings` and removes the file from git, since assay writes
+  `.qlty/` on every run.
 - What cannot be cleaned is held as a loosening whose reason names an issue in that repo; `assay check` lists it on
   every run, and that issue removes the loosening when it clears the debt.
 

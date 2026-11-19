@@ -8,6 +8,8 @@
 let
   inherit (pkgs) lib;
 
+  qlty = pkgs.callPackage ./qlty.nix { };
+
   # A stand-in for the devenv options the module sets or reads, so that it evaluates without devenv.
   devenvStub =
     { config, ... }:
@@ -93,6 +95,22 @@ let
   evalBuiltin = evalModule (import ../devenv/defaults.nix);
   builtinPlain = evalBuiltin { };
   builtinJavascript = evalBuiltin { languages.javascript.enable = true; };
+  builtinPython = evalBuiltin { languages.python.enable = true; };
+  builtinLoosened = evalBuiltin {
+    assay.findings = {
+      smells.function_complexity = {
+        threshold = 25;
+        reason = "parsers are one big match";
+      };
+      rules = {
+        "python:S1481" = {
+          enable = false;
+          reason = "generated code";
+        };
+        "python:S3776".enable = true;
+      };
+    };
+  };
   javascriptIn =
     directory:
     evalBuiltin {
@@ -330,9 +348,58 @@ let
         "assay"
         "actionlint"
         "ast-grep"
+        "qlty"
         "gitleaks"
         "oxfmt"
       ];
+    "radarlint joins the devenv of a repo with Python or Scala only" =
+      lib.all (c: lib.elem "radarlint" (map lib.getName c.packages)) [
+        builtinPython
+        (evalBuiltin { languages.scala.enable = true; })
+      ]
+      && !(lib.elem "radarlint" (map lib.getName builtinJavascript.packages));
+    "the findings check runs in the full run only" =
+      builtinPlain.assay.checks.findings.exec == "assay builtin findings"
+      && !builtinPlain.assay.checks.findings.fast;
+    "raising a smell threshold without a reason fails evaluation" =
+      !evaluatesBuiltin {
+        assay.findings.smells.function_complexity.threshold = 25;
+      };
+    "raising a smell threshold without a reason fails an assertion" =
+      builtins.any (a: !a.assertion)
+        (evalBuiltin { assay.findings.smells.identical_code.threshold = 30; }).assertions;
+    "raising a smell threshold with a reason evaluates" = evaluatesBuiltin {
+      assay.findings.smells.function_complexity = {
+        threshold = 25;
+        reason = "why";
+      };
+    };
+    "lowering a smell threshold is no loosening" = evaluatesBuiltin {
+      assay.findings.smells.function_complexity.threshold = 10;
+      assay.findings.smells.duplication.nodes_threshold = 40;
+    };
+    "turning a smell off without a reason fails evaluation" =
+      !evaluatesBuiltin {
+        assay.findings.smells.nested_control_flow.enable = false;
+      };
+    "raising duplication's nodes_threshold without a reason fails evaluation" =
+      !evaluatesBuiltin {
+        assay.findings.smells.duplication.nodes_threshold = 100;
+      };
+    "turning a radarlint rule off without a reason fails evaluation" =
+      !evaluatesBuiltin {
+        assay.findings.rules."python:S1481".enable = false;
+      };
+    "turning S3776 back on is no loosening" = evaluatesBuiltin {
+      assay.findings.rules."python:S3776".enable = true;
+    };
+    "a rule key that is not Sonar's fails evaluation" =
+      !evaluatesBuiltin {
+        assay.findings.rules."python S1" = {
+          enable = false;
+          reason = "why";
+        };
+      };
     "the ast-grep check requires sgconfig.yml, until a rule pack is on" =
       builtinPlain.assay.checks.ast-grep.requires == "sgconfig.yml"
       && builtinDemoPack.assay.checks.ast-grep.requires == null;
@@ -563,7 +630,7 @@ in
       ''
         ${lib.concatMapStrings (f: "echo ${lib.escapeShellArg "FAIL: ${f}"} >&2\n") failed}
         ${lib.optionalString (failed != [ ]) "exit 1"}
-        jq -e '. == {version: 1,
+        jq -e 'del(.findings) == {version: 1,
           checks: {
             demo: {exec: "true", fast: true, enable: true, requires: null, coverage: null},
             tested: {exec: "run-tests", fast: false, enable: true, requires: null, coverage: "$ASSAY_DIR/t.xml"}},
@@ -594,6 +661,31 @@ in
         same ${builtinPlain.env.ASSAY_CONFIG} ${../test/defaults/plain.json}
         same ${builtinJavascript.env.ASSAY_CONFIG} ${../test/defaults/javascript.json}
         same ${builtinFrontend.env.ASSAY_CONFIG} ${../test/defaults/javascript-frontend.json}
+        same ${builtinPython.env.ASSAY_CONFIG} ${../test/defaults/python.json}
+        # A loosening of the analyzer, with what it is; a tightening, none.
+        jq -e '.loosenings == [
+            {check: "findings", kind: "setting", reason: "parsers are one big match",
+             what: "smells.function_complexity.threshold is 25, above qlty'"'"'s 18"},
+            {check: "findings", kind: "setting", reason: "generated code", what: "rule python:S1481 is off"}]
+          and .findings.smells.function_complexity == {enable: true, threshold: 25}
+          and .findings.rules == {"python:S1481": false, "python:S3776": true, "scala:S3776": false}' \
+          ${builtinLoosened.env.ASSAY_CONFIG}
+        touch $out
+      '';
+}
+// lib.optionalAttrs (lib.meta.availableOn pkgs.stdenv.hostPlatform qlty) {
+  # The pinned static binary runs in the sandbox, which has no network, and every run has telemetry off.
+  qlty =
+    pkgs.runCommand "assay-qlty"
+      {
+        nativeBuildInputs = [ qlty ];
+      }
+      ''
+        export HOME=$TMPDIR
+        version=$(qlty --version)
+        echo "$version"
+        [[ $version == "qlty ${qlty.version} "* ]]
+        grep -q "QLTY_TELEMETRY.*off" ${lib.getExe qlty}
         touch $out
       '';
 

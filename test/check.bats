@@ -418,3 +418,45 @@ fails_closed() {
 	[ "$status" -eq 2 ]
 	[ "${lines[-1]}" = "assay: unexpected failure (exit 1)" ]
 }
+
+@test "a loosening of a setting of the analyzer is listed with its reason in the header" {
+	local_repo
+	check fmt true
+	jq '.loosenings += [{check: "findings", kind: "setting", reason: "parsers are one big match",
+    what: "smells.function_complexity.threshold is 25, above qlty'"'"'s 18"}]' "$ASSAY_CONFIG" >"$T/c.json"
+	mv "$T/c.json" "$ASSAY_CONFIG"
+	run "$assay" check fmt
+	[ "$status" -eq 0 ]
+	[ "${lines[1]}" = "  loosening: findings smells.function_complexity.threshold is 25, above qlty's 18: parsers are one big match" ]
+}
+
+@test "malformed findings settings exit 2" {
+	local_repo
+	check a "touch $T/ran"
+	good=$(jq -c '.findings = {radarlint: ["python"], rules: {"python:S3776": false},
+    smells: {function_complexity: {enable: true, threshold: 18}}, duplication: {nodes_threshold: 64}}' "$ASSAY_CONFIG")
+	printf '%s' "$good" >"$ASSAY_CONFIG"
+	run "$assay" check
+	[ "$status" -eq 0 ]
+	rm "$T/ran"
+	bad() {
+		printf '%s' "$2" >"$ASSAY_CONFIG"
+		fails_closed "$1"
+	}
+	# bad_jq <description> <jq filter>: bad, with the good configuration changed by the filter.
+	bad_jq() {
+		local json
+		json=$(jq -c "$2" <<<"$good")
+		bad "$1" "$json"
+	}
+	bad_jq "findings not an object" '.findings = []'
+	bad_jq "radarlint for another language" '.findings.radarlint = ["java"]'
+	bad_jq "a rule not on or off" '.findings.rules["python:S1"] = "off"'
+	bad_jq "a rule key that is not a Sonar key" '.findings.rules["python:S1\nx=1"] = false'
+	bad_jq "an unknown smell" '.findings.smells.long_lines = {enable: true, threshold: 1}'
+	bad_jq "a threshold of zero" '.findings.smells.function_complexity.threshold = 0'
+	bad_jq "a fractional threshold" '.findings.smells.function_complexity.threshold = 1.5'
+	bad_jq "enable not a boolean" '.findings.smells.function_complexity.enable = 1'
+	bad_jq "nodes_threshold not a number" '.findings.duplication.nodes_threshold = "64"'
+	bad_jq "a setting's loosening that says nothing" '.loosenings = [{check: "findings", kind: "setting", reason: "r"}]'
+}
