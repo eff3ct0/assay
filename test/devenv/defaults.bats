@@ -179,12 +179,10 @@ measure_archive() {
 	mkdir "$snapshot"
 	git archive -o "$snapshot.tar" HEAD
 	tar -xf "$snapshot.tar" -C "$snapshot"
-	run --separate-stderr bash -c 'cd "$1" && devenv shell -- assay measure' fixture "$snapshot"
-	echo "$output"
-	echo "$stderr" >&2
-	[ "$status" -eq 0 ]
+	snapshot_json=$(cd "$snapshot" && devenv shell -- assay measure) || return 1
+	echo "$snapshot_json"
 	[ ! -e "$snapshot/.git" ]
-	jsonschema -i /dev/stdin "$BATS_TEST_DIRNAME/../../schema/measure.json" <<<"$output"
+	jsonschema -i /dev/stdin "$BATS_TEST_DIRNAME/../../schema/measure.json" <<<"$snapshot_json"
 }
 
 @test "measure: archived Nix fixture runs in its devenv and validates against the shipped schema" {
@@ -196,7 +194,7 @@ measure_archive() {
 	git commit --quiet -m nix
 	measure_archive "$T/nix-snapshot"
 	jq -es 'length == 1 and (.[0] | .failed == [] and .coverage == {} and .lint == [] and .smells == []
-		and .duplication != null and any(.loc[]; .language == "Nix" and .lines > 0))' <<<"$output"
+		and .duplication != null and any(.loc[]; .language == "Nix" and .lines > 0))' <<<"$snapshot_json"
 }
 
 @test "measure: archived bash fixture reports real Cobertura, but null after bats fails" {
@@ -207,10 +205,10 @@ measure_archive() {
 	measure_archive "$T/bash-snapshot"
 	jq -es 'length == 1 and (.[0] | .failed == [] and .coverage.bats == {covered: 1, total: 2}
 		and .lint == [] and .smells == [] and .duplication.total > 0
-		and any(.loc[]; .language == "Shell" and .lines > 0))' <<<"$output"
+		and any(.loc[]; .language == "Shell" and .lines > 0))' <<<"$snapshot_json"
 	sed -i 's/hello you/wrong answer/' test/greet.bats
 	git add -A
 	git commit --quiet -m failing
 	measure_archive "$T/failing-snapshot"
-	jq -e '.failed == ["bats"] and .coverage == {bats: null}' <<<"$output"
+	jq -e '.failed == ["bats"] and .coverage == {bats: null}' <<<"$snapshot_json"
 }

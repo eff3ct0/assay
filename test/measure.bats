@@ -27,7 +27,7 @@ archive_fixture() {
 	jq -es 'length == 1 and (.[0] | .failed == [] and .seconds >= 0)' <<<"$output"
 	[ -s "$DEVENV_STUB_CALLS" ]
 	[ ! -e .git ]
-	[ "$(cat "$ASSAY_HITS_LOG")" = 'existing hit' ]
+	prints 'existing hit' cat "$ASSAY_HITS_LOG"
 }
 
 @test "measure counts successful coverage reports, not failed, missing, stale or skipped reports" {
@@ -54,8 +54,7 @@ EOF
 	check disabled 'touch excluded-check-ran; exit 1' --off
 	printf '#!/bin/sh\ntouch diff-cover-ran; exit 1\n' >"$DEVENV_STUB_PROFILE/diff-cover"
 	chmod +x "$DEVENV_STUB_PROFILE/diff-cover"
-	export PATH="$DEVENV_STUB_PROFILE:$PATH"
-	run --separate-stderr "$assay" measure
+	run --separate-stderr env PATH="$DEVENV_STUB_PROFILE:$PATH" "$assay" measure
 	echo "$output"
 	echo "$stderr" >&2
 	[ "$status" -eq 0 ]
@@ -102,8 +101,7 @@ EOF
 printf '%s\n' '[{"Name":"Shell","Lines":37,"Code":31},{"Name":"Nix","Lines":14,"Code":10}]'
 EOF
 	chmod +x "$DEVENV_STUB_PROFILE/"{qlty,jscpd,scc}
-	export PATH="$DEVENV_STUB_PROFILE:$PATH"
-	run --separate-stderr "$assay" measure
+	run --separate-stderr env PATH="$DEVENV_STUB_PROFILE:$PATH" "$assay" measure
 	[ "$status" -eq 0 ]
 	jq -es 'length == 1 and (.[0] |
 		.lint == [
@@ -117,7 +115,7 @@ EOF
 	printf '#!/bin/sh\necho '\''{"runs":[]}'\''\n' >"$DEVENV_STUB_PROFILE/qlty"
 	printf '#!/bin/sh\nexit 1\n' >"$DEVENV_STUB_PROFILE/jscpd"
 	printf '#!/bin/sh\necho not-json\n' >"$DEVENV_STUB_PROFILE/scc"
-	run --separate-stderr "$assay" measure
+	run --separate-stderr env PATH="$DEVENV_STUB_PROFILE:$PATH" "$assay" measure
 	[ "$status" -eq 0 ]
 	[ ! -e .qlty/qlty.toml ]
 	jq -e '.lint == [] and .smells == [] and .loc == null and .duplication == null' <<<"$output"
