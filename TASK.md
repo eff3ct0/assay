@@ -79,21 +79,22 @@ nixos-config issues it links (#50, #52, #58, #56, #47). Branch `agent/nix-bash-d
 Done: steps 1-6, the code review, the critic's four failures (`fix: critic findings…`) and the merge with main.
 
 The recheck critic (the last round) found four of the critic's five failures fixed and the merge with main
-breaking nothing; one stays open, for p3rkins:
+breaking nothing; one stayed open, plus a minor finding. PR #21 is open, not to be merged by an agent.
+
+p3rkins decided: fix both, then one new critic that rechecks only those two and the fix's diff, its verdict noted on
+PR #21. Fixed in `fix: kcov expected only where nixpkgs has it…`; that critic is the remaining step:
 
 - darwin, half fixed: the flake and a consumer evaluate there now, but `nix/checks.nix`'s expectation "bash's tools
   join the devenv, kcov and diff-cover among them" requires kcov on every platform, so `checks.<darwin>.module`
-  always fails (its build script holds `exit 1`). The likely fix: expect kcov only where
+  always fails (its build script holds `exit 1`). Fix: kcov expected exactly where
   `lib.meta.availableOn pkgs.stdenv.hostPlatform pkgs.kcov`.
-- Minor, not counted as a failure: README.md's language section says each check runs over the files git sees
-  (untracked ones included), while `bats` runs the tracked `.bats` files only.
+- Minor: README.md's language section says each check runs over the files git sees (untracked ones included), while
+  `bats` runs the tracked `.bats` files only. Fix: the sentence names that exception.
 
-Open decisions for p3rkins (not to be decided by an agent):
+Settled by p3rkins: squash merge, so no `.git-blame-ignore-revs`; `ASSAY_DIR` and the `coverage` loosening kind stay;
+bats failing with exit 127 on darwin until turned off with a reason is accepted (README says so); kcov's multi-line
+strings are issue #20.
 
-- `.git-blame-ignore-revs` for the shfmt commit (`style: shfmt's reformat…`) only makes sense if the branch is not
-  squash-merged.
-- kcov is nixpkgs' kcov patched (`nix/kcov.nix`), so it builds from source where no cache has it.
-- `ASSAY_DIR` and the `coverage` loosening kind are interface the issue did not name.
-- With a script at the repo root, kcov's `--bash-parse-files-in-dir` walks the whole root, ignored trees included.
-- kcov counts the lines inside a multi-line string (assay.sh's embedded jq and awk programs) as code that never runs:
-  a change to such a program is new code no test can cover. Worth an issue of its own.
+Still true, for the record: kcov is nixpkgs' kcov patched (`nix/kcov.nix`), so it builds from source where no cache
+has it; with a script at the repo root, kcov's `--bash-parse-files-in-dir` walks the whole root, ignored trees
+included.

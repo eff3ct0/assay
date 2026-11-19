@@ -218,7 +218,8 @@ failed, `2` could not run, `127` the check's tool (gitleaks) is missing. Outside
 Each language's checks are on when the repo enables the language in devenv (`languages.<language>.enable`), are named
 after their tool, and bring their tools into the devenv. They are default checks: turning one off, redefining its
 `exec` or changing its `coverage` is a loosening. Each runs over the files git sees (tracked, or untracked and
-not ignored), never over `.`, so `.devenv/` and other ignored files are never read; with nothing to check, it passes.
+not ignored), though `bats` runs only the tracked `.bats` files as tests; none runs over `.`, so `.devenv/` and other
+ignored files are never read; with nothing to check, it passes.
 
 | Language                       | `--fast`                                   | full run only                                               |
 | ------------------------------ | ------------------------------------------ | ----------------------------------------------------------- |

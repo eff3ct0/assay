@@ -266,16 +266,17 @@ let
           "nixf"
           "jq"
         ];
-    "bash's tools join the devenv, kcov and diff-cover among them" =
+    "bash's tools join the devenv, diff-cover among them" =
       lib.all (t: builtins.elem t (names shellRepo))
         [
           "assay-check-helpers"
           "ShellCheck"
           "shfmt"
           "bats"
-          "kcov"
           "diff-cover"
         ];
+    "kcov joins the devenv where nixpkgs has it (Linux), and only there" =
+      builtins.elem "kcov" (names shellRepo) == lib.meta.availableOn pkgs.stdenv.hostPlatform pkgs.kcov;
     "dropping the bats check's coverage is a loosening" =
       !(builtins.tryEval
         (withLanguages {
