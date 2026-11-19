@@ -52,7 +52,7 @@ EOF
 		check "$name" 'touch excluded-check-ran; exit 1'
 	done
 	check disabled 'touch excluded-check-ran; exit 1' --off
-	printf '#!/bin/sh\ntouch diff-cover-ran; exit 1\n' >"$DEVENV_STUB_PROFILE/diff-cover"
+	printf '#!/usr/bin/env bash\ntouch diff-cover-ran; exit 1\n' >"$DEVENV_STUB_PROFILE/diff-cover"
 	chmod +x "$DEVENV_STUB_PROFILE/diff-cover"
 	run --separate-stderr env PATH="$DEVENV_STUB_PROFILE:$PATH" "$assay" measure
 	echo "$output"
@@ -112,9 +112,9 @@ EOF
 		.duplication == {duplicated:4,total:21} and .loc == [{language:"Nix",lines:10},{language:"Shell",lines:31}])' <<<"$output"
 	jsonschema -i /dev/stdin "$BATS_TEST_DIRNAME/../schema/measure.json" <<<"$output"
 
-	printf '#!/bin/sh\necho '\''{"runs":[]}'\''\n' >"$DEVENV_STUB_PROFILE/qlty"
-	printf '#!/bin/sh\nexit 1\n' >"$DEVENV_STUB_PROFILE/jscpd"
-	printf '#!/bin/sh\necho not-json\n' >"$DEVENV_STUB_PROFILE/scc"
+	printf '#!/usr/bin/env bash\necho '\''{"runs":[]}'\''\n' >"$DEVENV_STUB_PROFILE/qlty"
+	printf '#!/usr/bin/env bash\nexit 1\n' >"$DEVENV_STUB_PROFILE/jscpd"
+	printf '#!/usr/bin/env bash\necho not-json\n' >"$DEVENV_STUB_PROFILE/scc"
 	run --separate-stderr env PATH="$DEVENV_STUB_PROFILE:$PATH" "$assay" measure
 	[ "$status" -eq 0 ]
 	[ ! -e .qlty/qlty.toml ]
