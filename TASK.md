@@ -97,8 +97,16 @@ The issue's body is the specification (`gh issue view 11 -R eff3ct0/assay`), wit
 ## Remaining steps
 
 Done: everything the issue asks for, the code review and its fixes, a first critic (Done failed on the two points
-above, now fixed; Resume, Verbatim and Differential passed). `main` moved meanwhile (the guard, #22): it is merged into
-the branch.
+above; Resume, Verbatim and Differential passed), their fix, the merge of `main` (the guard, #22), and the recheck
+critic: both failures fixed, the merge broke nothing, and one case newly broken by the fix of the first.
 
-1. A fresh critic rechecks the two failures, the diff of their fix and the merge's conflict resolution.
-2. Remove this file once that recheck passes.
+Open decision for the user, kept off the default branch: since the fix, a nested block or a boolean expression the
+base already has fails the `findings` check when the change edits the line it starts on, without making it worse
+(`while b:` to `while b > 0:` on a level-5 block's first line; an operand renamed in a complex expression). The issue
+says both "A finding about a line counts when it sits on new code" and "A smell that already existed in a file the
+change touches is still shown ... it does not fail the check". The alternatives: keep this (an edited line is new
+code); or match such a smell by the text of its first line instead of where it starts, so an edit to that line still
+fails but a block replaced elsewhere does too; or tell blocks apart by their enclosing function, which qlty does not
+report.
+
+1. The user decides the open point above; then this file goes.
