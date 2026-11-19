@@ -90,6 +90,10 @@ to do instead.
 **Code rule**:
 A rule about a repo's contents, kept in that repo.
 
+**Rule pack**:
+An opt-in set of ast-grep rules that assay ships, for rules that hold for every repo of a language; a repo turns one on
+in its devenv.
+
 **Guard rule**:
 A rule about what an agent does, kept in the machine's rule list.
 

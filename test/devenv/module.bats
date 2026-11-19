@@ -170,7 +170,7 @@ source "$BATS_TEST_DIRNAME/helpers.bash"
 	run --separate-stderr nix run . -- check --list
 	echo "$stderr"
 	[ "$status" -eq 0 ]
-	[ "$output" = "$(printf '%s\n' 'actionlint (fast)' 'agents-md (fast)' bats 'commit-trailers (fast)' 'deadnix (fast)' \
+	[ "$output" = "$(printf '%s\n' 'actionlint (fast)' 'agents-md (fast)' 'ast-grep (fast)' bats 'commit-trailers (fast)' 'deadnix (fast)' \
 		findings 'gitleaks (fast)' nix-flake-check 'nixf-tidy (fast)' 'nixfmt (fast)' 'oxfmt (fast)' 'shellcheck (fast)' \
 		'shfmt (fast)' 'statix (fast)' 'suppressions (fast)')" ]
 	run git commit --allow-empty -m "an empty commit"
@@ -184,9 +184,9 @@ source "$BATS_TEST_DIRNAME/helpers.bash"
 	shape
 	run --separate-stderr devenv shell -- assay check --list
 	echo "$stderr"
-	[ "$output" = "$(printf '%s\n' 'actionlint (fast)' 'agents-md (fast)' 'commit-trailers (fast)' findings \
-		'gitleaks (fast)' 'oxfmt (fast)' 'suppressions (fast)')" ]
-	run --separate-stderr devenv shell -- bash -c 'command -v oxfmt gitleaks actionlint qlty'
+	[ "$output" = "$(printf '%s\n' 'actionlint (fast)' 'agents-md (fast)' 'ast-grep (fast)' 'commit-trailers (fast)' \
+		findings 'gitleaks (fast)' 'oxfmt (fast)' 'suppressions (fast)')" ]
+	run --separate-stderr devenv shell -- bash -c 'command -v oxfmt gitleaks actionlint ast-grep qlty'
 	[ "$status" -eq 0 ]
 	# radarlint, a JVM, only for Python or Scala: the profile has qlty, not radarlint.
 	# shellcheck disable=SC2016 # expanded by the devenv's bash

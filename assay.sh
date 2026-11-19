@@ -4,7 +4,7 @@
 # whose path is ASSAY_CONFIG.
 set -euo pipefail
 
-# The package sets assay_tools (git, jq, gawk, coreutils, ast-grep) on the line before this script. assay's own
+# The package sets assay_tools (git, jq, gawk, coreutils, ast-grep, yq) on the line before this script. assay's own
 # commands find them first; each check runs with the PATH assay was called with, so it sees the devenv's tools, not
 # assay's.
 caller_path=$PATH
@@ -25,26 +25,29 @@ usage_text() {
 usage: assay check [--fast] [--base <rev>] [<check>...]    run the repo's checks
        assay check --list                                  list them, fast ones marked
        assay builtin agents-md [<commit>]                  one of the built-in checks that are assay's own code
+       assay builtin ast-grep
        assay builtin commit-trailers [--base <rev>]
        assay builtin gitleaks
        assay builtin suppressions [--base <rev>]
        assay builtin findings [--base <rev>]
        assay findings [--base <rev>] [--sarif]             the analyzer's findings on the change
        assay new-code [--base <rev>]                       the change's new code, as JSON
+       assay rule new <kebab-name> [--lang <lang>] [--from <file>:<line>[-<line>]]
+                                                           scaffold an ast-grep rule and its tests
        assay guard --rules <file>                          the agent guard: one hook event on stdin
        assay git-hook --rules <file> <hook> [<git's arguments>]
                                                            a global git hook: commit-msg or pre-push
 
-Outside the repo's devenv (ASSAY_CONFIG unset), check, builtin, findings and new-code run themselves inside it,
-from the repo root: devenv shell -- assay <command>, so the version the repo pins decides. guard and
-git-hook run where they are called, over the rule list given with --rules.
+Outside the repo's devenv (ASSAY_CONFIG unset), check, builtin, findings, new-code and rule run
+themselves inside it: devenv shell -- assay <command>, so the version the repo pins decides. guard
+and git-hook run where they are called, over the rule list given with --rules.
 The base of the change: --base, else ASSAY_BASE, else GitHub's event (GITHUB_EVENT_PATH), else the
 fork point of HEAD from the default branch, else their merge base. assay never fetches.
 Exit codes: 0 every selected check passed, 1 at least one failed, 2 assay could not run;
-assay builtin exits 127 when the tool its check runs is missing; assay findings exits 0
-whenever it ran, with findings or without. assay guard exits 0 with its answer on stdout, and 1 on
-its own error, which lets the call through; assay git-hook exits 1 when a rule is violated or
-cannot be evaluated.
+assay builtin exits 127 when the tool its check runs is missing, and assay rule new 1 when a rule of
+that name already exists; assay findings exits 0 whenever it ran, with findings or without. assay
+guard exits 0 with its answer on stdout, and 1 on its own error, which lets the call through; assay
+git-hook exits 1 when a rule is violated or cannot be evaluated.
 EOF
 }
 
@@ -195,6 +198,12 @@ def validate:
     and ((.coverage | type) != "object" or (.coverage.newCode | percent | not))
   then fail("coverage.newCode must be an integer from 0 to 100")
   elif (.loosenings | type) != "array" then fail("loosenings must be an array")
+  elif .languages != null and ((.languages | type) != "array" or
+    any(.languages[]; if type == "string" then test("^[a-z][a-z0-9_-]*$") | not else true end)) then
+    fail("languages must be an array of language names")
+  elif .rulePacks != null and ((.rulePacks | type) != "object" or
+    any(.rulePacks | to_entries[]; (.key | test($name_re) | not) or (.value | text | not))) then
+    fail("rulePacks must map pack names to directories")
   else
     . as $c
     | reduce ($c.checks | keys[]) as $n (null;
@@ -219,6 +228,8 @@ def validate:
     | "loose_check+=(\(.check // "" | @sh)) loose_kind+=(\(.kind | @sh)) loose_reason+=(\(.reason | @sh))",
       "loose_value+=(\(if .kind == "new-code" then "\(.newCode) \(.default)" elif .kind == "setting" then .what
         else "" end | @sh))"),
+  ((.languages // [])[] | "cfg_languages+=(\(@sh))"),
+  ((.rulePacks // {}) | to_entries | sort_by(.key)[] | "pack_names+=(\(.key | @sh)) pack_dirs+=(\(.value | @sh))"),
   "config_loaded=1"
 JQ
 
@@ -232,6 +243,10 @@ loose_reason=()
 # A new-code loosening's threshold and assay's default, "<newCode> <default>"; a setting's, what it is; empty for the
 # others.
 loose_value=()
+# The languages the repo enables, and the rule packs it turns on with their directories, in name order.
+cfg_languages=()
+pack_names=()
+pack_dirs=()
 config_loaded=0
 
 # Only ever called with ASSAY_CONFIG set: without it, main delegates.
@@ -1330,17 +1345,424 @@ builtin_findings() {
 	finish 1
 }
 
+# The marker that opens each placeholder `assay rule new` writes: "<fill in: what goes here>".
+rule_placeholder='<fill in:'
+
+# sg_load: the root's sgconfig.yml as compact JSON, in sg_json. Returns 1, with yq's error on one line in sg_error, when
+# it cannot be read as YAML.
+sg_json=
+sg_error=
+sg_load() {
+	command -v yq >/dev/null || die "cannot find yq on the PATH"
+	if ! sg_json=$(yq -o=json -I=0 '.' sgconfig.yml 2>&1); then
+		sg_error=${sg_json//$'\n'/ }
+		return 1
+	fi
+}
+
+# sg_dirs <rules|tests|all>: the directories sgconfig.yml names (sg_load first), NUL-terminated, in its order: its
+# ruleDirs, its testConfigs' testDir, or every one of those and its utilDirs.
+sg_dirs() {
+	# shellcheck disable=SC2016 # jq's program, not the shell's
+	jq -j -n --arg kind "$1" 'def names: if type == "array" then .[] | select(type == "string" and length > 0) else empty end;
+		input | (if $kind == "tests" then empty else (try .ruleDirs catch null) | names end),
+			(if $kind == "all" then (try .utilDirs catch null) | names else empty end),
+			(if $kind == "rules" then empty else [(try .testConfigs[] catch empty) | try .testDir catch null] | names end)
+		| . + "\u0000"' <<<"$sg_json" || die "cannot read the directories sgconfig.yml names"
+}
+
+# root_relative <path>: the path relative to the repo root (the current directory) when it lies inside the repo, else
+# absolute.
+root_relative() {
+	local abs
+	abs=$(realpath -m -s -- "$1") || die "cannot resolve $1"
+	case $abs in
+	"$root") echo . ;;
+	"$root"/*) echo "${abs#"$root"/}" ;;
+	*) echo "$abs" ;;
+	esac
+}
+
+# sg_grep <out> <pattern> <pathspec>...: the lines that hold the fixed string, in the files git sees (tracked, or
+# untracked but not ignored; binary files left out), as <path>:<line>:<text>, into <out>. Every option that a user's
+# configuration could change is fixed. Returns 1 when no line does.
+sg_grep() {
+	local out=$1 pattern=$2 rc=0
+	shift 2
+	git -c core.quotePath=false grep --untracked -I -n -F --full-name --no-color --no-column --no-recurse-submodules \
+		--no-textconv -e "$pattern" -- "$@" >"$out" || rc=$?
+	case $rc in
+	0 | 1) return "$rc" ;;
+	*) die "cannot search the working tree for $pattern" ;;
+	esac
+}
+
+# sg_run <ast-grep argument>...: print the command, then run it with its output on stdout; returns its exit code.
+sg_run() {
+	local arg shown="\$ ast-grep" rc=0
+	for arg in "$@"; do shown+=" $(shell_word "$arg")"; done
+	echo "$shown"
+	ast-grep "$@" 2>&1 || rc=$?
+	return "$rc"
+}
+
+# ast-grep: the repo's ast-grep rules (sgconfig.yml at the root, whatever directories it names) and the rule packs the
+# configuration turns on (rulePacks, each an ast-grep project of its own, scanning the repo from its root), in three
+# steps, in order:
+# 1. a plain text search of the files git sees, for ast-grep-ignore outside the rule directories (a bare one on a line
+#    also silences a rule written to forbid it, so exceptions live in the rule's own file), and for the placeholders
+#    of `assay rule new` inside them;
+# 2. `ast-grep test --skip-snapshot-tests` (snapshots only restate the message, and ast-grep test fails without them);
+# 3. `ast-grep scan`, which exits 1 on an error finding.
+# Every step runs, so that one run shows every failure, but a placeholder ends the check after the first: the rule is
+# not written yet, and ast-grep would take its placeholder pattern for code. ast-grep's own errors (a rule it cannot
+# read, a missing rule directory) fail the step they happen in.
+builtin_ast_grep() {
+	local has_config=0 hits dirs count d i ignores=0 placeholders=0 tests_failed=0 scan_failed=0 all_inside=0
+	local -a excluded=() inside=()
+	[ $# -eq 0 ] || usage_error "ast-grep takes no argument"
+	load_config
+	find_repo
+	if [ -f sgconfig.yml ]; then has_config=1; fi
+	if [ "$has_config" = 0 ] && [ ${#pack_names[@]} -eq 0 ]; then finish 0; fi
+	if ! command -v ast-grep >/dev/null; then
+		echo "assay: cannot find ast-grep on the PATH" >&2
+		finish 127
+	fi
+
+	# 1. The plain text search, outside and inside the rule directories that lie in the repo.
+	tmp_file hits
+	if [ "$has_config" = 1 ]; then
+		if ! sg_load; then
+			echo "sgconfig.yml cannot be read as YAML: $sg_error"
+			finish 1
+		fi
+		tmp_file dirs
+		sg_dirs all >"$dirs"
+		while IFS= read -r -d '' d; do
+			d=$(root_relative "$d")
+			case $d in
+			/*) continue ;;
+			.) all_inside=1 ;;
+			esac
+			excluded+=(":(top,exclude,literal)$d")
+			inside+=(":(top,literal)$d")
+		done <"$dirs"
+	fi
+	if [ "$all_inside" = 0 ] && sg_grep "$hits" ast-grep-ignore . "${excluded[@]}"; then
+		cat "$hits"
+		count=$(wc -l <"$hits")
+		if [ "$count" -eq 1 ]; then echo -n "1 line with"; else echo -n "$count lines with"; fi
+		echo " ast-grep-ignore outside the rule directories: remove each one. An exception lives in the rule's own file" \
+			"(its ignores, or a not: clause in its rule), where a review sees it; an ast-grep-ignore also silences a rule" \
+			"written to forbid it."
+		ignores=1
+	fi
+	if [ ${#inside[@]} -gt 0 ] && sg_grep "$hits" "$rule_placeholder" "${inside[@]}"; then
+		cat "$hits"
+		count=$(wc -l <"$hits")
+		if [ "$count" -eq 1 ]; then echo -n "1 placeholder"; else echo -n "$count placeholders"; fi
+		echo " of assay rule new left in the rules and their tests: fill each one in, as the comment above its field says."
+		placeholders=1
+	fi
+	[ "$placeholders" = 0 ] || finish 1
+
+	# 2. The rules' tests: the repo's, then each pack's.
+	if [ "$has_config" = 1 ]; then sg_run test --skip-snapshot-tests --color never || tests_failed=1; fi
+	for i in "${!pack_names[@]}"; do
+		sg_run test -c "${pack_dirs[$i]}/sgconfig.yml" --skip-snapshot-tests --color never || tests_failed=1
+	done
+	if [ "$tests_failed" = 1 ]; then
+		echo "ast-grep test failed: each rule reports its invalid cases and none of its valid ones; fix the rule or its tests."
+	fi
+
+	# 3. The scan: the repo's rules, then each pack's.
+	if [ "$has_config" = 1 ] && ! sg_run scan --color never; then
+		echo "ast-grep scan found code a rule forbids: fix each finding; \`ast-grep scan -U\` applies a rule's fix:," \
+			"where it has one."
+		scan_failed=1
+	fi
+	for i in "${!pack_names[@]}"; do
+		if ! sg_run scan -c "${pack_dirs[$i]}/sgconfig.yml" --color never; then
+			echo "ast-grep scan found code a rule forbids: fix each finding;" \
+				"\`ast-grep scan -c $(shell_word "${pack_dirs[$i]}/sgconfig.yml") -U\` applies a pack rule's fix:, where it has one."
+			scan_failed=1
+		fi
+	done
+	if [ "$ignores$tests_failed$scan_failed" = 000 ]; then finish 0; fi
+	finish 1
+}
+
 cmd_builtin() {
 	[ $# -ge 1 ] || usage_error "builtin needs the name of a built-in check"
 	local check=$1
 	shift
 	case $check in
 	agents-md) builtin_agents_md "$@" ;;
+	ast-grep) builtin_ast_grep "$@" ;;
 	commit-trailers) builtin_commit_trailers "$@" ;;
 	gitleaks) builtin_gitleaks "$@" ;;
 	suppressions) builtin_suppressions "$@" ;;
 	findings) builtin_findings "$@" ;;
 	*) usage_error "no built-in check named '$check'" ;;
+	esac
+}
+
+# assay rule new: the scaffold of an ast-grep rule, in ast-grep's own layout, whose placeholders fail the ast-grep
+# check until they are filled in. Only ast-grep rules: a native rule is a line in its tool's configuration, and a
+# guard rule a Nix entry.
+
+# A shell script's shebang: sh, bash, dash, ksh or bats, by path or through env.
+shebang_re='^#![[:space:]]*[^[:space:]]*/(env[[:space:]]+(-[^[:space:]]+[[:space:]]+)*)?((ba|da|k)?sh|bats)([[:space:]]|$)'
+
+# lang_of_file <path>: the ast-grep language of a file, in lowercase: bash for a script whose name has no extension and
+# whose shebang names a shell, else the one ast-grep parses it as (by its extension, or the languageGlobs of the
+# sgconfig.yml it finds); nothing when it has none.
+lang_of_file() {
+	local first="" out
+	if [[ ${1##*/} != ?*.* ]]; then
+		IFS= read -r first <"$1" || true
+		if [[ $first =~ $shebang_re ]]; then
+			echo bash
+			return 0
+		fi
+	fi
+	# Any node matches $A, and the first match names the language; the file holds at least one non-blank line.
+	# shellcheck disable=SC2016 # ast-grep's metavariable $A, not the shell's
+	out=$(ast-grep run -p '$A' --json=stream -- "$1" 2>/dev/null | head -n 1) || true
+	jq -r '.language // empty | ascii_downcase' <<<"$out" 2>/dev/null || true
+}
+
+# from_case <file> <first> <last>: lines <first> to <last> of the file as the first item of a YAML list, indented by
+# two: dedented by the whitespace they all start with, trailing whitespace cut, as a block scalar; or as a quoted
+# string when the first line still starts with whitespace (a block scalar would take it for indentation) or a line
+# holds a control character other than a tab. Dies when the file is shorter, or the lines are blank.
+from_case() {
+	local file=$1 first=$2 last=$3 text line range
+	# shellcheck disable=SC2016 # awk's $0, not the shell's
+	text=$(LC_ALL=C awk -v first="$first" -v last="$last" '
+    NR >= first && NR <= last { sub(/[ \t]+$/, ""); line[++n] = $0 }
+    END {
+      if (NR < last) { print NR; exit 3 }
+      for (i = 1; i <= n; i++) if (line[i] != "") { match(line[i], /^[ \t]*/); ws = substr(line[i], 1, RLENGTH)
+        if (!have++) prefix = ws; else { j = 0; while (j < length(prefix) && substr(prefix, j + 1, 1) == substr(ws, j + 1, 1)) j++; prefix = substr(prefix, 1, j) } }
+      if (!have) exit 4
+      for (i = 1; i <= n; i++) print (line[i] == "") ? "" : substr(line[i], length(prefix) + 1)
+    }' "$file") || {
+		case $? in
+		3) die "--from: $file has $text lines, not $last" ;;
+		4)
+			if [ "$first" = "$last" ]; then range="line $first of $file is"; else range="lines $first-$last of $file are"; fi
+			die "--from: $range blank"
+			;;
+		*) die "--from: cannot read $file" ;;
+		esac
+	}
+	if [[ $text =~ ^[[:space:]] ]] || LC_ALL=C grep -q '[[:cntrl:]]' <<<"${text//$'\t'/ }"; then
+		printf '  - %s\n' "$(printf '%s\n' "$text" | jq -Rs .)"
+	else
+		printf '  - |\n'
+		while IFS= read -r line; do
+			if [ -z "$line" ]; then echo; else printf '    %s\n' "$line"; fi
+		done <<<"$text"
+	fi
+}
+
+# first_dir <rules|tests>: the first directory of that kind sgconfig.yml names (sg_load first), relative to the root
+# when it lies inside the repo; nothing when it names none.
+first_dir() {
+	local list d
+	tmp_file list
+	sg_dirs "$1" >"$list"
+	if IFS= read -r -d '' d <"$list"; then root_relative "$d"; fi
+}
+
+# rule_new <argument>...: `assay rule new`. Writes the scaffold and prints the paths it created, relative to the
+# directory it was called from.
+rule_new() {
+	local name="" lang="" lang_set=0 from="" from_set=0 file="" first="" last="" case_file rule_dir test_dir d f hit list
+	local caller_dir dirs
+	local -a created=()
+	caller_dir=$(pwd -P) || die "cannot read the current directory"
+	while [ $# -gt 0 ]; do
+		case $1 in
+		--lang)
+			[ $# -ge 2 ] || usage_error "--lang needs a language"
+			lang=$2 lang_set=1
+			shift
+			;;
+		--lang=*) lang=${1#--lang=} lang_set=1 ;;
+		--from)
+			[ $# -ge 2 ] || usage_error "--from needs <file>:<line>[-<line>]"
+			from=$2 from_set=1
+			shift
+			;;
+		--from=*) from=${1#--from=} from_set=1 ;;
+		-h | --help)
+			usage_text
+			finish 0
+			;;
+		-*) usage_error "rule new: unknown option '$1'" ;;
+		*)
+			[ -z "$name" ] || usage_error "rule new takes one name, not '$name' and '$1'"
+			name=$1
+			;;
+		esac
+		shift
+	done
+	[ -n "$name" ] || usage_error "rule new needs the rule's name, in kebab-case"
+	[[ $name =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] || usage_error "rule new: '$name' is not kebab-case (lowercase words joined by -)"
+	if [ "$lang_set" = 1 ] && ! [[ $lang =~ ^[A-Za-z][A-Za-z0-9_-]*$ ]]; then
+		usage_error "--lang: '$lang' is not the name of a language ast-grep knows"
+	fi
+	if [ "$from_set" = 1 ]; then
+		[[ $from =~ ^(.+):([1-9][0-9]*)(-([1-9][0-9]*))?$ ]] || usage_error "--from takes <file>:<line>[-<line>], not '$from'"
+		file=${BASH_REMATCH[1]} first=${BASH_REMATCH[2]} last=${BASH_REMATCH[4]:-${BASH_REMATCH[2]}}
+		[ "$first" -le "$last" ] || usage_error "--from: the range $first-$last ends before it starts"
+		if [ ! -f "$file" ] || [ ! -r "$file" ]; then die "--from: cannot read $file"; fi
+		# Relative to the current directory, before moving to the repo root.
+		tmp_file case_file
+		from_case "$file" "$first" "$last" >"$case_file"
+		if [ "$lang_set" = 0 ]; then lang=$(lang_of_file "$file"); fi
+	fi
+	load_config
+	find_repo
+
+	# The language: --lang, else --from's file's, else the repo's single enabled one.
+	if [ -z "$lang" ] && [ ${#cfg_languages[@]} -eq 1 ]; then lang=${cfg_languages[0]}; fi
+	if [ -z "$lang" ]; then
+		local why="" of=" of assay's languages"
+		if [ "$from_set" = 1 ]; then
+			why="ast-grep gives $file no language, and "
+			of=
+		fi
+		if [ ${#cfg_languages[@]} -eq 0 ]; then
+			why+="the repo enables none$of"
+		else
+			printf -v list '%s, ' "${cfg_languages[@]}"
+			why+="the repo enables several$of (${list%, })"
+		fi
+		die "rule new needs --lang <language>: $why"
+	fi
+
+	# Where the rule and its tests go: the first rule and test directories of the repo's sgconfig.yml, or the ones the
+	# sgconfig.yml written here names.
+	tmp_file dirs
+	if [ -f sgconfig.yml ]; then
+		sg_load || die "sgconfig.yml cannot be read as YAML: $sg_error"
+		rule_dir=$(first_dir rules)
+		test_dir=$(first_dir tests)
+		[ -n "$rule_dir" ] || die "sgconfig.yml names no rule directory (ruleDirs), where the rule would go"
+		[ -n "$test_dir" ] ||
+			die "sgconfig.yml names no test directory (testConfigs: - testDir: <dir>), where the rule's tests would go"
+		sg_dirs all >"$dirs"
+	else
+		rule_dir=rules test_dir=rule-tests
+	fi
+	local rule_file=$rule_dir/$name.yml test_file=$test_dir/$name-test.yml
+
+	# A rule of that name: its files, or a rule of that id in any of the directories sgconfig.yml names.
+	for f in "$rule_file" "$test_file"; do
+		if [ -e "$f" ] || [ -L "$f" ]; then
+			echo "assay: a rule named $name already exists: $f" >&2
+			finish 1
+		fi
+	done
+	while IFS= read -r -d '' d; do
+		d=$(root_relative "$d")
+		[ -d "$d" ] || continue
+		hit=$(grep -rlE --include='*.yml' --include='*.yaml' "^id:[[:space:]]*[\"']?${name}[\"']?[[:space:]]*(#.*)?$" -- "$d" |
+			LC_ALL=C sort | head -n 1) || true
+		if [ -n "$hit" ]; then
+			echo "assay: a rule named $name already exists: $hit" >&2
+			finish 1
+		fi
+	done <"$dirs"
+
+	if [ ! -e sgconfig.yml ]; then
+		cat >sgconfig.yml <<'EOF' || die "cannot write sgconfig.yml"
+# ast-grep's project configuration, written by `assay rule new`. Its paths are relative to this file. While it
+# exists, the ast-grep check runs the rules and their tests (assay check ast-grep).
+ruleDirs:
+  - rules
+testConfigs:
+  - testDir: rule-tests
+EOF
+		created+=(sgconfig.yml)
+	fi
+	mkdir -p -- "$rule_dir" "$test_dir" || die "cannot create $rule_dir and $test_dir"
+	{
+		cat <<'EOF'
+# A code rule: a check born from a correction, scaffolded by `assay rule new`; the assay-rule skill has the
+# procedure. Until every placeholder is replaced, `assay check ast-grep` fails, so a half-written rule cannot be
+# committed. Each comment says what the field under it must hold.
+EOF
+		printf 'id: %s\nlanguage: %s\n' "$name" "$lang"
+		cat <<'EOF'
+# Always error: a rule is a check, never a warning.
+severity: error
+# One line, shown at the location: what is wrong and what to do instead. In English, with no quote of the user.
+message: "<fill in: what is wrong and what to do instead>"
+# Why: the root cause, what goes wrong otherwise. Fix: the right change, concretely: the API, command or file to use.
+# Not a fix: the known dodges (renaming, aliasing, casting, moving the call elsewhere, suppressing). The closing line
+# stays as it is.
+note: |
+  Why: <fill in: the root cause>
+  Fix: <fill in: the right change>
+  Not a fix: <fill in: the known dodges>
+  If the rule is wrong here, stop and tell the user; exceptions go in the rule's own file.
+# The shape of the corrected code, and no wider: a pattern, or kind, has, inside, all, any. An exception is a not:
+# clause here, never an inline ast-grep-ignore.
+rule:
+  pattern: "<fill in: the shape of the corrected code>"
+# Files the rule does not apply to, as globs; existing occurrences that could not be verified go here, under a comment
+# that marks them as existing occurrences.
+# ignores:
+#   - "<glob>"
+# The rewrite to the fix, where it is mechanical: `ast-grep scan -U` applies it.
+# fix: "<the fix>"
+# A document in this repo that explains the rule (an ADR), if there is one.
+# url: "<path in this repo>"
+EOF
+	} >"$rule_file" || die "cannot write $rule_file"
+	created+=("$rule_file")
+	{
+		echo "# The tests of $rule_file, run by \`ast-grep test --skip-snapshot-tests\` (assay check ast-grep)."
+		printf 'id: %s\n' "$name"
+		echo "# At least one case the rule must report: the corrected code, cut down to the minimum."
+		echo "invalid:"
+		if [ -n "$from" ]; then
+			cat -- "$case_file"
+		else
+			echo '  - "<fill in: the corrected code, cut down to the minimum>"'
+		fi
+		cat <<'EOF'
+# At least one case the rule must let pass: the fix, and a near miss (the same words in a string or a comment, a
+# similar call that is fine).
+valid:
+  - "<fill in: the fix>"
+  - "<fill in: a near miss>"
+EOF
+	} >"$test_file" || die "cannot write $test_file"
+	created+=("$test_file")
+	# Each path as the caller names it: relative to their directory, or absolute outside the repo.
+	for f in "${created[@]}"; do
+		if [[ $f == /* ]]; then echo "$f"; else realpath -m -s --relative-to="$caller_dir" -- "$root/$f"; fi
+	done
+	finish 0
+}
+
+cmd_rule() {
+	[ $# -ge 1 ] || usage_error "rule needs a subcommand: new"
+	local sub=$1
+	shift
+	case $sub in
+	new) rule_new "$@" ;;
+	-h | --help)
+		usage_text
+		finish 0
+		;;
+	*) usage_error "no rule subcommand named '$sub' (new)" ;;
 	esac
 }
 
@@ -1640,30 +2062,32 @@ not_adopted() {
 	finish 2
 }
 
-# What the delegating assay runs inside the repo's devenv: it records in the directory given first whether the
-# devenv set ASSAY_CONFIG (assay's module does) and whether it handed over, then runs the repo's own assay. Being
-# the delegating assay's own code, it works whatever version of assay the repo pins.
+# What the delegating assay runs inside the repo's devenv, from the repo root: it records in the directory given first
+# whether the devenv set ASSAY_CONFIG (assay's module does) and whether it handed over, then runs the repo's own
+# assay from the caller's directory, given second, so that a path among the arguments means what the caller meant.
+# Being the delegating assay's own code, it works whatever version of assay the repo pins.
 # shellcheck disable=SC2016 # expanded by the bash that runs it
-delegate_sh='tmp=$1
-shift
+delegate_sh='tmp=$1 cwd=$2
+shift 2
 if [ -z "${ASSAY_CONFIG:-}" ]; then
   : >"$tmp/unadopted"
   exit 2
 fi
 : >"$tmp/started"
+cd -- "$cwd" || exit 2
 exec assay "$@"'
 
-# delegate <command> [<arg>...]: outside the repo's devenv, run `assay <command> <arg>...` inside it, from the repo
-# root, so that the version the repo pins decides. devenv runs with the caller's PATH, not assay's own tools.
+# delegate <command> [<arg>...]: outside the repo's devenv, run `assay <command> <arg>...` inside it, entered from the
+# repo root, so that the version the repo pins decides. devenv runs with the caller's PATH, not assay's own tools.
 delegate() {
-	local rc=0
+	local rc=0 cwd=$PWD
 	find_repo
 	[ -f "$root/devenv.nix" ] || not_adopted "$root has no devenv.nix"
 	PATH=$caller_path command -v devenv >/dev/null ||
 		die "cannot find devenv on the PATH, which assay needs to run inside the repo's devenv"
 	local delegate_tmp
 	tmp_file delegate_tmp -d
-	PATH=$caller_path devenv shell -- "$BASH" -c "$delegate_sh" assay "$delegate_tmp" "$@" || rc=$?
+	PATH=$caller_path devenv shell -- "$BASH" -c "$delegate_sh" assay "$delegate_tmp" "$cwd" "$@" || rc=$?
 	if [ -e "$delegate_tmp/unadopted" ]; then not_adopted "the devenv of $root does not import assay's module"; fi
 	# devenv itself failed (exit 1 on an evaluation error), which must not pass for a failing check.
 	[ -e "$delegate_tmp/started" ] || die "devenv shell failed (exit $rc) before assay could run in the repo's devenv"
@@ -2234,6 +2658,11 @@ main() {
 		shift
 		if [ -z "${ASSAY_CONFIG:-}" ]; then delegate findings "$@"; fi
 		cmd_findings "$@"
+		;;
+	rule)
+		shift
+		if [ -z "${ASSAY_CONFIG:-}" ]; then delegate rule "$@"; fi
+		cmd_rule "$@"
 		;;
 	# The machine-level subcommands run outside any devenv and never delegate.
 	guard)

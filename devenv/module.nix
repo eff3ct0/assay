@@ -1,6 +1,10 @@
-# assay's devenv module, given its default checks (a function like defaults.nix). devenv.nix applies it to
-# defaults.nix; nix/checks.nix applies it to a test default.
-{ defaults }:
+# assay's devenv module, given its default checks (a function like defaults.nix) and the directory of its rule packs
+# (packs/, each pack a directory of it). devenv.nix applies it to defaults.nix and packs/; nix/checks.nix to test
+# defaults and to test/packs/.
+{
+  defaults,
+  packs ? ../packs,
+}:
 {
   config,
   lib,
@@ -157,6 +161,34 @@ let
     assay: a loosening needs a reason:
     ${lib.concatMapStringsSep "\n" (l: "  - ${describe l}; set ${l.where}") unreasoned}'';
 
+  # The rule packs assay ships: the directories under packs/.
+  availablePacks = lib.attrNames (
+    lib.filterAttrs (_: type: type == "directory") (builtins.readDir packs)
+  );
+  unknownPacks = builtins.filter (p: !(lib.elem p availablePacks)) cfg.rulePacks;
+  unknownPacksMessage = "assay: assay.rulePacks names no rule pack assay ships: ${lib.concatStringsSep ", " unknownPacks} (it ships ${
+    if availablePacks == [ ] then "none yet" else lib.concatStringsSep ", " availablePacks
+  })";
+
+  # The languages the repo enables among assay's six, by the names ast-grep knows them by: devenv's own, but shell is
+  # bash. JavaScript and TypeScript stay two: an ast-grep rule for one does not read the other's files.
+  languageNames = {
+    javascript = "javascript";
+    typescript = "typescript";
+    python = "python";
+    rust = "rust";
+    scala = "scala";
+    nix = "nix";
+    shell = "bash";
+  };
+  languages = lib.unique (
+    lib.sort lib.lessThan (
+      lib.attrValues (
+        lib.filterAttrs (l: _: lib.attrByPath [ "languages" l "enable" ] false config) languageNames
+      )
+    )
+  );
+
   # Check names become log file names.
   badNames = builtins.filter (n: builtins.match "[A-Za-z0-9][A-Za-z0-9._-]*" n == null) (
     lib.attrNames cfg.checks
@@ -169,8 +201,9 @@ let
   );
   badRulesMessage = "assay: assay.findings.rules takes Sonar's rule keys, like python:S3776: ${lib.concatStringsSep ", " badRules}";
 
-  # What `assay check` reads, through ASSAY_CONFIG. It cannot be produced while a check name is bad or a loosening
-  # has no reason, whatever path of devenv's evaluation asks for it.
+  # What `assay check` reads, through ASSAY_CONFIG. It cannot be produced while a check name is bad, a loosening has
+  # no reason, a rule pack is unknown or a radarlint rule key is not Sonar's, whatever path of devenv's evaluation
+  # asks for it.
   configFile =
     if badNames != [ ] then
       throw badNamesMessage
@@ -178,6 +211,8 @@ let
       throw badRulesMessage
     else if unreasoned != [ ] then
       throw unreasonedMessage
+    else if unknownPacks != [ ] then
+      throw unknownPacksMessage
     else
       pkgs.writeText "assay-config.json" (
         builtins.toJSON {
@@ -223,6 +258,10 @@ let
             }) smellDefaults;
             duplication = { inherit (cfg.findings.smells.duplication) nodes_threshold; };
           };
+          # assay rule new's default language, when the repo enables one.
+          inherit languages;
+          # Each pack's directory, an ast-grep project of its own, which the ast-grep check runs.
+          rulePacks = lib.genAttrs cfg.rulePacks (p: "${packs + "/${p}"}");
         }
       );
 
@@ -386,6 +425,17 @@ in
       default = null;
       description = "Why the repo lowers `assay.coverage.newCode` below assay's default; `assay check` lists it in its header.";
     };
+    rulePacks = mkOption {
+      type = types.listOf types.str;
+      default = [ ];
+      example = [ "rust" ];
+      description = ''
+        Rule packs to turn on: sets of ast-grep rules that assay ships (the directories under packs/ in its source),
+        for rules that hold for every repo of a language. The ast-grep check tests each pack and scans the repo with
+        its rules, beside the repo's own, and runs without sgconfig.yml while a pack is on. A pack adds rules: what
+        they find in the repo is cleaned up in the change that turns it on.
+      '';
+    };
     seed = mkOption {
       type = types.ints.between 1 2147483647;
       default = 42;
@@ -439,6 +489,10 @@ in
       {
         assertion = unreasoned == [ ];
         message = unreasonedMessage;
+      }
+      {
+        assertion = unknownPacks == [ ];
+        message = unknownPacksMessage;
       }
     ];
   };

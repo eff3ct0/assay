@@ -60,6 +60,14 @@ in
     exec = "assay builtin agents-md";
     fast = true;
   };
+  # The repo's ast-grep rules, whose opt-in is sgconfig.yml, and the rule packs it turns on (assay.rulePacks), which
+  # are an opt-in of their own.
+  ast-grep = {
+    exec = "assay builtin ast-grep";
+    fast = true;
+    requires = if config.assay.rulePacks == [ ] then "sgconfig.yml" else null;
+    packages = [ pkgs.ast-grep ];
+  };
   commit-trailers = {
     exec = "assay builtin commit-trailers";
     fast = true;

@@ -1,0 +1,5 @@
+# A rule pack used by assay's own tests: an ast-grep project of its own, as each pack under packs/ is.
+ruleDirs:
+  - rules
+testConfigs:
+  - testDir: rule-tests

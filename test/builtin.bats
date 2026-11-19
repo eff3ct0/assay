@@ -12,17 +12,20 @@ untimed() { sed -E 's/ [0-9]+\.[0-9]{2}s/ Ns/g' <<<"$output"; }
 	builtin_checks plain
 	run --separate-stderr "$assay" check --list
 	[ "$status" -eq 0 ]
-	[ "$output" = "$(printf '%s\n' 'actionlint (fast)' 'agents-md (fast)' 'commit-trailers (fast)' findings \
-		'gitleaks (fast)' 'oxfmt (fast)' 'suppressions (fast)')" ]
+	[ "$output" = "$(printf '%s\n' 'actionlint (fast)' 'agents-md (fast)' 'ast-grep (fast)' 'commit-trailers (fast)' \
+		findings 'gitleaks (fast)' 'oxfmt (fast)' 'suppressions (fast)')" ]
 }
 
 @test "a repo in shape passes every built-in check; without workflows actionlint is skipped" {
 	shaped_repo
 	builtin_checks plain
+	sg_project
+	git add -A
+	git commit --quiet -m "ast-grep rules"
 	run --separate-stderr "$assay" check --base HEAD
 	echo "$output"
 	[ "$status" -eq 0 ]
-	[ "${lines[-1]%% in *}" = "7 checks passed" ]
+	[ "${lines[-1]%% in *}" = "8 checks passed" ]
 	git rm --quiet -r .github
 	git commit --quiet -m "no workflows"
 	run --separate-stderr "$assay" check --base HEAD

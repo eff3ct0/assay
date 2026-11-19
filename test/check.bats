@@ -364,6 +364,11 @@ fails_closed() {
 	bad "a loosening without a reason" "$(jq -c '.loosenings = [{check: "a", kind: "off"}]' <<<"$good")"
 	bad "a loosening of an unknown check" "$(jq -c '.loosenings = [{check: "z", kind: "off", reason: "r"}]' <<<"$good")"
 	bad "a loosening of an unknown kind" "$(jq -c '.loosenings = [{check: "a", kind: "x", reason: "r"}]' <<<"$good")"
+	bad "languages not a list" "$(jq -c '.languages = "rust"' <<<"$good")"
+	bad "a language that is not a name" "$(jq -c '.languages = ["Rust"]' <<<"$good")"
+	bad "rulePacks not an object" "$(jq -c '.rulePacks = ["demo"]' <<<"$good")"
+	bad "a rule pack without a directory" "$(jq -c '.rulePacks = {demo: ""}' <<<"$good")"
+	bad "a rule pack's name with a slash" "$(jq -c '.rulePacks = {"a/b": "/x"}' <<<"$good")"
 }
 
 @test "without jq assay exits 2" {

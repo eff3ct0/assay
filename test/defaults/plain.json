@@ -15,6 +15,13 @@
       "requires": null,
       "coverage": null
     },
+    "ast-grep": {
+      "exec": "assay builtin ast-grep",
+      "fast": true,
+      "enable": true,
+      "requires": "sgconfig.yml",
+      "coverage": null
+    },
     "commit-trailers": {
       "exec": "assay builtin commit-trailers",
       "fast": true,
@@ -55,6 +62,8 @@
   "coverage": {
     "newCode": 80
   },
+  "languages": [],
+  "rulePacks": {},
   "findings": {
     "duplication": {
       "nodes_threshold": 64

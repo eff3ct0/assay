@@ -7,11 +7,12 @@
 
   # What the tests run beside the checks' own tools.
   packages = with pkgs; [
-    # ast-grep: the guard's tests run assay.sh, which finds it on the PATH.
+    # ast-grep and yq: the suite runs assay.sh, which finds them on the PATH.
     ast-grep
     git
     jq
     # The suite runs radarlint, which the module brings only to repos with Python or Scala.
     (callPackage ./nix/radarlint.nix { })
+    yq-go
   ];
 }
