@@ -33,7 +33,7 @@ writeShellApplication {
     }
     assay_presets=${../preset}
     assay_schema=${../schema}
-    assay_collect=${../collect.py}
+    assay_collect=${../collector}/main.py
     assay_python=${python3.withPackages (p: [ p.jsonschema ])}/bin/python3
   ''
   + builtins.readFile ../assay.sh;

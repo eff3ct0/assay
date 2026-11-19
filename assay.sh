@@ -3355,7 +3355,7 @@ main() {
 		export ASSAY_SCHEMA=${assay_schema:-$dir/schema}
 		local -a priority=(nice -n 10)
 		if command -v ionice >/dev/null; then priority+=(ionice -c 3); fi
-		exec "${priority[@]}" "${assay_python:-python3}" "${assay_collect:-$dir/collect.py}" "$@"
+		exec "${priority[@]}" "${assay_python:-python3}" "${assay_collect:-$dir/collector/main.py}" "$@"
 		;;
 	guard)
 		shift

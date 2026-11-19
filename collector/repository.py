@@ -1,19 +1,15 @@
-"""Machine-level collector. SQLite transactions keep each replacement history atomic."""
+"""Rebuild one repository's history and measure its default tip."""
 
-import argparse
-import fcntl
 import json
 import os
 from pathlib import Path
 import re
 import signal
-import sqlite3
 import subprocess
 import sys
 import tarfile
 import tempfile
 import time
-import uuid
 
 import jsonschema
 
@@ -108,74 +104,3 @@ def collect_repo(db, path, repo, schema):
                 db.executemany("INSERT INTO checks VALUES (?,?)", ((repo, n) for n in names))
             if error:
                 print(f"assay: {repo}@{tip}: {error}", file=sys.stderr)
-
-
-def import_hits(db, log, repos):
-    if not log.parent.is_dir():
-        return
-    # Hold the writers' lock only for the rename. The unique batch receipt is
-    # committed with its rows: a crash before unlinking never replays them.
-    prefix = log.name + ".pending-"
-    with Path(str(log) + ".lock").open("a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        if log.exists():
-            log.rename(log.with_name(prefix + uuid.uuid4().hex))
-    for batch in log.parent.iterdir():
-        if not batch.name.startswith(prefix):
-            continue
-        with db:
-            if db.execute("INSERT OR IGNORE INTO batches VALUES (?)", (batch.name,)).rowcount:
-                with batch.open() as lines:
-                    for line in lines:
-                        event = json.loads(line)
-                        if event["v"] != 1:
-                            raise ValueError("unknown hits log version")
-                        if event["repo"] in repos:
-                            db.execute("INSERT INTO hits VALUES (?,?)", (repos[event["repo"]], line.strip()))
-        batch.unlink()
-
-
-def main():
-    parser = argparse.ArgumentParser(prog="assay collect")
-    parser.add_argument("--db", required=True, type=Path)
-    args = parser.parse_args()
-    root = Path(os.environ.get("ASSAY_COLLECT_ROOT", "~/git")).expanduser().resolve()
-    owners = json.loads(os.environ["ASSAY_COLLECT_OWNERS"])
-    if not isinstance(owners, list) or not all(isinstance(n, str) and re.fullmatch(r"[\w.-]+", n)
-                                                and n not in (".", "..") for n in owners):
-        raise ValueError("ASSAY_COLLECT_OWNERS must be a JSON list of owner names")
-    schema = Path(os.environ["ASSAY_SCHEMA"])
-    measure_schema = json.loads((schema / "measure.json").read_bytes())
-    repos = {}
-    errors = False
-    with Path(str(args.db) + ".lock").open("a") as lock, sqlite3.connect(args.db) as db:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        db.executescript((schema / "collect.sql").read_text())
-        if os.environ.get("ASSAY_RULES"):
-            rules = json.loads(Path(os.environ["ASSAY_RULES"]).read_bytes())["rules"]
-            with db:
-                db.execute("DELETE FROM rules")
-                db.executemany("INSERT INTO rules VALUES (?)", ((r["name"],) for r in rules))
-        for owner in sorted(set(owners)):
-            folder = root / owner
-            if folder.is_symlink() or not folder.is_dir():
-                continue
-            for path in sorted(folder.iterdir()):
-                if path.name.endswith(".wt") or path.is_symlink() or not (path / ".git").is_dir():
-                    continue
-                repo = repos[str(path)] = owner + "/" + path.name
-                try:
-                    collect_repo(db, path, repo, measure_schema)
-                except (OSError, ValueError) as err:
-                    print(f"assay: {repo}: {err}", file=sys.stderr)
-                    errors = True
-        if os.environ.get("ASSAY_HITS_LOG"):
-            import_hits(db, Path(os.environ["ASSAY_HITS_LOG"]), repos)
-    return int(errors)
-
-
-if __name__ == "__main__":
-    try:
-        sys.exit(main())
-    except (OSError, KeyError, ValueError, sqlite3.Error) as exc:
-        sys.exit(f"assay: {exc}")
