@@ -56,13 +56,11 @@ and the acceptance criteria; it links nixos-config#51, #50, #56 and #58, whose r
 
 ## Remaining steps
 
-1. The `ast-grep` check: assay.sh, defaults.nix, test/defaults/*.json, test/ast-grep.bats, the lists in
-   test/builtin.bats and test/devenv/module.bats.
-2. `languages` and `rulePacks` in the module and the configuration; nix/checks.nix.
-3. `assay rule new`, test/rule-new.bats; delegation from a subdirectory in test/delegate.bats.
-4. Rule packs: packs/README.md, test/packs/demo, test/packs.bats.
-5. The `assay-rule` skill, its installation in nix/home-manager.nix, nix/checks.nix, test/skills.bats.
-6. test/devenv: a pack and `assay rule new` in a real devenv.
-7. README.md, AGENTS.md, GLOSSARY.md.
-8. The full suite (`nix flake check`, `bats test/devenv`, `devenv test`), the code review, the critic, the pull
-   request. Remove this file once the last critic passes.
+The branch was rebased onto `ab03c18` (#21: Nix and bash default checks, kcov, shfmt over the suite), its base
+commit now. Done: the `ast-grep` check, `languages` and `rulePacks`, `assay rule new` and its delegation, rule packs
+(`packs/README.md`, `test/packs/demo`, `test/packs.bats`), the `assay-rule` skill and its installation, the real-devenv
+tests (`test/devenv/rules.bats`), README.md, AGENTS.md and GLOSSARY.md.
+
+1. The full suite: `nix flake check`, `nix develop -c bats test/devenv`, `devenv test`.
+2. The code review (the `code-review` skill), then the critic, then the pull request ("Closes
+   https://github.com/eff3ct0/assay/issues/13"), not merged. Remove this file once the last critic passes.
