@@ -13,6 +13,20 @@ archive_fixture() {
 	[ ! -e .git ]
 }
 
+# A synthetic executable runs under the same Bash as Bats, including in a Nix sandbox without /usr/bin/env.
+measure_tool() {
+	local file=$DEVENV_STUB_PROFILE/$1
+	{
+		printf '#!%s\n' "$BASH"
+		cat
+	} >"$file"
+	chmod +x "$file"
+}
+
+measure_run() {
+	env PATH="$DEVENV_STUB_PROFILE:$PATH" "$assay" measure "$@"
+}
+
 @test "measure delegates in a git archive without a base or a hit" {
 	local_repo
 	devenv_files yes
@@ -52,9 +66,8 @@ EOF
 		check "$name" 'touch excluded-check-ran; exit 1'
 	done
 	check disabled 'touch excluded-check-ran; exit 1' --off
-	printf '#!/usr/bin/env bash\ntouch diff-cover-ran; exit 1\n' >"$DEVENV_STUB_PROFILE/diff-cover"
-	chmod +x "$DEVENV_STUB_PROFILE/diff-cover"
-	run --separate-stderr env PATH="$DEVENV_STUB_PROFILE:$PATH" "$assay" measure
+	measure_tool diff-cover <<<'touch diff-cover-ran; exit 1'
+	run --separate-stderr measure_run
 	echo "$output"
 	echo "$stderr" >&2
 	[ "$status" -eq 0 ]
@@ -68,8 +81,7 @@ EOF
 @test "measure reports raw analyzer counts and distinguishes unavailable from an empty result" {
 	local_repo
 	archive_fixture
-	cat >"$DEVENV_STUB_PROFILE/qlty" <<'EOF'
-#!/usr/bin/env bash
+	measure_tool qlty <<'EOF'
 set -eu
 [[ $1 == --no-upgrade-check && $3 == --all && $4 == --sarif ]]
 case $2 in
@@ -89,19 +101,18 @@ smells)
 *) exit 1 ;;
 esac
 EOF
-	cat >"$DEVENV_STUB_PROFILE/jscpd" <<'EOF'
-#!/usr/bin/env bash
+	measure_tool jscpd <<'EOF'
 set -eu
 while [[ $1 != --output ]]; do shift; done
 printf '%s\n' '{"statistics":{"total":{"duplicatedLines":4,"lines":21,"percentage":19.05}}}' >"$2/jscpd-report.json"
 EOF
-	cat >"$DEVENV_STUB_PROFILE/scc" <<'EOF'
-#!/usr/bin/env bash
+	measure_tool scc <<'EOF'
 [[ $1 == --format && $2 == json ]] || exit 1
 printf '%s\n' '[{"Name":"Shell","Lines":37,"Code":31},{"Name":"Nix","Lines":14,"Code":10}]'
 EOF
-	chmod +x "$DEVENV_STUB_PROFILE/"{qlty,jscpd,scc}
-	run --separate-stderr env PATH="$DEVENV_STUB_PROFILE:$PATH" "$assay" measure
+	run --separate-stderr measure_run
+	echo "$output"
+	echo "$stderr" >&2
 	[ "$status" -eq 0 ]
 	jq -es 'length == 1 and (.[0] |
 		.lint == [
@@ -112,13 +123,67 @@ EOF
 		.duplication == {duplicated:4,total:21} and .loc == [{language:"Nix",lines:10},{language:"Shell",lines:31}])' <<<"$output"
 	jsonschema -i /dev/stdin "$BATS_TEST_DIRNAME/../schema/measure.json" <<<"$output"
 
-	printf '#!/usr/bin/env bash\necho '\''{"runs":[]}'\''\n' >"$DEVENV_STUB_PROFILE/qlty"
-	printf '#!/usr/bin/env bash\nexit 1\n' >"$DEVENV_STUB_PROFILE/jscpd"
-	printf '#!/usr/bin/env bash\necho not-json\n' >"$DEVENV_STUB_PROFILE/scc"
-	run --separate-stderr env PATH="$DEVENV_STUB_PROFILE:$PATH" "$assay" measure
+	measure_tool qlty <<<'echo '\''{"runs":[]}'\'''
+	measure_tool jscpd <<<'exit 1'
+	measure_tool scc <<<'echo not-json'
+	run --separate-stderr measure_run
 	[ "$status" -eq 0 ]
 	[ ! -e .qlty/qlty.toml ]
 	jq -e '.lint == [] and .smells == [] and .loc == null and .duplication == null' <<<"$output"
+}
+
+@test "measure in a checkout keeps its metadata and reports zero coverage alongside unavailable coverage" {
+	local_repo
+	mkdir report-is-directory
+	check zero 'printf "%s\n" SF:a.sh LF:0 LH:0 end_of_record >zero.info' --coverage zero.info
+	check invalid 'printf "%s\n" SF:a.sh LF:1 LH:2 end_of_record >invalid.info' --coverage invalid.info
+	check blocked 'printf "%s\n" "check still ran" >ran' --coverage report-is-directory
+	before=$(git rev-parse HEAD)
+	run --separate-stderr measure_run
+	[ "$status" -eq 0 ]
+	jq -e '.failed == [] and .coverage == {zero:{covered:0,total:0}, invalid:null, blocked:null}' <<<"$output"
+	holds ran 'check still ran'
+	[ -d report-is-directory ]
+	[ -d .git ]
+	prints "$before" git rev-parse HEAD
+}
+
+@test "measure refuses to overwrite an archive's qlty settings or write through a symlink" {
+	local_repo
+	mkdir .qlty "$T/other"
+	printf 'kept settings\n' >.qlty/qlty.toml
+	archive_fixture
+	measure_tool qlty <<<'touch qlty-ran; exit 1'
+	run --separate-stderr measure_run
+	[ "$status" -eq 0 ]
+	jq -e '.lint == null and .smells == null and .failed == []' <<<"$output"
+	[[ $stderr == *"archive already contains qlty configuration"* ]]
+	holds .qlty/qlty.toml 'kept settings'
+	[ ! -e qlty-ran ] && [ ! -e .git ]
+
+	mv .qlty "$T/original-qlty"
+	ln -s "$T/other" .qlty
+	run --separate-stderr measure_run
+	[ "$status" -eq 0 ]
+	jq -e '.lint == null and .smells == null and .failed == []' <<<"$output"
+	[[ $stderr == *"cannot prepare qlty configuration through a symlink"* ]]
+	[ -L .qlty ] && [ ! -e "$T/other/qlty.toml" ] && [ ! -e qlty-ran ] && [ ! -e .git ]
+}
+
+@test "measure reports smells independently when the lint invocation is unsuccessful" {
+	local_repo
+	archive_fixture
+	measure_tool qlty <<'EOF'
+case $2 in
+	check) echo '{"runs":[{"invocations":[{"executionSuccessful":false}],"results":[]}]}' ;;
+	smells) echo '{"runs":[{"tool":{"driver":{"name":"qlty"}},"results":[{"ruleId":"nested-control-flow"}]}]}' ;;
+	*) exit 1 ;;
+esac
+EOF
+	run --separate-stderr measure_run
+	[ "$status" -eq 0 ]
+	jq -e '.lint == null and .smells == [{kind:"nested-control-flow",count:1}]' <<<"$output"
+	[[ $stderr == *"could not measure lint"* ]]
 }
 
 @test "measure exits 2 without a devenv importing assay" {
