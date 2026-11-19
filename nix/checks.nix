@@ -182,10 +182,14 @@ let
 
   # The module with each language's default checks alone (devenv/languages/), for the languages a repo enables.
   withLanguages = evalModule (
-    args: import ../devenv/languages/nix.nix args // import ../devenv/languages/bash.nix args
+    args:
+    import ../devenv/languages/nix.nix args
+    // import ../devenv/languages/bash.nix args
+    // import ../devenv/languages/python.nix args
   );
   nixRepo = withLanguages { languages.nix.enable = true; };
   shellRepo = withLanguages { languages.shell.enable = true; };
+  pythonRepo = withLanguages { languages.python.enable = true; };
   # Each check's name with what `assay check --list` shows of it: fast or not, and what it requires and covers.
   listed =
     config:
@@ -201,6 +205,12 @@ let
     fast = true;
     enable = true;
     requires = null;
+    coverage = null;
+  };
+  pythonCheck = fast: {
+    inherit fast;
+    enable = true;
+    requires = "pyproject.toml";
     coverage = null;
   };
 
@@ -276,6 +286,9 @@ let
         lib.attrNames builtinPlain.assay.checks
         ++ lib.attrNames nixRepo.assay.checks
         ++ lib.attrNames shellRepo.assay.checks
+      )
+      && lib.all (n: builtins.elem n (lib.attrNames builtinPython.assay.checks)) (
+        lib.attrNames pythonRepo.assay.checks
       );
     "Nix's defaults: nixfmt, statix, deadnix and nixf-tidy fast, nix flake check when flake.nix exists" =
       listed nixRepo == {
@@ -301,6 +314,52 @@ let
           coverage = "$ASSAY_DIR/kcov/bats/cobertura.xml";
         };
       };
+    "Python's defaults: ruff check, ruff format, vulture and deptry fast, import-linter fast and off, pyright, pytest with its coverage report and osv-scanner full, each requiring pyproject.toml" =
+      listed pythonRepo == {
+        ruff-check = pythonCheck true;
+        ruff-format = pythonCheck true;
+        vulture = pythonCheck true;
+        deptry = pythonCheck true;
+        import-linter = pythonCheck true // {
+          enable = false;
+        };
+        pyright = pythonCheck false;
+        pytest = pythonCheck false // {
+          coverage = "$ASSAY_DIR/pytest/coverage.xml";
+        };
+        osv-scanner = pythonCheck false;
+      };
+    "Python's commands" =
+      lib.mapAttrs (_: c: c.exec) (
+        removeAttrs pythonRepo.assay.checks [
+          "import-linter"
+        ]
+      ) == {
+        ruff-check = "ruff check --no-fix --extend-select RUF100";
+        ruff-format = "ruff format --check";
+        vulture = "vulture . --exclude .venv,.devenv";
+        deptry = "assay-deptry";
+        pyright = "pyright --warnings";
+        pytest = ''assay-pytest "$ASSAY_DIR/pytest"'';
+        osv-scanner = "assay builtin osv-scanner uv.lock";
+      };
+    "turning import-linter on is no loosening" =
+      (builtins.tryEval
+        (withLanguages {
+          languages.python.enable = true;
+          assay.checks.import-linter.enable = true;
+        }).env.ASSAY_CONFIG
+      ).success;
+    "Python's tools join the devenv: ruff, pyright, vulture, osv-scanner, the helpers and diff-cover" =
+      lib.all (t: builtins.elem t (names pythonRepo))
+        [
+          "assay-check-helpers"
+          "ruff"
+          "pyright"
+          "vulture"
+          "osv-scanner"
+          "diff-cover"
+        ];
     "Nix's tools join the devenv, nixfmt and nixf among them" =
       lib.all (t: builtins.elem t (names nixRepo))
         [

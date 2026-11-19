@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# A stand-in for osv-scanner in the CLI's tests: `osv-scanner scan source --format json -L <lockfile>...` appends a line
+# to OSV_STUB_CALLS when it is set (each lockfile's name, the directory left out), then reads each lockfile as lines
+# "<name> <version> [<advisory>...]", an advisory being its ids joined by "+" (an advisory and its aliases), and prints
+# what osv-scanner 2 prints in JSON for the packages that have advisories: in the PyPI ecosystem, each id's summary
+# "<id>'s summary" (none for an id that starts with PYSEC), fixed in "<version>.1". Exit 1 when it found an advisory,
+# 0 when not, 128 when no lockfile has a package; 127 for a lockfile that does not exist, or with OSV_STUB_FAIL set.
+set -euo pipefail
+
+if [ "${1:-}" != scan ] || [ "${2:-}" != source ] || [ "${3:-}" != --format ] || [ "${4:-}" != json ]; then
+	echo "osv-scanner stub: unexpected arguments: $*" >&2
+	exit 64
+fi
+shift 4
+lockfiles=()
+while [ $# -gt 0 ]; do
+	if [ "$1" != -L ] || [ $# -lt 2 ]; then
+		echo "osv-scanner stub: unexpected arguments: $*" >&2
+		exit 64
+	fi
+	lockfiles+=("$2")
+	shift 2
+done
+if [ -n "${OSV_STUB_CALLS:-}" ]; then
+	names=()
+	for f in "${lockfiles[@]}"; do names+=("${f##*/}"); done
+	echo "${names[*]}" >>"$OSV_STUB_CALLS"
+fi
+if [ -n "${OSV_STUB_FAIL:-}" ]; then
+	echo "failed to query the OSV API: the network is unreachable" >&2
+	exit 127
+fi
+for f in "${lockfiles[@]}"; do
+	if [ ! -f "$f" ]; then
+		echo "failed to resolve path: stat $f: no such file or directory" >&2
+		exit 127
+	fi
+done
+
+# One JSON object per lockfile line: the lockfile's path, then the line's words.
+# shellcheck disable=SC2094 # each lockfile is only read; its path is printed, not written to
+lines() {
+	local f
+	local -a words
+	for f in "${lockfiles[@]}"; do
+		while read -r -a words; do
+			if [ ${#words[@]} -ge 2 ]; then jq -nc --arg path "$f" '{path: $path, words: $ARGS.positional}' --args "${words[@]}"; fi
+		done <"$f"
+	done
+}
+found=$(lines)
+# shellcheck disable=SC2016 # jq's variables, not the shell's
+jq -s --args '
+  {results: [$ARGS.positional[] as $path
+    | {source: {path: $path, type: "lockfile"},
+       packages: [.[] | select(.path == $path and (.words | length) > 2) | .words as [$name, $version]
+         | {package: {name: $name, version: $version, ecosystem: "PyPI"},
+            vulnerabilities: [.words[2:][] | split("+")[] as $id
+              | {id: $id, aliases: [], summary: (if $id | startswith("PYSEC") then null else "\($id)\u0027s summary" end),
+                 affected: [{package: {ecosystem: "PyPI", name: $name},
+                   ranges: [{type: "ECOSYSTEM", events: [{introduced: "0"}, {fixed: "\($version).1"}]}]}]}],
+            groups: [.words[2:][] | split("+") | {ids: ., aliases: .}]}]}
+    | select(.packages != [])]}
+' "${lockfiles[@]}" <<<"$found"
+if [ -z "$found" ]; then
+	echo "No package sources found, --help for usage information." >&2
+	exit 128
+fi
+if jq -e 'select((.words | length) > 2)' <<<"$found" >/dev/null; then exit 1; fi
+exit 0

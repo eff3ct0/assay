@@ -16,6 +16,33 @@ untimed() { sed -E 's/ [0-9]+\.[0-9]{2}s/ Ns/g' <<<"$output"; }
 		findings 'gitleaks (fast)' 'oxfmt (fast)' 'preset (fast)' 'suppressions (fast)')" ]
 }
 
+@test "with Python on, --list adds its checks: four fast, import-linter fast and off, three full" {
+	local_repo
+	builtin_checks python
+	run --separate-stderr "$assay" check --list
+	[ "$status" -eq 0 ]
+	[ "$output" = "$(printf '%s\n' 'actionlint (fast)' 'agents-md (fast)' 'ast-grep (fast)' 'commit-trailers (fast)' \
+		'deptry (fast)' findings 'gitleaks (fast)' 'import-linter (fast, off)' osv-scanner 'oxfmt (fast)' \
+		'preset (fast)' pyright pytest 'ruff-check (fast)' 'ruff-format (fast)' 'suppressions (fast)' 'vulture (fast)')" ]
+}
+
+@test "without pyproject.toml, Python's checks are skipped and listed" {
+	local_repo
+	builtin_checks python
+	run --separate-stderr "$assay" check --base HEAD deptry osv-scanner pyright pytest ruff-check ruff-format vulture
+	echo "$output"
+	[ "$status" -eq 0 ]
+	local n
+	for n in deptry osv-scanner pyright pytest ruff-check ruff-format vulture; do
+		[[ $output == *$'\n'"  skipped: $n (no pyproject.toml)"$'\n'* ]]
+		[[ $output == *$'\n'"skip $n (no pyproject.toml)"* ]]
+	done
+	[ "${lines[-1]%% in *}" = "7 checks passed (7 skipped)" ]
+	run --separate-stderr "$assay" check --base HEAD import-linter
+	[ "$status" -eq 2 ]
+	[ "$stderr" = "assay: check 'import-linter' is off in this repo" ]
+}
+
 @test "a repo in shape passes every built-in check; without workflows actionlint is skipped" {
 	shaped_repo
 	builtin_checks plain

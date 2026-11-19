@@ -105,3 +105,4 @@ in
 }
 // import ./languages/nix.nix args
 // import ./languages/bash.nix args
+// import ./languages/python.nix args

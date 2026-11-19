@@ -26,13 +26,14 @@ JSON
 usage_text() {
 	cat <<'EOF'
 usage: assay check [--fast] [--base <rev>] [<check>...]    run the repo's checks
-       assay check --list                                  list them, fast ones marked
+       assay check --list                                  list them, fast and off ones marked
        assay preset [<language>...]                        write the languages' presets into the repo, or merge
                                                            newer versions in
        assay builtin agents-md [<commit>]                  one of the built-in checks that are assay's own code
        assay builtin ast-grep
        assay builtin commit-trailers [--base <rev>]
        assay builtin gitleaks
+       assay builtin osv-scanner [--base <rev>] <lockfile>...
        assay builtin preset
        assay builtin suppressions [--base <rev>]
        assay builtin findings [--base <rev>]
@@ -267,11 +268,15 @@ load_config() {
 	[ "$config_loaded" = 1 ] || die "invalid configuration $cfg: incomplete"
 }
 
+# Every check, in name order, the fast ones and the off ones marked: "<name>", "<name> (fast)", "<name> (off)" or
+# "<name> (fast, off)".
 list_checks() {
-	local n
+	local n marks
 	for n in "${names[@]}"; do
-		if [ "${c_enable[$n]}" != 1 ]; then continue; fi
-		if [ "${c_fast[$n]}" = 1 ]; then echo "$n (fast)"; else echo "$n"; fi
+		marks=
+		if [ "${c_fast[$n]}" = 1 ]; then marks=fast; fi
+		if [ "${c_enable[$n]}" != 1 ]; then marks+="${marks:+, }off"; fi
+		echo "$n${marks:+ ($marks)}"
 	done
 }
 
@@ -1053,6 +1058,98 @@ builtin_suppressions() {
 	0 | 1) finish "$rc" ;;
 	*) die "cannot read the files that hold new code (awk exit $rc)" ;;
 	esac
+}
+
+# osv-scanner: the advisories on the dependency versions the change adds or changes, in the lockfiles given (paths
+# from the repo root), which the languages' osv-scanner checks run. The advisory database changes without the code,
+# so the check holds on the change: one osv-scanner run scans each lockfile as the working tree has it and its copy at
+# the base, which keeps the file's name (osv-scanner picks its parser by name), and an advisory (with its aliases) is
+# new when the base's copy has none of its ids on the same package version (ecosystem, name, version). A lockfile the
+# working tree lacks has nothing to check; one the base lacks makes all of its advisories new. Advisories on the
+# versions the change leaves alone are never shown: they reach the user through GitHub's Dependabot.
+IFS= read -r -d '' osv_jq <<'JQ' || true
+def key: "\(.package.ecosystem)\u0000\(.package.name)\u0000\(.package.version)";
+def lower: ascii_downcase;
+(reduce (.results // [])[] as $r ({}; .[$r.source.path] += ($r.packages // []))) as $by
+| [$pairs[] as $p
+  | ([($by[$p.base] // [])[] | key as $k | (.vulnerabilities // [])[] | "\($k)\u0000\(.id)"] | INDEX(.)) as $seen
+  | ($by[$p.current] // [])[] as $pkg
+  | ($pkg | key) as $k
+  | ($pkg.groups // [])[] as $g
+  | select(all($g.ids[]; $seen["\($k)\u0000\(.)"] == null))
+  | [($pkg.vulnerabilities // [])[] | select(.id as $id | $g.ids | index($id))] as $vulns
+  | ([$vulns[] | .summary // empty | select(. != "")] | first // "no summary") as $summary
+  | ([$vulns[] | (.affected // [])[] | select((.package.name // "" | lower) == ($pkg.package.name | lower))
+      | (.ranges // [])[] | (.events // [])[] | .fixed // empty] | unique) as $fixed
+  | "\($p.lockfile): \($pkg.package.name) \($pkg.package.version) (\($pkg.package.ecosystem)): \($g.ids | join(", ")):"
+    + " \($summary)\(if $fixed == [] then "" else "; fixed in \($fixed | join(", "))" end)"]
+| unique[]
+JQ
+builtin_osv_scanner() {
+	local copies json log pairs lockfile current copy kind i=0 rc=0 found count
+	local -a lockfiles=() args=()
+	while [ $# -gt 0 ]; do
+		case $1 in
+		--base)
+			[ $# -ge 2 ] || usage_error "--base needs a revision"
+			opt_base=$2 opt_base_set=1
+			shift
+			;;
+		--base=*) opt_base=${1#--base=} opt_base_set=1 ;;
+		-*) usage_error "osv-scanner: unknown option '$1'" ;;
+		/*) usage_error "osv-scanner: a lockfile is a path from the repo root, not '$1'" ;;
+		*) lockfiles+=("${1#./}") ;;
+		esac
+		shift
+	done
+	if [ "$opt_base_set" = 1 ] && [ -z "$opt_base" ]; then usage_error "--base needs a revision"; fi
+	[ ${#lockfiles[@]} -gt 0 ] || usage_error "osv-scanner needs the lockfiles to scan"
+	find_repo
+	resolve_base
+	if ! command -v osv-scanner >/dev/null; then
+		echo "assay: cannot find osv-scanner on the PATH" >&2
+		finish 127
+	fi
+	tmp_file copies -d
+	copies=$(realpath -- "$copies") || die "cannot find the temporary directory"
+	tmp_file json
+	tmp_file log
+	tmp_file pairs
+	for lockfile in "${lockfiles[@]}"; do
+		current=$root/$lockfile
+		[ -f "$current" ] || continue
+		args+=(-L "$current")
+		copy=
+		kind=$(git cat-file -t "$base_sha:$lockfile" 2>/dev/null) || kind=
+		if [ "$kind" = blob ]; then
+			i=$((i + 1))
+			mkdir -- "$copies/$i" || die "cannot create $copies/$i"
+			copy=$copies/$i/${lockfile##*/}
+			git cat-file blob "$base_sha:$lockfile" >"$copy" || die "cannot read $lockfile at the base"
+			args+=(-L "$copy")
+		fi
+		jq -nc --arg lockfile "$lockfile" --arg current "$current" --arg base "$copy" \
+			'{lockfile: $lockfile, current: $current, base: $base}' >>"$pairs" || die "cannot list the lockfiles"
+	done
+	[ ${#args[@]} -gt 0 ] || finish 0
+	osv-scanner scan source --format json "${args[@]}" >"$json" 2>"$log" </dev/null || rc=$?
+	case $rc in
+	0 | 1) ;;
+	# No package in any lockfile.
+	128) finish 0 ;;
+	*)
+		cat -- "$log" >&2
+		die "osv-scanner failed (exit $rc)"
+		;;
+	esac
+	found=$(jq -r --slurpfile pairs "$pairs" "$osv_jq" "$json") || die "cannot read osv-scanner's report"
+	[ -n "$found" ] || finish 0
+	printf '%s\n' "$found"
+	count=$(wc -l <<<"$found")
+	if [ "$count" -eq 1 ]; then echo -n "1 advisory"; else echo -n "$count advisories"; fi
+	echo " on dependency versions this change adds or changes: move each package to a version that fixes it, or" \
+		"leave it out of the change; an advisory that does not apply goes in osv-scanner.toml, with its reason."
+	finish 1
 }
 
 # Presets: the configuration files a language's default checks need in a repo. assay holds every version of each
@@ -2116,6 +2213,7 @@ cmd_builtin() {
 	ast-grep) builtin_ast_grep "$@" ;;
 	commit-trailers) builtin_commit_trailers "$@" ;;
 	gitleaks) builtin_gitleaks "$@" ;;
+	osv-scanner) builtin_osv_scanner "$@" ;;
 	preset) builtin_preset "$@" ;;
 	suppressions) builtin_suppressions "$@" ;;
 	findings) builtin_findings "$@" ;;

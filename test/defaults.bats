@@ -67,7 +67,7 @@ listed() {
 hits() {
 	awk -v root="$PWD/" '
     /<source>/ { src = $0; sub(/.*<source>/, "", src); sub(/<\/source>.*/, "", src) }
-    /<class / { f = $0; sub(/.*filename="/, "", f); sub(/".*/, "", f); if (f !~ /^\//) f = src f; sub("^" root, "", f) }
+    /<class / { f = $0; sub(/.*filename="/, "", f); sub(/".*/, "", f); if (f !~ /^\//) f = src (src ~ /\/$/ ? "" : "/") f; sub("^" root, "", f) }
     /<line / { n = $0; sub(/.*number="/, "", n); sub(/".*/, "", n); h = $0; sub(/.*hits="/, "", h); sub(/".*/, "", h); print f ":" n ":" h }
   ' "$1" >"$T/hits" || return
 	LC_ALL=C sort -t: -k1,1 -k2,2n "$T/hits"
@@ -165,4 +165,111 @@ BATS
 	[ "${lines[1]}" = "ok 1 passes" ]
 	run hits .git/assay/kcov/bats/cobertura.xml
 	[ -z "$output" ]
+}
+
+# python_project: a src/ layout as `uv init --lib` writes it, with Python's preset's .coveragerc and conftest.py, a module
+# a test imports, one no test imports, and a file in .venv/ that is never measured.
+python_project() {
+	mkdir -p src/demo tests .venv/lib
+	cp "$BATS_TEST_DIRNAME/../preset/python/1/.coveragerc" "$BATS_TEST_DIRNAME/../preset/python/1/conftest.py" .
+	printf '%s\n' '[project]' 'name = "demo"' 'version = "0.1.0"' >pyproject.toml
+	printf '%s\n' 'def double(x: int) -> int:' '    return 2 * x' >src/demo/__init__.py
+	printf '%s\n' 'def lonely(x: int) -> int:' '    return x' >src/demo/lonely.py
+	printf '%s\n' 'import sys' '' "sys.path.insert(0, 'src')" >tests/__init__.py
+	printf '%s\n' 'from demo import double' '' '' 'def test_double() -> None:' '    assert double(2) == 4' \
+		>tests/test_demo.py
+	printf '%s\n' 'def venv_only() -> None:' '    pass' >.venv/lib/site.py
+	printf '%s\n' .venv/ >.gitignore
+	git add -A
+}
+
+@test "assay-pytest runs pytest under coverage.py; its report lists a module no test imports at 0%, not .venv/" {
+	local_repo
+	python_project
+	run --separate-stderr "$bin/assay-pytest" .git/assay/pytest
+	echo "$output"
+	[ "$status" -eq 0 ]
+	[ "${lines[0]}" = '$ coverage run --source=. -m pytest --hypothesis-profile=ci' ]
+	[[ $output == *"1 passed"* ]]
+	run hits .git/assay/pytest/coverage.xml
+	echo "$output"
+	[[ $output == *$'src/demo/__init__.py:1:1\nsrc/demo/__init__.py:2:1\n'* ]]
+	[[ $output == *$'src/demo/lonely.py:1:0\nsrc/demo/lonely.py:2:0\n'* ]]
+	[[ $output != *.venv* ]]
+	# The data stays out of the tree.
+	[ -f .git/assay/pytest/.coverage ]
+	[ ! -e .coverage ]
+}
+
+@test "assay-pytest: no test is a pass, every source uncovered; a failing test fails; no Python file, an empty report" {
+	local_repo
+	python_project
+	rm -r tests
+	run --separate-stderr "$bin/assay-pytest" .git/assay/pytest
+	echo "$output"
+	[ "$status" -eq 0 ]
+	[[ $output == *"assay-pytest: pytest collected no test (exit 5), which passes"* ]]
+	run hits .git/assay/pytest/coverage.xml
+	[[ $output == *$'src/demo/__init__.py:2:0\n'* && $output == *$'src/demo/lonely.py:2:0'* ]]
+	mkdir tests
+	printf '%s\n' 'def test_fails() -> None:' '    assert 1 == 2' >tests/test_fails.py
+	run --separate-stderr "$bin/assay-pytest" .git/assay/pytest
+	[ "$status" -eq 1 ]
+	[ ! -e .git/assay/pytest/coverage.xml ]
+	rm -r src tests conftest.py
+	run --separate-stderr "$bin/assay-pytest" .git/assay/pytest
+	echo "$output"
+	[ "$status" -eq 0 ]
+	[ "${lines[-1]}" = "assay-pytest: no Python file to cover; an empty report stands for coverage.py's" ]
+	run hits .git/assay/pytest/coverage.xml
+	[ -z "$output" ]
+	local here
+	here=$(pwd -P)
+	grep -q "<source>$here</source>" .git/assay/pytest/coverage.xml
+}
+
+@test "assay-pytest runs Hypothesis derandomized and without its example database: two runs try the same inputs" {
+	local_repo
+	python_project
+	printf '%s\n' 'import os' '' 'from hypothesis import given, strategies as st' '' '' '@given(st.integers())' \
+		'def test_seen(n: int) -> None:' '    with open(os.environ["SEEN"], "a") as f:' '        f.write(f"{n}\n")' \
+		>tests/test_seen.py
+	SEEN=$T/first "$bin/assay-pytest" .git/assay/pytest >/dev/null
+	SEEN=$T/second "$bin/assay-pytest" .git/assay/pytest >/dev/null
+	local seen
+	seen=$(wc -l <"$T/first")
+	[ "$seen" -gt 10 ]
+	cmp "$T/first" "$T/second"
+	# Hypothesis caches the source's constants under .hypothesis/ whatever the profile, but keeps no examples.
+	[ ! -e .hypothesis/examples ]
+}
+
+# fake_deptry: a deptry that prints its arguments, one per line, and exits with DEPTRY_EXIT (0 unless set), first on the
+# PATH.
+fake_deptry() {
+	local bash_path
+	bash_path=$(command -v bash)
+	mkdir -p "$T/bin"
+	printf '#!%s\nprintf "%%s\\n" "$@"\nexit "${DEPTRY_EXIT:-0}"\n' "$bash_path" >"$T/bin/deptry"
+	chmod +x "$T/bin/deptry"
+	PATH=$T/bin:$PATH
+}
+
+@test "assay-deptry runs deptry from the root with conftest.py left out, on top of the repo's own extend_exclude" {
+	local_repo
+	fake_deptry
+	mkdir sub
+	cd sub
+	run --separate-stderr "$bin/assay-deptry"
+	echo "$output"
+	[ "$status" -eq 0 ]
+	output_is "\$ deptry . --extend-exclude '(.*/)?conftest\\.py'" . --extend-exclude '(.*/)?conftest\.py'
+	cd "$T/work"
+	printf '%s\n' '[project]' 'name = "demo"' '' '[tool.deptry]' 'extend_exclude = ["scripts", "docs/.*"]' >pyproject.toml
+	run --separate-stderr env DEPTRY_EXIT=1 "$bin/assay-deptry"
+	[ "$status" -eq 1 ]
+	[ "${lines[-1]}" = 'scripts,docs/.*,(.*/)?conftest\.py' ]
+	printf '%s\n' '[project]' 'name = "demo"' >pyproject.toml
+	run --separate-stderr "$bin/assay-deptry"
+	[ "${lines[-1]}" = '(.*/)?conftest\.py' ]
 }

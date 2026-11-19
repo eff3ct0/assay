@@ -24,6 +24,12 @@ lib.optional (lib.meta.availableOn stdenv.hostPlatform kcov) (callPackage ./kcov
   gawk
   ast-grep
   yq-go
+  # Python's test check's helper runs pytest under coverage.py, with Hypothesis.
+  (python3.withPackages (ps: [
+    ps.coverage
+    ps.hypothesis
+    ps.pytest
+  ]))
   # The built-in checks' tools, which assay's devenv module adds to every repo's devenv.
   actionlint
   gitleaks

@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# assay-pytest <dir>: Python's test check. Runs pytest under coverage.py from the repo root, with Hypothesis's ci
+# profile (derandomized, no database, no deadline), over every Python file under the root (--source=.), so that the
+# files no test loads are reported at 0% (a src/ layout's too, through the preset's .coveragerc); then writes
+# coverage.py's Cobertura report to <dir>/coverage.xml. Its data goes to <dir>/.coverage (COVERAGE_FILE), out of the
+# tree; <dir> is emptied first. pytest's exit 5, no test collected, is a pass. With no Python file at all, coverage.py
+# has nothing to report and writes no report ("No data to report."): an empty one stands for it, so that the coverage
+# of new code finds no line to cover rather than a missing report.
+set -euo pipefail
+
+if [ $# -ne 1 ]; then
+	echo "usage: assay-pytest <dir>" >&2
+	exit 2
+fi
+out=$(realpath -m "$1")
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+rm -rf "$out"
+mkdir -p "$out"
+export COVERAGE_FILE=$out/.coverage
+
+echo '$ coverage run --source=. -m pytest --hypothesis-profile=ci'
+rc=0
+coverage run --source=. -m pytest --hypothesis-profile=ci || rc=$?
+if [ "$rc" -eq 5 ]; then
+	echo "assay-pytest: pytest collected no test (exit 5), which passes"
+elif [ "$rc" -ne 0 ]; then
+	exit "$rc"
+fi
+
+echo "\$ coverage xml -o $out/coverage.xml"
+rc=0
+coverage xml -o "$out/coverage.xml" >"$out/xml.log" 2>&1 || rc=$?
+cat "$out/xml.log"
+if [ "$rc" -eq 1 ] && grep -qx 'No data to report.' "$out/xml.log"; then
+	echo "assay-pytest: no Python file to cover; an empty report stands for coverage.py's"
+	{
+		echo '<?xml version="1.0" ?>'
+		echo '<coverage version="0" lines-valid="0" lines-covered="0" line-rate="1" branches-valid="0"'
+		echo '  branches-covered="0" branch-rate="0" complexity="0">'
+		echo "	<sources><source>$root</source></sources>"
+		echo '	<packages/>'
+		echo '</coverage>'
+	} >"$out/coverage.xml"
+	rc=0
+fi
+exit "$rc"
