@@ -8,9 +8,7 @@ Removed once the last critic passes.
 /mattpocock-skills:implement https://github.com/eff3ct0/assay/issues/11
 ```
 
-The issue's body is the specification (`gh issue view 11 -R eff3ct0/assay`), with the specs it links:
-eff3ct0/nixos-config#46, #50 and #52. The research behind #46 is `docs/research/assay-analyzer.md` on the
-`agent/research-analyzer` branch of eff3ct0/nixos-config.
+The issue's body is the specification (`gh issue view 11 -R eff3ct0/assay`), with the specifications it links.
 
 ## Facts verified while implementing (qlty 0.671.0, radarlint 2.0.0)
 
@@ -68,13 +66,16 @@ eff3ct0/nixos-config#46, #50 and #52. The research behind #46 is `docs/research/
   `python:S3776` and `scala:S3776` off by default. Raising a threshold, turning a smell off or turning a rule off is a
   loosening: a `{check = "findings"; kind = "setting"; what; reason}` entry, which fails evaluation without a reason
   and which `assay check` prints as `loosening: findings <what>: <reason>`.
-- New finding: a finding about a line (radarlint, `nested-control-flow`, `boolean-logic`) is new when its start
-  line is new code (assay's own new code, which follows renames). A finding about a function or a file
-  (`function-complexity`, `function-parameters`, `return-statements`, `file-complexity`) or a clone location is new
-  when the base has no counterpart: the same rule, base path (through renames) and function name; for a clone's
-  place, a clone's place in the same base path between the same set of base paths. Not `structural_hash`: appending
-  code to a file whose whole module was a clone turned the clone into the function's, with another hash. Counted as
-  multisets: with more at HEAD than at the base, those not starting on new code take the counterparts first.
+- New finding: a linter's finding (radarlint) is new when any of its lines is new code (assay's own new code, which
+  follows renames), as qlty keeps them to changed lines; a start-line rule missed a parameter list growing past
+  radarlint's S107 on its last lines. A smell is new when the base has no counterpart: the same rule, base path
+  (through renames) and function name (none for nested control flow and boolean logic, whose regions qlty truncates
+  to the first operands); for a clone's place, a clone's place in the same base path between the same set of base
+  paths. Not `structural_hash`: appending code to a file whose whole module was a clone turned the clone into the
+  function's, with another hash. Counted as multisets: with more at HEAD than at the base, those not starting on new
+  code take the counterparts first. So a smell the base has, grown or edited, never fails.
+- duplication's `nodes_threshold` holds for every language: assay writes it for Rust too, whose qlty default is 50,
+  since #52 makes values per repo, not per language, and the issue names 64.
 - The base's smells: `git read-tree` of the base into a temporary index, `checkout-index --prefix` into a temporary
   directory, `git init` there, the same `.qlty/qlty.toml`, `qlty smells <base paths>`, only when a function, file or
   clone finding needs a counterpart.
@@ -95,4 +96,4 @@ Done: packages, `assay findings`, `assay builtin findings`, the module's options
 `nix develop -c bats test`, `nix develop -c bats test/devenv`, shellcheck and `nix flake check` passed.
 
 1. `devenv test` in the worktree; the code review; a critic, as the global rules ask.
-2. Remove this file once the last critic passes; squash-free history is fine (p3rkins merges).
+2. Remove this file once the last critic passes.

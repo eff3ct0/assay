@@ -221,13 +221,13 @@ qlty runs only what no other check runs, so that a finding fails one check only:
 
 Output, on stdout: the findings by file, the lint findings first, then the smells, each as
 `<path>:<line>: <tool>/<rule>: <message>`, and a count. A finding that does not fail the `findings` check ends in
-`(not on new code)` or `(at the base too)`:
+`(not on new code)` (a linter's) or `(at the base too)` (a smell's):
 
 ```
 $ assay findings
 src/app.py:23: radarlint-python/python:S1481: Remove the unused local variable "w".
 src/app.py:1: qlty/function-complexity: Function with high complexity (count = 28): tangled (at the base too)
-src/app.py:7: qlty/nested-control-flow: Deeply nested control flow (level = 5) (not on new code)
+src/app.py:7: qlty/nested-control-flow: Deeply nested control flow (level = 5) (at the base too)
 
 3 findings on the change, 1 of them new: the findings check fails on those
 ```
@@ -238,12 +238,11 @@ nobody; `2` when it could not run (qlty missing or failing included).
 
 A **new finding** is one the change introduces, and the `findings` check fails on each new one, whatever its level:
 
-- A finding about a line (radarlint's, nested control flow, boolean logic) is new when its line, the one printed, is
-  new code.
-- A finding about a function or a file (function and file complexity, parameters, return statements) is new when the
-  base has no counterpart: the same rule, file (following renames) and function. So a smell that existed at the base
-  and grew does not fail.
-- A clone's place is new when the base has no clone's place in the same file between the same files.
+- A linter's finding (radarlint's) is about a place: it is new when any of its lines is new code.
+- A smell is about a piece of code (a function, a file, a nested block, an expression, a clone): it is new when the
+  base has no counterpart, the same rule in the same file (following renames) and, for one about a function, the same
+  function; a clone's place, when the base has no clone's place in the same file between the same files. So a smell
+  that existed at the base and grew, or that the change edits, does not fail.
 
 qlty refuses to run without `.qlty/qlty.toml`, which holds store paths: assay writes `.qlty/` on every run, from
 `assay.findings`, and keeps it out of git with a `.qlty/` line in `.git/info/exclude`. A repo that tracks
@@ -254,8 +253,9 @@ run the tools of the repo's devenv: qlty downloads nothing. qlty is packaged for
 ### `assay.findings`
 
 qlty's defaults hold: function complexity 18, file complexity 50, nested control flow 5, function parameters 6,
-return statements 6, boolean logic 4, identical and similar code 15 lines, duplication's `nodes_threshold` 64 (Rust's
-own, 50, stays). A repo changes them in its `devenv.nix`:
+return statements 6, boolean logic 4, identical and similar code 15 lines, duplication's `nodes_threshold` 64, for
+every language (it replaces qlty's own 50 for Rust: values are per repo, not per language). A repo changes them in its
+`devenv.nix`:
 
 ```nix
 {

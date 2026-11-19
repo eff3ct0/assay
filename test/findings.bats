@@ -59,7 +59,7 @@ fixture() {
   echo "$output$stderr"
   [ "$status" -eq 0 ]
   [ "${lines[0]}" = "src/app.py:1: qlty/function-complexity: Function with high complexity (count = 28): tangled (at the base too)" ]
-  [ "${lines[1]}" = "src/app.py:7: qlty/nested-control-flow: Deeply nested control flow (level = 5) (not on new code)" ]
+  [ "${lines[1]}" = "src/app.py:7: qlty/nested-control-flow: Deeply nested control flow (level = 5) (at the base too)" ]
   [ "${lines[-1]}" = "2 findings on the change, none new: the findings check passes" ]
   run --separate-stderr "$assay" check --base HEAD findings
   echo "$output$stderr"
@@ -105,7 +105,7 @@ fixture() {
   echo "$output$stderr"
   [ "$status" -eq 0 ]
   [ "${lines[0]}" = "src/my dir/é#1.py:1: qlty/function-complexity: Function with high complexity (count = 27): tangled (at the base too)" ]
-  [ "${lines[1]}" = "src/my dir/é#1.py:7: qlty/nested-control-flow: Deeply nested control flow (level = 5) (not on new code)" ]
+  [ "${lines[1]}" = "src/my dir/é#1.py:7: qlty/nested-control-flow: Deeply nested control flow (level = 5) (at the base too)" ]
   run --separate-stderr "$assay" check --base HEAD findings
   [ "$status" -eq 0 ]
   # A copy is no rename: its smells are new.
@@ -164,6 +164,8 @@ fixture() {
   [ "$status" -eq 0 ]
   [ "$output" = "no findings on the change" ]
   grep -qx 'threshold = 30' .qlty/qlty.toml
+  # duplication's nodes_threshold holds for every language, Rust's own default included.
+  [ "$(grep -c '^nodes_threshold = 64$\|^smells.duplication.nodes_threshold = 64$' .qlty/qlty.toml)" -eq 2 ]
   jq '.findings.smells.function_complexity.threshold = 20' "$T/config.json" >"$T/config2.json"
   ASSAY_CONFIG=$T/config2.json run --separate-stderr "$assay" findings
   [ "${lines[0]}" = "src/app.py:1: qlty/function-complexity: Function with high complexity (count = 27): tangled" ]
@@ -280,4 +282,74 @@ without() {
   [ "$status" -eq 0 ]
   ASSAY_BASE=HEAD run --separate-stderr "$assay" findings --base HEAD~1
   [ "${lines[0]}" = "src/app.py:1: qlty/function-complexity: Function with high complexity (count = 27): tangled" ]
+}
+
+@test "a linter's finding over several lines is new when any of its lines is; a smell the base lacks, wherever it starts" {
+  local_repo
+  builtin_checks python
+  # Thirteen parameters, one per line: S107 starts at 14.
+  params() { echo 'def f('; for p in "$@"; do echo "    $p,"; done; echo '):'; echo '    return 0'; }
+  params a b c d e f g h i j k l m >p.py
+  printf '%s\n' 'def g(a, b, c, d, e):' '    x = (a and b' '         and c)' '    return x' >q.py
+  git add p.py q.py
+  git commit --quiet -m base
+  params a b c d e f g h i j k l m n o >p.py
+  printf '%s\n' 'def g(a, b, c, d, e):' '    x = (a and b' '         and c and d and e)' '    return x' >q.py
+  run --separate-stderr "$assay" findings --base HEAD
+  echo "$output$stderr"
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = 'p.py:2: radarlint-python/python:S107: Function "f" has 15 parameters, which is greater than the 13 authorized.' ]
+  [[ $output == *$'\nq.py:2: qlty/boolean-logic: Complex binary expression\n'* ]]
+  run --separate-stderr "$assay" builtin findings --base HEAD
+  echo "$output"
+  [ "$status" -eq 1 ]
+  grep -q '^p.py:2: radarlint-python/python:S107: ' <<<"$output"
+  grep -q '^q.py:2: qlty/boolean-logic: Complex binary expression$' <<<"$output"
+}
+
+@test "radarlint for Scala: a finding on new code fails" {
+  local_repo
+  jq '.findings.radarlint = ["scala"]' "$BATS_TEST_DIRNAME/defaults/python.json" >"$T/scala.json"
+  builtin_checks python
+  export ASSAY_CONFIG=$T/scala.json
+  printf '%s\n' 'object A {' '  def f(a: Int): Boolean = a == a' '}' >A.scala
+  run --separate-stderr "$assay" builtin findings
+  echo "$output$stderr"
+  [ "$status" -eq 1 ]
+  grep -q '^A.scala:2: radarlint-scala/scala:S1764: ' <<<"$output"
+}
+
+@test "in TypeScript, Rust and Scala too: a new complex function fails, one the base has passes in a touched file" {
+  for f in tangled.ts tangled.rs tangled.scala; do
+    cd "$T"
+    rm -rf "$T/work"
+    local_repo
+    builtin_checks plain
+    fixture "$f" "src/$f"
+    run --separate-stderr "$assay" check findings
+    echo "$f: $output"
+    [ "$status" -eq 1 ]
+    grep -q "^src/$f:[0-9]*: qlty/function-complexity: " <<<"$output"
+    git add src
+    git commit --quiet -m "$f"
+    echo '// the end' >>"src/$f"
+    run --separate-stderr "$assay" check --base HEAD findings
+    echo "$f: $output"
+    [ "$status" -eq 0 ]
+    run --separate-stderr "$assay" findings --base HEAD
+    grep -q "^src/$f:[0-9]*: qlty/function-complexity: .* (at the base too)$" <<<"$output"
+  done
+}
+
+@test "a new clone in TypeScript fails naming both places" {
+  local_repo
+  builtin_checks plain
+  fixture tangled.ts src/a.ts
+  git add src
+  git commit --quiet -m a
+  fixture tangled.ts src/b.ts
+  run --separate-stderr "$assay" builtin findings --base HEAD
+  echo "$output"
+  [ "$status" -eq 1 ]
+  grep -q '^src/b.ts:1: qlty/identical-code: .*: src/b.ts:1-[0-9]*, src/a.ts:1-[0-9]*$' <<<"$output"
 }

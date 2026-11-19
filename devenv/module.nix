@@ -280,9 +280,9 @@ in
                       type = types.ints.positive;
                       default = nodesThresholdDefault;
                       description = ''
-                        The size, in syntax nodes, from which qlty compares code for clones (qlty's default,
-                        ${toString nodesThresholdDefault}; Rust's own, 50, stays). Raising it is a loosening and needs
-                        `reason`.
+                        The size, in syntax nodes, from which qlty compares code for clones, in every language
+                        (qlty's default, ${toString nodesThresholdDefault}, which also replaces Rust's own, 50). Raising
+                        it is a loosening and needs `reason`.
                       '';
                     };
                     reason = reasonOption;
