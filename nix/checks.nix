@@ -605,8 +605,16 @@ let
     ) withoutGit.config.warnings;
     "disabled, the module registers no hook" = !(disabled.config.programs.git.settings ? hook);
     "disabled, the module installs no skill" =
-      !(disabled.config.home.file ? ".claude/skills/assay-rule")
-      && !(disabled.config.xdg.configFile ? "opencode/skills/assay-rule");
+      lib.all
+        (
+          skill:
+          !(disabled.config.home.file ? ".claude/skills/${skill}")
+          && !(disabled.config.xdg.configFile ? "opencode/skills/${skill}")
+        )
+        [
+          "assay-rule"
+          "assay-property"
+        ];
   };
   homeFailed = lib.attrNames (lib.filterAttrs (_: ok: !ok) homeExpectations);
 
@@ -730,9 +738,13 @@ in
         }
         # assay is on the user's PATH.
         test -x ${home.activationPackage}/home-path/bin/assay
-        # The skills, where Claude Code loads them and where OpenCode does, as the repo holds them.
+        # Every skill, assay-rule and assay-property among them, where Claude Code loads them and where OpenCode
+        # does, as the repo holds them.
         for dir in .claude/skills .config/opencode/skills; do
-          cmp ${home.activationPackage}/home-files/$dir/assay-rule/SKILL.md ${../skills/assay-rule/SKILL.md}
+          [ "$(ls ${home.activationPackage}/home-files/$dir)" = "$(ls ${../skills})" ]
+          for skill in assay-rule assay-property; do
+            cmp ${home.activationPackage}/home-files/$dir/$skill/SKILL.md ${../skills}/$skill/SKILL.md
+          done
         done
         # The generated git config holds both hooks.
         gitconfig=${home.activationPackage}/home-files/.config/git/config

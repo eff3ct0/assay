@@ -51,7 +51,9 @@ frontmatter() { awk -v f="$2" 'NR == 1 && $0 != "---" { exit } NR > 1 && $0 == "
 		'ast-grep'"'"'s own layout (`sgconfig.yml`, `rules/<name>.yml`, `rule-tests/<name>-test.yml`); native rules in their tool'"'"'s' \
 		'A rule is born in the repo where the correction happened, and moves to a pack as above.' \
 		'A new correction adds no prose unless no check can hold it; then it goes in the `AGENTS.md` that applies, saying why no' \
-		'`assay rule new <kebab-name> [--lang <lang>] [--from <file>:<line>[-<line>]]`'; do
+		'`assay rule new <kebab-name> [--lang <lang>] [--from <file>:<line>[-<line>]]`' \
+		'a Nix repo, bats in a bash repo). A correction about behaviour that holds for every input becomes a property-based' \
+		'test, through `assay-property`.'; do
 		if ! grep -qF -- "$part" "$skill"; then
 			echo "missing: $part"
 			return 1
@@ -72,5 +74,68 @@ frontmatter() { awk -v f="$2" 'NR == 1 && $0 != "---" { exit } NR > 1 && $0 == "
 		run grep -n -i -w -F -- "$word" "$skills"/*/SKILL.md
 		echo "$output"
 		[ "$status" -eq 1 ]
+	done
+}
+
+@test "assay-property's description names its triggers, and its text holds the ladder, the tables, TLA+ and Lean" {
+	local skill=$skills/assay-property/SKILL.md part
+	description=$(frontmatter "$skill" description)
+	for part in \
+		'code whose correctness is a rule over all inputs (parsers, serializers, money and other arithmetic, data transformations, state machines)' \
+		'code whose correctness depends on the order in which processes, jobs or machines that share state act' \
+		'a bug escaped the example tests'; do
+		if [[ $description != *"$part"* ]]; then
+			echo "missing from the description: $part"
+			return 1
+		fi
+	done
+	for part in \
+		'1. an example test, the default;' \
+		'2. a property-based test: a property holds for every input and can be stated without restating the implementation,' \
+		'over a large or structured input space; not when the only property is "returns what the code computes";' \
+		'3. a stateful property-based test: one program with an API the test can drive, commands against a model, with a' \
+		'scheduler where the library has one (fast-check `fc.commands` with `modelRun` or `scheduledModelRun`,' \
+		'`proptest-state-machine`, Hypothesis `RuleBasedStateMachine`, ScalaCheck `Commands` with its parallel `property`);' \
+		'4. a TLA+ model: correctness depends on the interleaving of actors that are separate systems (processes, jobs,' \
+		'machines sharing a git ref, a database, a queue), on retries or crashes mid-step, or the design is not code yet; it' \
+		'pays off before writing a protocol, or after an incident caused by a race;' \
+		'5. a Lean proof: a property must hold for unbounded inputs, a failure is costly, and the core is small and pure; the' \
+		'proof covers the algorithm, and a property-based test ties the code to the same specification.' \
+		'**Forms**: round-trip (`decode (encode x) == x`), invariant, idempotence, oracle (a simple, slow version, or the old' \
+		'implementation during a refactor), metamorphic relation (adding a filter never grows the result), stateful model' \
+		'- It does not restate the implementation' \
+		'- Generators are built from the library'"'"'s combinators over the domain'"'"'s types, not from filters, so that shrinking' \
+		'works, and they reach the edges (empty, boundaries, Unicode).' \
+		'- One property per test, named by the test.' \
+		'- Every counterexample found stays in the repo as an explicit example, in the same commit as the fix.' \
+		'| proptest         | `PROPTEST_RNG_SEED=$ASSAY_SEED` in the test check |' \
+		'| Hypothesis       | `--hypothesis-profile=ci` in the test check       |' \
+		'| fast-check       | `fc.configureGlobal` in `vitest.setup.ts`         |' \
+		'| munit-scalacheck | a base trait every property suite extends         | write the trait below ' \
+		'override def scalaCheckInitialSeed: String =' \
+		'case Some(n) => super.scalaCheckTestParameters.withMinSuccessfulTests(n.toInt)' \
+		'| proptest         | `PROPTEST_CASES=10000` and no `PROPTEST_RNG_SEED` ' \
+		'| Hypothesis       | `--hypothesis-profile=explore`, with `ASSAY_CASES=10000` ' \
+		'| fast-check       | `env -u ASSAY_SEED ASSAY_CASES=10000` before the test command ' \
+		'| proptest         | `proptest-regressions/`, committed ' \
+		'| Hypothesis       | `@example(...)` on the test; `.hypothesis/` stays ignored ' \
+		'| fast-check       | the `examples` parameter of `fc.assert` ' \
+		'| munit-scalacheck | a test with the fixed input: a seed stops reproducing once the generators change ' \
+		'- **Layout**: `tla/<Name>.tla` with `tla/<Name>.cfg`, at the repo root. A second configuration of a spec is an' \
+		'`nix shell nixpkgs#tlaplus18 -c tlc -config <Name>.cfg <Name>.tla`' \
+		'- **Budget**: each configuration finishes in under a minute. Shrink the constants rather than grow the budget.' \
+		'(`assay.checks.tla.enable = true;`), which brings TLC (`tlaplus18`) into its devenv.' \
+		'- Through devenv'"'"'s `languages.lean4.enable` (nixpkgs'"'"' `lean4`, Lake included), with the Lake package in `lean/`.' \
+		'- Without elan, `lean-toolchain` is ignored: the version is the devenv'"'"'s.' \
+		'- assay gains a `lean` check (`lake build --wfail`, so that a `sorry` fails) with the first Lean case.' \
+		'A model'"'"'s or proof'"'"'s header lists the files it abstracts, and each of those files carries a comment naming the model' \
+		'Quint (its `verify` downloads Apalache), Apalache (not in nixpkgs), trace validation and model-based test generation.'; do
+		if ! grep -qF -- "$part" "$skill"; then
+			echo "missing: $part"
+			return 1
+		fi
+	done
+	for part in Climb Write Wire Explore Keep Link; do
+		grep -q "^[0-9]\. \*\*$part\*\*" "$skill"
 	done
 }

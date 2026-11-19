@@ -67,7 +67,8 @@ Climbing only to the first step that holds:
    have no light ban list, so their bans are ast-grep rules too. In Nix, anything about evaluated values is a flake
    check instead;
 6. what ast-grep cannot parse (Markdown, the shape of the file tree): a test in the repo's own suite (a flake check in
-   a Nix repo, bats in a bash repo).
+   a Nix repo, bats in a bash repo). A correction about behaviour that holds for every input becomes a property-based
+   test, through `assay-property`.
 
 ## The message
 
