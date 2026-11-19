@@ -15,6 +15,8 @@
     uv
     # The suite runs radarlint, which the module brings only to repos with Python or Scala.
     (callPackage ./nix/radarlint.nix { })
+    # And TLC, which it brings only to repos that turn the tla check on: assay has no model of its own.
+    tlaplus18
     yq-go
   ];
 }

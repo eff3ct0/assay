@@ -113,6 +113,13 @@
       "requires": null,
       "coverage": null
     },
+    "tla": {
+      "exec": "assay builtin tla",
+      "fast": false,
+      "enable": false,
+      "requires": "tla/*.cfg",
+      "coverage": null
+    },
     "vulture": {
       "exec": "vulture . --exclude .venv,.devenv",
       "fast": true,
@@ -125,17 +132,13 @@
   "coverage": {
     "newCode": 80
   },
-  "languages": [
-    "python"
-  ],
+  "languages": ["python"],
   "rulePacks": {},
   "findings": {
     "duplication": {
       "nodes_threshold": 64
     },
-    "radarlint": [
-      "python"
-    ],
+    "radarlint": ["python"],
     "rules": {
       "python:S3776": false,
       "scala:S3776": false

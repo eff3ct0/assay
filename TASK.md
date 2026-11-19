@@ -17,6 +17,10 @@ A note sent while working, verbatim:
 > cambie de permisos usa ${VAR:?} y está dentro de un directorio creado con mktemp -d; nada de rm ni chmod -R sobre una
 > ruta calculada sin comprobar antes que empieza por ese directorio. Tú también, y sigue con lo tuyo.
 
+The merge instruction, verbatim:
+
+> El PR #27 ya está en origin/main (0ecc91344e199d2c73900f5f46bd6882c5aae2b5); el CI y el crítico pasaron. Sigue en tu worktree; integra el main nuevo cuando puedas hacerlo sin pisar trabajo en curso. Conserva el check TLA y la semántica de --list, y verifica el resultado antes de avisar para el crítico.
+
 Issue #7 is the specification; it links eff3ct0/nixos-config#58, #50, #52, #54 and #57.
 
 ## Facts checked (flake nixpkgs: ruff 0.15.14, pyright 1.1.411, vulture 2.14, osv-scanner 2.3.3, uv 0.11.21; devenv-nixpkgs rolling: ruff 0.17.4, pyright 1.1.414, vulture 2.16, osv-scanner 2.7.0, uv 0.13.7)
@@ -88,6 +92,5 @@ template's own switches separately (outside this issue). Advisory change tests u
 fixture runs a clean scan with the real scanner.
 
 Rerun `nix flake check` and `nix develop -c bats test/devenv` on the final tree. The orchestrator owns the independent
-critic and any PR; report the pushed branch to `t32` and stop. Do not integrate PR #27 while it is open: it implements
-the same list markers, and its `tla (off)` fixture expectations must survive any later integration. Remove this file
-only after the last critic passes.
+critic and any PR; report the pushed branch to `t32` and stop. The merged base includes PR #27: its TLA check and
+`--list` markers are retained. Remove this file only after the last critic passes.

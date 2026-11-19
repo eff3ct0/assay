@@ -36,6 +36,7 @@ usage: assay check [--fast] [--base <rev>] [<check>...]    run the repo's checks
        assay builtin preset
        assay builtin suppressions [--base <rev>]
        assay builtin findings [--base <rev>]
+       assay builtin tla
        assay builtin osv-scanner [--base <rev>] <lockfile>...  the advisory comparison, shared by language checks
        assay findings [--base <rev>] [--sarif]             the analyzer's findings on the change
        assay new-code [--base <rev>]                       the change's new code, as JSON
@@ -2216,6 +2217,61 @@ builtin_ast_grep() {
 	finish 1
 }
 
+# tla: TLC over the repo's TLA+ models: each configuration tla/<Name>.cfg that git sees (tracked, or untracked but not
+# ignored) against tla/<Name>.tla, one after another in name order, every one run so that one run shows every failure.
+# One worker and a pinned fingerprint polynomial keep the result and a violation's trace the same from run to run.
+# Nothing is written into the tree: TLC's states go to <git-dir>/assay/tla (-metadir), emptied first, where TLC leaves
+# them after a violation; Java's temporary files, where TLC unpacks its standard modules, to its tmp/; and
+# -noGenerateSpecTE keeps TLC from writing a trace module beside the spec. Any non-zero exit of TLC fails the check
+# (12 an invariant violated, 11 a deadlock, 150 and 151 parse and configuration errors), its trace in the output.
+builtin_tla() {
+	# fp: which of TLC's fingerprint polynomials (-fp) every run uses.
+	local dir list cfg spec rc fp=0
+	local -a cfgs=() failures=()
+	[ $# -eq 0 ] || usage_error "tla takes no argument"
+	find_repo
+	if ! command -v tlc >/dev/null; then
+		echo "assay: cannot find tlc on the PATH" >&2
+		finish 127
+	fi
+	dir=$gitdir/assay/tla
+	rm -rf "${dir:?}"
+	mkdir -p "$dir/tmp" || die "cannot create $dir"
+	tmp_file list
+	git ls-files -z --cached --others --exclude-standard --deduplicate -- ':(top,glob)tla/*.cfg' >"$list" ||
+		die "cannot list the working tree"
+	LC_ALL=C sort -z -o "$list" "$list" || die "cannot sort $list"
+	while IFS= read -r -d '' cfg; do
+		if [ -f "$cfg" ]; then cfgs+=("$cfg"); fi
+	done <"$list"
+	if [ ${#cfgs[@]} -eq 0 ]; then
+		echo "no tla/*.cfg to check"
+		finish 0
+	fi
+	for cfg in "${cfgs[@]}"; do
+		spec=${cfg%.cfg}.tla
+		if [ ! -f "$spec" ]; then
+			failures+=("$cfg: no $spec beside it")
+			continue
+		fi
+		echo "\$ tlc -workers 1 -fp $fp -noGenerateSpecTE -metadir $dir -config $cfg $spec"
+		rc=0
+		JDK_JAVA_OPTIONS="${JDK_JAVA_OPTIONS:+$JDK_JAVA_OPTIONS }-Djava.io.tmpdir=$dir/tmp" \
+			tlc -workers 1 -fp "$fp" -noGenerateSpecTE -metadir "$dir" -config "$cfg" "$spec" </dev/null 2>&1 ||
+			rc=$?
+		echo
+		if [ "$rc" -ne 0 ]; then failures+=("$cfg: TLC exit $rc"); fi
+	done
+	[ ${#failures[@]} -gt 0 ] || finish 0
+	printf '%s\n' "${failures[@]}"
+	if [ ${#cfgs[@]} -eq 1 ]; then
+		echo "1 of 1 TLA+ configuration failed"
+	else
+		echo "${#failures[@]} of ${#cfgs[@]} TLA+ configurations failed"
+	fi
+	finish 1
+}
+
 cmd_builtin() {
 	[ $# -ge 1 ] || usage_error "builtin needs the name of a built-in check"
 	local check=$1
@@ -2229,6 +2285,7 @@ cmd_builtin() {
 	preset) builtin_preset "$@" ;;
 	suppressions) builtin_suppressions "$@" ;;
 	findings) builtin_findings "$@" ;;
+	tla) builtin_tla "$@" ;;
 	*) usage_error "no built-in check named '$check'" ;;
 	esac
 }

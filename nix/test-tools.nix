@@ -1,10 +1,9 @@
 # What `bats test` needs on the PATH, in the flake's devShell and in `nix flake check`'s sandbox: the CLI's own tools,
 # ast-grep and yq among them (the guard's command rules and the ast-grep check run through ast-grep, and the ast-grep
 # check and `assay rule new` read sgconfig.yml with yq, and the Python preset uses it for TOML), diff-cover for
-# coverage of new code, what the default checks' helpers (devenv/bin) run, and the built-in checks' tools: radarlint
-# too, which the module brings only to repos with Python or Scala. kcov and qlty only where they run (kcov where
-# nixpkgs has it, Linux; qlty on x86_64-linux): elsewhere test/defaults.bats skips assay-bats' tests, and the findings
-# tests fail on the missing tool.
+# coverage of new code, what the default checks' helpers (devenv/bin) run, and the built-in checks' tools.
+# radarlint is normally only in repos with Python or Scala, and TLC only where the tla check is enabled.
+# Elsewhere than Linux, test/defaults.bats skips assay-bats' tests (kcov); the findings tests require qlty.
 { pkgs }:
 with pkgs;
 let
@@ -36,4 +35,6 @@ lib.optional (lib.meta.availableOn stdenv.hostPlatform kcov) (callPackage ./kcov
   gitleaks
   oxfmt
   (callPackage ./radarlint.nix { })
+  # The tla check's tool, which the module brings only to repos that turn the check on.
+  tlaplus18
 ]

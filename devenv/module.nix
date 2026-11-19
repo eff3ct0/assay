@@ -21,7 +21,15 @@ let
   defaults' = defaults { inherit config lib pkgs; };
   # The checks, without the tools each one lists.
   defaultChecks = lib.mapAttrs (_: d: removeAttrs d [ "packages" ]) defaults';
-  defaultTools = lib.unique (lib.concatMap (d: d.packages or [ ]) (lib.attrValues defaults'));
+  # Their tools: those of a check on by default whether the repo keeps it on or not, those of a check off by default
+  # only once the repo turns it on.
+  defaultTools = lib.unique (
+    lib.concatLists (
+      lib.mapAttrsToList (
+        name: d: lib.optionals ((d.enable or true) || cfg.checks.${name}.enable) (d.packages or [ ])
+      ) defaults'
+    )
+  );
 
   # The analyzer's policy (`assay findings` and the `findings` check): qlty's own smell thresholds, and Sonar's
   # cognitive complexity off in radarlint, since complexity has one source, qlty's smells.
