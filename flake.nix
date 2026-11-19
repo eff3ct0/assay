@@ -43,6 +43,8 @@
             jq
             git
             gawk
+            # The guard's command rules run through it; the package brings it on its own.
+            ast-grep
             # The built-in checks' tools, which assay's devenv module adds to every repo's devenv.
             actionlint
             gitleaks
