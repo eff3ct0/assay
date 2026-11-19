@@ -15,8 +15,10 @@ fast_budget=5
 # Check names become log file names.
 name_re='^[A-Za-z0-9][A-Za-z0-9._-]*$'
 # qlty's smells, which the configuration's findings.smells may set.
-smell_kinds='["boolean_logic", "file_complexity", "function_complexity", "function_parameters", "identical_code",
-  "nested_control_flow", "return_statements", "similar_code"]'
+IFS= read -r -d '' smell_kinds <<'JSON' || true
+["boolean_logic", "file_complexity", "function_complexity", "function_parameters", "identical_code",
+  "nested_control_flow", "return_statements", "similar_code"]
+JSON
 
 usage_text() {
 	cat <<'EOF'
@@ -142,8 +144,7 @@ log_run() {
 
 # The configuration, validated whole before anything is printed, and emitted as shell assignments (strings quoted
 # with @sh) that end with config_loaded=1.
-# shellcheck disable=SC2016 # jq's $variables, not the shell's
-config_jq='
+IFS= read -r -d '' config_jq <<'JQ' || true
 def fail($m): "\($m)\n" | halt_error(1);
 def text: type == "string" and length > 0;
 def percent: type == "number" and . == floor and . >= 0 and . <= 100;
@@ -219,7 +220,7 @@ def validate:
       "loose_value+=(\(if .kind == "new-code" then "\(.newCode) \(.default)" elif .kind == "setting" then .what
         else "" end | @sh))"),
   "config_loaded=1"
-'
+JQ
 
 names=()
 declare -A c_exec=() c_fast=() c_enable=() c_requires=() c_coverage=()
@@ -412,8 +413,7 @@ change_diff() {
 # it, quoted or not). With the variable `removed` set to a file name, also writes "<path>\t<text>" there for each line
 # the change removes, under the file's new path (its old one when the file is deleted). With the variable `renames`
 # set to a file name, writes "<old path>\t<new path>" there for each renamed file, the paths as git prints them.
-# shellcheck disable=SC2016 # awk's $0, not the shell's
-diff_awk='
+IFS= read -r -d '' diff_awk <<'AWK' || true
 function path_of(p, prefix) {
   sub(/\t$/, "", p)
   if (p == "/dev/null") return ""
@@ -438,7 +438,7 @@ old > 0 || new > 0 {
   n = split(substr(f[3], 2), w, ","); new = (n > 1) ? w[2] + 0 : 1
   if (new > 0 && to != "") printf "%d\t%d\t%s\n", w[1], w[1] + new - 1, to
 }
-'
+AWK
 
 # git_unquote <var>: the path in <var>, as git prints it, with git's C-style quoting undone.
 git_unquote() {
@@ -464,9 +464,12 @@ new_code() {
 
 # new_code_json <diff file>: the new code in a diff from change_diff, as one JSON object, {"<path>": [[first, last],
 # ...]}, keys sorted.
+IFS= read -r -d '' new_code_jq <<'JQ' || true
+split("\u0000") | .[:-1] as $f
+| reduce range(0; $f | length; 3) as $i ({}; .[$f[$i]] += [[($f[$i + 1] | tonumber), ($f[$i + 2] | tonumber)]])
+JQ
 new_code_json() {
-	new_code "$1" | jq -S -R -s 'split("\u0000") | .[:-1] as $f
-    | reduce range(0; $f | length; 3) as $i ({}; .[$f[$i]] += [[($f[$i + 1] | tonumber), ($f[$i + 2] | tonumber)]])'
+	new_code "$1" | jq -S -R -s "$new_code_jq"
 }
 
 # renames_json <diff file>: the files a diff from change_diff renames, as one JSON object, {"<new path>": "<old path>"}.
@@ -1035,14 +1038,13 @@ builtin_suppressions() {
 # radarlint's plugins pointed at $radarlint, an absolute path: qlty runs plugins with an empty PATH, and would
 # download its own tools for its own plugin definitions. The rules end the plugin's script as a shell comment: qlty
 # keys its cache of radarlint's results by the script, not by radarlint.properties.
-# shellcheck disable=SC2016 # jq's $variables and qlty's ${target}, not the shell's
-findings_toml_jq='
+IFS= read -r -d '' findings_toml_jq <<'JQ' || true
 (.findings // {}) as $f
 | (($f.rules // {}) | to_entries | map("\(.key)=\(.value)") | join(" ")) as $rules
 | "# Written by assay on every run, from assay.findings: an edit here does not last.",
   "config_version = \"0\"",
   (($f.smells // {}) | to_entries[] | "", "[smells.\(.key)]", "enabled = \(.value.enable)", "threshold = \(.value.threshold)"),
-  # One value per repo, not per language: Rust has its own in qlty'"'"'s defaults.
+  # One value per repo, not per language: Rust has its own in qlty's defaults.
   (if $f.duplication then "", "[smells.duplication]", "nodes_threshold = \($f.duplication.nodes_threshold)",
      "", "[language.rust]", "smells.duplication.nodes_threshold = \($f.duplication.nodes_threshold)" else empty end),
   (($f.radarlint // [])[] as $language | "radarlint-\($language)" as $plugin
@@ -1053,15 +1055,14 @@ findings_toml_jq='
       "success_codes = [0, 1]", "output = \"stdout\"",
       "output_format = \"sarif\"", "output_missing = \"error\"", "batch = true", "cache_results = true"),
   (($f.radarlint // [])[] | "", "[[plugin]]", "name = \("radarlint-\(.)" | tojson)", "version = \"assay\"")
-'
+JQ
 
 # .qlty/configs/radarlint.properties, which radarlint reads from the directory it runs in: qlty links it into the repo
 # root while radarlint runs. A rule python:S3776 is radarlint.rules.python.S3776.
 radarlint_properties_jq='(.findings.rules // {}) | to_entries[] | "radarlint.rules.\(.key | sub(":"; "."))=\(.value)"'
 
 # What both programs over qlty's SARIF need. A path is a URI there, percent-encoded, non-ASCII characters included.
-# shellcheck disable=SC2016 # jq's $variables, not the shell's
-sarif_defs='
+IFS= read -r -d '' sarif_defs <<'JQ' || true
 def utf8_string:
   . as $b | length as $n
   | def code($i):
@@ -1082,11 +1083,11 @@ def place: .locations[0].physicalLocation;
 def path: place.artifactLocation.uri // "" | uri_path;
 def line: place.region.startLine // 0;
 def last_line: [line, place.region.endLine // 0] | max;
-# A linter'"'"'s finding is about a place in the code; a smell, about a piece of it: a function, a file, a block, an
+# A linter's finding is about a place in the code; a smell, about a piece of it: a function, a file, a block, an
 # expression or a clone.
 def about_a_place($run): $run == "lint";
 def clone: .ruleId | IN("qlty:identical-code", "qlty:similar-code");
-'
+JQ
 
 # The findings on the change as one SARIF log, {"runs": [lint, smells]}, each result marked new or not with SARIF's
 # baselineState. A linter'"'"'s finding is new when any of its lines is new code, as qlty keeps them to changed lines. A
@@ -1096,8 +1097,7 @@ def clone: .ruleId | IN("qlty:identical-code", "qlty:similar-code");
 # starts on new code. qlty'"'"'s hash of a clone is no identity: a clone grows or
 # shrinks to the largest piece of code its places share, so an unrelated edit next to one changes it. With more of one
 # counterpart now than at the base, the ones that do not start on new code take the base'"'"'s first.
-# shellcheck disable=SC2016 # jq's $variables, not the shell's
-findings_jq='
+IFS= read -r -d '' findings_jq <<'JQ' || true
 ($config[0].findings.rules // {}) as $rules
 | $new_code[0] as $new_code | $renames[0] as $renames
 | def in_smell_languages: (place.region.sourceLanguage // "") | IN("python", "rust", "scala", "tsx", "typescript");
@@ -1131,13 +1131,12 @@ findings_jq='
 | {"$schema": "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json",
    version: "2.1.0",
    runs: [($lint[0].runs[0] + {results: $lint_results}), ($smells[0].runs[0] + {results: $smells_results})]}
-'
+JQ
 
 # The text of a findings log: by file, a blank line between files; in a file the lint findings, then the smells, by
 # line, as "<path>:<line>: <tool>/<rule>: <message>", a clone followed by its places. With $only_new, the new ones
 # only, and nothing at all without any.
-# shellcheck disable=SC2016 # jq's $variables, not the shell's
-findings_text_jq='
+IFS= read -r -d '' findings_text_jq <<'JQ' || true
 def plural($n; $word): "\($n) \($word)\(if $n == 1 then "" else "s" end)";
 def where: "\(.artifactLocation.uri // "" | uri_path):\(.region.startLine)-\(.region.endLine // .region.startLine)";
 [.runs | to_entries[] | (if .key == 0 then "lint" else "smells" end) as $run | .key as $order | .value.results[]?
@@ -1163,7 +1162,7 @@ def where: "\(.artifactLocation.uri // "" | uri_path):\(.region.startLine)-\(.re
     + if $new_count == 0 then "none new: the findings check passes"
       else "\($new_count) of them new: the findings check fails on those" end
   end
-'
+JQ
 
 radarlint_bin=
 tool_missing=
@@ -1269,9 +1268,9 @@ findings_sarif() {
 		--level note
 	run_qlty "$smells" "qlty smells" . smells --upstream "$base_sha" --sarif --quiet
 	# The base's paths of the files whose smells need a counterpart.
-	jq -j --slurpfile renames "$renames" "$sarif_defs"'
-    [.runs[]?.results[]? | path] | unique[] | ($renames[0][.] // .) + "\u0000"' \
-		"$smells" >"$paths" || die "cannot read qlty's smells"
+	jq -j --slurpfile renames "$renames" \
+		"$sarif_defs"'[.runs[]?.results[]? | path] | unique[] | ($renames[0][.] // .) + "\u0000"' "$smells" >"$paths" ||
+		die "cannot read qlty's smells"
 	while IFS= read -r -d '' p; do base_paths+=("$p"); done <"$paths"
 	if [ ${#base_paths[@]} -gt 0 ]; then
 		findings_base_smells "$base" "${base_paths[@]}"
