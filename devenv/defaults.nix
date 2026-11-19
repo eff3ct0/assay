@@ -31,6 +31,14 @@ let
 
   # Markdown and YAML in every repo; a JavaScript project's own files under its directory. TOML never: cargo and uv
   # write it. The scope lives here, not in a configuration file, so that it is the same wherever .oxfmtrc.json sits.
+  # The analyzer: qlty where its static binary runs; radarlint, a JVM, only for the languages it analyzes.
+  qlty = pkgs.callPackage ../nix/qlty.nix { };
+  radarlint = pkgs.callPackage ../nix/radarlint.nix { };
+  radarlintNeeded = builtins.any (l: config.languages.${l}.enable or false) [
+    "python"
+    "scala"
+  ];
+
   oxfmtPatterns = [
     "**/*.{md,mdx,yml,yaml}"
   ]
@@ -54,6 +62,14 @@ in
   commit-trailers = {
     exec = "assay builtin commit-trailers";
     fast = true;
+  };
+  # The new findings among those `assay findings` shows; it builds nothing, but analyzes too slowly for every commit.
+  findings = {
+    exec = "assay builtin findings";
+    fast = false;
+    packages =
+      lib.optional (lib.meta.availableOn pkgs.stdenv.hostPlatform qlty) qlty
+      ++ lib.optional radarlintNeeded radarlint;
   };
   gitleaks = {
     exec = "assay builtin gitleaks";

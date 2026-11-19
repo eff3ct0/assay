@@ -2,41 +2,91 @@
   "version": 1,
   "checks": {
     "actionlint": {
+      "enable": true,
       "exec": "actionlint",
       "fast": true,
-      "enable": true,
       "requires": ".github/workflows/*"
     },
     "agents-md": {
+      "enable": true,
       "exec": "assay builtin agents-md",
       "fast": true,
-      "enable": true,
       "requires": null
     },
     "commit-trailers": {
+      "enable": true,
       "exec": "assay builtin commit-trailers",
       "fast": true,
+      "requires": null
+    },
+    "findings": {
       "enable": true,
+      "exec": "assay builtin findings",
+      "fast": false,
       "requires": null
     },
     "gitleaks": {
+      "enable": true,
       "exec": "assay builtin gitleaks",
       "fast": true,
-      "enable": true,
       "requires": null
     },
     "oxfmt": {
+      "enable": true,
       "exec": "oxfmt --check --no-error-on-unmatched-pattern '**/*.{md,mdx,yml,yaml}'",
       "fast": true,
-      "enable": true,
       "requires": null
     },
     "suppressions": {
+      "enable": true,
       "exec": "assay builtin suppressions",
       "fast": true,
-      "enable": true,
       "requires": null
     }
   },
-  "loosenings": []
+  "loosenings": [],
+  "findings": {
+    "duplication": {
+      "nodes_threshold": 64
+    },
+    "radarlint": [],
+    "rules": {
+      "python:S3776": false,
+      "scala:S3776": false
+    },
+    "smells": {
+      "boolean_logic": {
+        "enable": true,
+        "threshold": 4
+      },
+      "file_complexity": {
+        "enable": true,
+        "threshold": 50
+      },
+      "function_complexity": {
+        "enable": true,
+        "threshold": 18
+      },
+      "function_parameters": {
+        "enable": true,
+        "threshold": 6
+      },
+      "identical_code": {
+        "enable": true,
+        "threshold": 15
+      },
+      "nested_control_flow": {
+        "enable": true,
+        "threshold": 5
+      },
+      "return_statements": {
+        "enable": true,
+        "threshold": 6
+      },
+      "similar_code": {
+        "enable": true,
+        "threshold": 15
+      }
+    }
+  }
 }

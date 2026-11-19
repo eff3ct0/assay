@@ -353,7 +353,8 @@ change_diff() {
 
 # Reads change_diff's output. Prints "<first>\t<last>\t<path>" for each hunk that adds lines (the path as git prints
 # it, quoted or not). With the variable `removed` set to a file name, also writes "<path>\t<text>" there for each line
-# the change removes, under the file's new path (its old one when the file is deleted).
+# the change removes, under the file's new path (its old one when the file is deleted). With the variable `renames`
+# set to a file name, writes "<old path>\t<new path>" there for each renamed file, the paths as git prints them.
 # shellcheck disable=SC2016 # awk's $0, not the shell's
 diff_awk='
 function path_of(p, prefix) {
@@ -370,6 +371,8 @@ old > 0 || new > 0 {
   old = 0; new = 0
 }
 /^diff --git / { from = ""; path = ""; to = ""; next }
+/^rename from / { renamed = substr($0, 13); next }
+/^rename to / { if (renames != "") print renamed "\t" substr($0, 11) > renames; next }
 /^--- / { from = path_of(substr($0, 5), "a/"); next }
 /^\+\+\+ / { to = path_of(substr($0, 5), "b/"); path = (to == "") ? from : to; next }
 /^@@ / {
@@ -380,20 +383,45 @@ old > 0 || new > 0 {
 }
 '
 
+# git_unquote <var>: the path in <var>, as git prints it, with git's C-style quoting undone.
+git_unquote() {
+  local -n unquote_var=$1
+  if [[ $unquote_var == \"*\" ]]; then
+    unquote_var=${unquote_var:1:${#unquote_var}-2}
+    unquote_var=${unquote_var//%/%%}
+    # shellcheck disable=SC2059 # the format decodes git's C-style quoting
+    printf -v unquote_var -- "$unquote_var"
+  fi
+}
+
 # new_code <diff file> [<removed file>]: the new code in a diff from change_diff, as NUL-terminated records: a path,
 # then the first and the last line of one of its ranges. A file's ranges come in order. With a second file, the
 # lines the change removes are written there too, as diff_awk writes them.
 new_code() {
   local first last path
   LC_ALL=C awk -v removed="${2:-}" "$diff_awk" "$1" | while IFS=$'\t' read -r first last path; do
-    if [[ $path == \"*\" ]]; then
-      path=${path:1:${#path}-2}
-      path=${path//%/%%}
-      # shellcheck disable=SC2059 # the format decodes git's C-style quoting
-      printf -v path -- "$path"
-    fi
+    git_unquote path
     printf '%s\0%s\0%s\0' "$path" "$first" "$last"
   done
+}
+
+# new_code_json <diff file>: the new code in a diff from change_diff, as one JSON object, {"<path>": [[first, last],
+# ...]}, keys sorted.
+new_code_json() {
+  new_code "$1" | jq -S -R -s 'split("\u0000") | .[:-1] as $f
+    | reduce range(0; $f | length; 3) as $i ({}; .[$f[$i]] += [[($f[$i + 1] | tonumber), ($f[$i + 2] | tonumber)]])'
+}
+
+# renames_json <diff file>: the files a diff from change_diff renames, as one JSON object, {"<new path>": "<old path>"}.
+renames_json() {
+  local list from to
+  tmp_file list
+  LC_ALL=C awk -v renames="$list" "$diff_awk" "$1" >/dev/null
+  while IFS=$'\t' read -r from to; do
+    git_unquote from
+    git_unquote to
+    printf '%s\0%s\0' "$to" "$from"
+  done <"$list" | jq -R -s 'split("\u0000") | .[:-1] as $f | reduce range(0; $f | length; 2) as $i ({}; .[$f[$i]] = $f[$i + 1])'
 }
 
 cmd_new_code() {
@@ -403,8 +431,7 @@ cmd_new_code() {
   local diff
   tmp_file diff
   change_diff "$base_sha" >"$diff"
-  new_code "$diff" | jq -S -R -s 'split("\u0000") | .[:-1] as $f
-    | reduce range(0; $f | length; 3) as $i ({}; .[$f[$i]] += [[($f[$i + 1] | tonumber), ($f[$i + 2] | tonumber)]])'
+  new_code_json "$diff"
   finish 0
 }
 
@@ -942,6 +969,295 @@ builtin_suppressions() {
   esac
 }
 
+# The analyzer. `assay findings` runs qlty in the repo itself, with no server: `qlty check`, whose findings qlty keeps to
+# the changed lines, and `qlty smells`, which reports every smell of a changed file. qlty runs only what no other
+# check runs: radarlint's plugins, for Python and Scala, and smells, for TypeScript, Rust, Python and Scala. The
+# built-in `findings` check fails on the new findings among those `assay findings` shows.
+
+# .qlty/qlty.toml, from the configuration's `findings` settings (qlty's own defaults for what it leaves out), with
+# radarlint's plugins pointed at $radarlint, an absolute path: qlty runs plugins with an empty PATH, and would
+# download its own tools for its own plugin definitions.
+# shellcheck disable=SC2016 # jq's $variables and qlty's ${target}, not the shell's
+findings_toml_jq='
+(.findings // {}) as $f
+| "# Written by assay on every run, from assay.findings: an edit here does not last.",
+  "config_version = \"0\"",
+  (($f.smells // {}) | to_entries[] | "", "[smells.\(.key)]", "enabled = \(.value.enable)", "threshold = \(.value.threshold)"),
+  (if $f.duplication then "", "[smells.duplication]", "nodes_threshold = \($f.duplication.nodes_threshold)" else empty end),
+  (($f.radarlint // [])[] as $language | "radarlint-\($language)" as $plugin
+    | "", "[plugins.definitions.\($plugin)]", "file_types = [\($language | tojson)]",
+      "config_files = [\"radarlint.properties\"]", "latest_version = \"assay\"", "known_good_version = \"assay\"",
+      "", "[plugins.definitions.\($plugin).drivers.lint]",
+      "script = \("\($radarlint | @sh) \($language) ${target}" | tojson)", "success_codes = [0, 1]", "output = \"stdout\"",
+      "output_format = \"sarif\"", "output_missing = \"error\"", "batch = true", "cache_results = true"),
+  (($f.radarlint // [])[] | "", "[[plugin]]", "name = \("radarlint-\(.)" | tojson)", "version = \"assay\"")
+'
+
+# .qlty/configs/radarlint.properties, which radarlint reads from the directory it runs in: qlty links it into the repo
+# root while radarlint runs. A rule python:S3776 is radarlint.rules.python.S3776.
+radarlint_properties_jq='(.findings.rules // {}) | to_entries[] | "radarlint.rules.\(.key | sub(":"; "."))=\(.value)"'
+
+# What both programs over qlty's SARIF need. A path is a URI there, percent-encoded, non-ASCII characters included.
+# shellcheck disable=SC2016 # jq's $variables, not the shell's
+sarif_defs='
+def utf8_string:
+  . as $b | length as $n
+  | def code($i):
+      if $i >= $n then empty
+      else $b[$i] as $c
+        | if $c < 128 then $c, code($i + 1)
+          elif $c >= 240 then ($c % 8) * 262144 + ($b[$i + 1] % 64) * 4096 + ($b[$i + 2] % 64) * 64 + $b[$i + 3] % 64, code($i + 4)
+          elif $c >= 224 then ($c % 16) * 4096 + ($b[$i + 1] % 64) * 64 + $b[$i + 2] % 64, code($i + 3)
+          elif $c >= 192 then ($c % 32) * 64 + $b[$i + 1] % 64, code($i + 2)
+          else $c, code($i + 1) end
+      end;
+    [code(0)] | implode;
+def hex: ascii_downcase | explode | map(if . >= 97 then . - 87 else . - 48 end) | .[0] * 16 + .[1];
+def uri_path:
+  if test("%") then [match("%[0-9A-Fa-f]{2}|[^%]|%"; "g").string | if length == 3 then .[1:] | hex else explode[0] end] | utf8_string
+  else . end;
+def place: .locations[0].physicalLocation;
+def path: place.artifactLocation.uri // "" | uri_path;
+def line: place.region.startLine // 0;
+# A finding about a line, whose place is its start line; the other smells are about a function, a file or a clone.
+def about_a_line($run): $run == "lint" or (.ruleId | IN("qlty:nested-control-flow", "qlty:boolean-logic"));
+def clone: .ruleId | IN("qlty:identical-code", "qlty:similar-code");
+'
+
+# The findings on the change as one SARIF log, {"runs": [lint, smells]}, each result marked new or not with SARIF's
+# baselineState. A finding about a line is new when that line is new code. One about a function, a file or a clone is
+# new when the base has no counterpart: the same rule, file (through renames) and function; for a clone, the same file
+# and clone (qlty's structural hash). With more of one counterpart now than at the base, the ones that do not start on
+# new code take the base'"'"'s first.
+# shellcheck disable=SC2016 # jq's $variables, not the shell's
+findings_jq='
+($config[0].findings.rules // {}) as $rules
+| $new[0] as $new | $renames[0] as $renames
+| def smell_language: (place.region.sourceLanguage // "") | IN("python", "rust", "scala", "tsx", "typescript");
+  def rule_on: ($rules[.ruleId // "" | sub("^[^:]*:"; "")]) != false;
+  def on_new_code: path as $p | line as $l | any($new[$p][]?; .[0] <= $l and $l <= .[1]);
+  def function: .message.text // "" | capture("\\(count = [0-9]+\\): (?<name>.*)$").name // "";
+  def counterpart($p): if clone then ["clone", $p, .properties.structural_hash] else [.ruleId, $p, function] end | tojson;
+  def results: [.[0].runs[]?.results[]?];
+  ($lint | results | map(select(rule_on) | . + {baselineState: (if on_new_code then "new" else "unchanged" end)}))
+    as $lint_results
+| ($base | results | map(select(smell_language and (about_a_line("smells") | not)) | counterpart(path))
+    | reduce .[] as $k ({}; .[$k] += 1)) as $counts
+| ($smells | results | map(select(smell_language)) | to_entries
+    | map({i: .key, result: .value, fresh: (.value | on_new_code),
+        key: (.value | if about_a_line("smells") then null else counterpart($renames[path] // path) end)})) as $entries
+| (reduce ($entries | map(select(.key != null)) | group_by(.key)[]) as $group ({};
+      ($counts[$group[0].key] // 0) as $k
+      | reduce ($group | sort_by(.fresh, (.result | line)) | to_entries[]) as $e (.;
+          .[$e.value.i | tostring] = (if $e.key < $k then "unchanged" else "new" end)))) as $states
+| ($entries | map(.result + {baselineState: ($states[.i | tostring] // (if .fresh then "new" else "unchanged" end))}))
+    as $smells_results
+| {"$schema": "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json",
+   version: "2.1.0",
+   runs: [($lint[0].runs[0] + {results: $lint_results}), ($smells[0].runs[0] + {results: $smells_results})]}
+'
+
+# The text of a findings log: by file, a blank line between files; in a file the lint findings, then the smells, by
+# line, as "<path>:<line>: <tool>/<rule>: <message>", a clone followed by its places. With $only_new, the new ones
+# only, and nothing at all without any.
+# shellcheck disable=SC2016 # jq's $variables, not the shell's
+findings_text_jq='
+def plural($n; $word): "\($n) \($word)\(if $n == 1 then "" else "s" end)";
+def where: "\(.artifactLocation.uri // "" | uri_path):\(.region.startLine)-\(.region.endLine // .region.startLine)";
+[.runs | to_entries[] | (if .key == 0 then "lint" else "smells" end) as $run | .key as $order | .value.results[]?
+  | {path: path, line: line, order: $order, rule: (.ruleId // "" | sub(":"; "/")), new: (.baselineState == "new"),
+     about_a_line: about_a_line($run),
+     message: ((.message.text // "" | gsub("[\\r\\n\\t]+"; " "))
+       + (if clone then ": " + ([place, .relatedLocations[]?.physicalLocation] | map(where) | join(", ")) else "" end))}]
+| if $only_new then map(select(.new)) else . end
+| (map(select(.new)) | length) as $new
+| (group_by(.path)
+    | map(sort_by(.order, .line, .rule)
+        | map("\(.path):\(.line): \(.rule): \(.message)"
+            + if .new or $only_new then "" elif .about_a_line then " (not on new code)" else " (at the base too)" end)
+        | join("\n"))
+    | join("\n\n")) as $body
+| length as $all
+| if $only_new then
+    if $new == 0 then empty
+    else $body, "", "\(plural($new; "new finding")) on the change: fix each one (assay findings shows them among the rest)"
+    end
+  elif $all == 0 then "no findings on the change"
+  else $body, "", "\(plural($all; "finding")) on the change, "
+    + if $new == 0 then "none new: the findings check passes" else "\($new) of them new: the findings check fails on those" end
+  end
+'
+
+radarlint_bin=
+tool_missing=
+# findings_tools: qlty on the PATH, and radarlint when the configuration runs it, whose absolute path goes in
+# radarlint_bin. Returns 1, with the message in tool_missing, when one is missing.
+findings_tools() {
+  local languages
+  if ! command -v qlty >/dev/null; then
+    tool_missing="cannot find qlty on the PATH"
+    return 1
+  fi
+  languages=$(jq -r '.findings.radarlint // [] | join(" and ")' "$ASSAY_CONFIG") || die "cannot read $ASSAY_CONFIG"
+  [ -n "$languages" ] || return 0
+  if ! radarlint_bin=$(command -v radarlint) || ! radarlint_bin=$(readlink -f -- "$radarlint_bin"); then
+    tool_missing="cannot find radarlint on the PATH, which the findings run for $languages"
+    return 1
+  fi
+}
+
+# findings_prepare: .qlty/ kept out of git through .git/info/exclude, then .qlty/qlty.toml and
+# .qlty/configs/radarlint.properties written from the configuration, as on every run.
+findings_prepare() {
+  local exclude
+  if git ls-files --error-unmatch -- .qlty/qlty.toml >/dev/null 2>&1; then
+    die "the repo tracks .qlty/qlty.toml, which assay writes on every run from assay.findings: move its settings" \
+      "there and remove the file from git"
+  fi
+  exclude=$(git rev-parse --path-format=absolute --git-path info/exclude) || die "cannot find .git/info/exclude"
+  if ! grep -qxF .qlty/ "$exclude" 2>/dev/null; then
+    {
+      mkdir -p "$(dirname "$exclude")" &&
+        if [ -s "$exclude" ] && [ -n "$(tail -c 1 "$exclude")" ]; then echo >>"$exclude"; fi &&
+        echo .qlty/ >>"$exclude"
+    } || die "cannot add .qlty/ to $exclude"
+  fi
+  mkdir -p .qlty/configs || die "cannot create .qlty/configs"
+  jq -r --arg radarlint "$radarlint_bin" "$findings_toml_jq" "$ASSAY_CONFIG" >.qlty/qlty.toml ||
+    die "cannot write .qlty/qlty.toml"
+  jq -r "$radarlint_properties_jq" "$ASSAY_CONFIG" >.qlty/configs/radarlint.properties ||
+    die "cannot write .qlty/configs/radarlint.properties"
+}
+
+# run_qlty <out> <what> <dir> <arg>...: qlty with its arguments, from <dir>, with telemetry off and no update check;
+# its SARIF log goes to <out>. A failure, or anything but a SARIF log, is exit 2 with qlty's own message.
+run_qlty() {
+  local out=$1 what=$2 dir=$3 err rc=0
+  shift 3
+  tmp_file err
+  (
+    cd "$dir" || exit 2
+    # Elsewhere than in the repo, git's variables would name the repo instead.
+    if [ "$dir" != . ]; then unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE; fi
+    QLTY_TELEMETRY=off exec qlty --no-upgrade-check "$@"
+  ) >"$out" 2>"$err" || rc=$?
+  if [ "$rc" -eq 0 ] && jq -e '.runs | type == "array"' "$out" >/dev/null 2>&1; then return 0; fi
+  {
+    grep -v '^[[:space:]]*$' "$err" | tail -n 20
+    jq -r '.runs[]?.invocations[]?.toolExecutionNotifications[]?.message.text' "$out" 2>/dev/null
+  } >&2
+  if [ "$rc" -ne 0 ]; then die "$what failed (exit $rc)"; fi
+  die "$what printed no SARIF log"
+}
+
+# findings_base_smells <out> <path>...: qlty's smells about those files of the base, in a copy of the base's tree
+# (qlty needs a git repository: an empty one will do). A path the base does not have is left out.
+findings_base_smells() {
+  local out=$1 index copy p
+  local -a present=()
+  shift
+  tmp_file index
+  tmp_file copy -d
+  rm -f -- "$index"
+  GIT_INDEX_FILE=$index git read-tree "$base_sha" || die "cannot read the tree of the base $base_sha"
+  GIT_INDEX_FILE=$index git checkout-index -a -f --prefix="$copy/" || die "cannot copy the base's tree to $copy"
+  for p in "$@"; do
+    if [ -f "$copy/$p" ] && [ ! -L "$copy/$p" ]; then present+=("$p"); fi
+  done
+  if [ ${#present[@]} -eq 0 ]; then
+    echo '{"runs": []}' >"$out"
+    return 0
+  fi
+  env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE git -C "$copy" init --quiet || die "cannot create a repository in $copy"
+  { mkdir -p "$copy/.qlty" && cp .qlty/qlty.toml "$copy/.qlty/qlty.toml"; } || die "cannot write $copy/.qlty/qlty.toml"
+  run_qlty "$out" "qlty smells at the base" "$copy" smells --sarif --quiet -- "${present[@]}"
+}
+
+# findings_sarif <out>: the findings on the change, as findings_jq writes them, to <out>.
+findings_sarif() {
+  local out=$1 diff new renames lint smells base paths p
+  local -a counterparts=()
+  tmp_file diff
+  tmp_file new
+  tmp_file renames
+  tmp_file lint
+  tmp_file smells
+  tmp_file base
+  tmp_file paths
+  findings_prepare
+  change_diff "$base_sha" >"$diff"
+  new_code_json "$diff" >"$new"
+  renames_json "$diff" >"$renames"
+  run_qlty "$lint" "qlty check" . check --upstream "$base_sha" --sarif --no-progress --no-fail --no-formatters \
+    --level note
+  run_qlty "$smells" "qlty smells" . smells --upstream "$base_sha" --sarif --quiet
+  # The base's paths of the files whose smells about a function, a file or a clone need a counterpart.
+  jq -j --slurpfile renames "$renames" "$sarif_defs"'
+    [.runs[]?.results[]? | select((about_a_line("smells") | not)) | path] | unique[] | ($renames[0][.] // .) + "\u0000"' \
+    "$smells" >"$paths" || die "cannot read qlty's smells"
+  while IFS= read -r -d '' p; do counterparts+=("$p"); done <"$paths"
+  if [ ${#counterparts[@]} -gt 0 ]; then
+    findings_base_smells "$base" "${counterparts[@]}"
+  else
+    echo '{"runs": []}' >"$base"
+  fi
+  jq -n --slurpfile config "$ASSAY_CONFIG" --slurpfile lint "$lint" --slurpfile smells "$smells" \
+    --slurpfile base "$base" --slurpfile new "$new" --slurpfile renames "$renames" "$sarif_defs$findings_jq" >"$out" ||
+    die "cannot match the findings against the base"
+}
+
+cmd_findings() {
+  local sarif=0 log
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --sarif) sarif=1 ;;
+      --base)
+        [ $# -ge 2 ] || usage_error "--base needs a revision"
+        opt_base=$2 opt_base_set=1
+        shift
+        ;;
+      --base=*) opt_base=${1#--base=} opt_base_set=1 ;;
+      -h | --help)
+        usage_text
+        finish 0
+        ;;
+      *) usage_error "findings: unexpected argument '$1'" ;;
+    esac
+    shift
+  done
+  if [ "$opt_base_set" = 1 ] && [ -z "$opt_base" ]; then usage_error "--base needs a revision"; fi
+  load_config
+  find_repo
+  resolve_base
+  findings_tools || die "$tool_missing"
+  tmp_file log
+  findings_sarif "$log"
+  if [ "$sarif" = 1 ]; then
+    jq . "$log" || die "cannot print the SARIF log"
+  else
+    jq -r --argjson only_new false "$sarif_defs$findings_text_jq" "$log" || die "cannot print the findings"
+  fi
+  finish 0
+}
+
+builtin_findings() {
+  local log text
+  parse_base_option findings "$@"
+  load_config
+  find_repo
+  resolve_base
+  if ! findings_tools; then
+    echo "assay: $tool_missing" >&2
+    finish 127
+  fi
+  tmp_file log
+  findings_sarif "$log"
+  text=$(jq -r --argjson only_new true "$sarif_defs$findings_text_jq" "$log") || die "cannot print the findings"
+  [ -n "$text" ] || finish 0
+  printf '%s\n' "$text"
+  finish 1
+}
+
 cmd_builtin() {
   [ $# -ge 1 ] || usage_error "builtin needs the name of a built-in check"
   local check=$1
@@ -951,6 +1267,7 @@ cmd_builtin() {
     commit-trailers) builtin_commit_trailers "$@" ;;
     gitleaks) builtin_gitleaks "$@" ;;
     suppressions) builtin_suppressions "$@" ;;
+    findings) builtin_findings "$@" ;;
     *) usage_error "no built-in check named '$check'" ;;
   esac
 }
@@ -1207,6 +1524,11 @@ main() {
       shift
       if [ -z "${ASSAY_CONFIG:-}" ]; then delegate new-code "$@"; fi
       cmd_new_code "$@"
+      ;;
+    findings)
+      shift
+      if [ -z "${ASSAY_CONFIG:-}" ]; then delegate findings "$@"; fi
+      cmd_findings "$@"
       ;;
     # The machine-level subcommands run outside any devenv and never delegate.
     guard) not_yet guard "--rules <file>    the agent guard: one harness hook event on stdin" ;;

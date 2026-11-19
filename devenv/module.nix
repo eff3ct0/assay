@@ -19,6 +19,83 @@ let
   defaultChecks = lib.mapAttrs (_: d: removeAttrs d [ "packages" ]) defaults';
   defaultTools = lib.concatMap (d: d.packages or [ ]) (lib.attrValues defaults');
 
+  # The analyzer's policy (`assay findings` and the `findings` check): qlty's own smell thresholds, and Sonar's
+  # cognitive complexity off in radarlint, since complexity has one source, qlty's smells.
+  smellDefaults = {
+    boolean_logic = 4;
+    file_complexity = 50;
+    function_complexity = 18;
+    function_parameters = 6;
+    identical_code = 15;
+    nested_control_flow = 5;
+    return_statements = 6;
+    similar_code = 15;
+  };
+  nodesThresholdDefault = 64;
+  ruleDefaults = {
+    "python:S3776" = false;
+    "scala:S3776" = false;
+  };
+  # radarlint, a JVM, runs only for the languages the repo enables.
+  radarlintLanguages = builtins.filter (l: config.languages.${l}.enable or false) [
+    "python"
+    "scala"
+  ];
+
+  # A loosening of the analyzer's policy: a smell turned off or its threshold raised, a rule turned off.
+  findingsLoosenings =
+    lib.concatLists (
+      lib.mapAttrsToList (
+        kind: default:
+        let
+          s = cfg.findings.smells.${kind};
+        in
+        if !s.enable then
+          [
+            {
+              what = "smells.${kind} is off";
+              option = "assay.findings.smells.${kind}.reason";
+              inherit (s) reason;
+            }
+          ]
+        else if s.threshold > default then
+          [
+            {
+              what = "smells.${kind}.threshold is ${toString s.threshold}, above qlty's ${toString default}";
+              option = "assay.findings.smells.${kind}.reason";
+              inherit (s) reason;
+            }
+          ]
+        else
+          [ ]
+      ) smellDefaults
+    )
+    ++ (
+      let
+        d = cfg.findings.smells.duplication;
+      in
+      lib.optional (d.nodes_threshold > nodesThresholdDefault) {
+        what = "smells.duplication.nodes_threshold is ${toString d.nodes_threshold}, above qlty's ${toString nodesThresholdDefault}";
+        option = "assay.findings.smells.duplication.reason";
+        inherit (d) reason;
+      }
+    )
+    ++ lib.concatLists (
+      lib.mapAttrsToList (
+        key: r:
+        if !r.enable && (ruleDefaults.${key} or true) then
+          [
+            {
+              what = "rule ${key} is off";
+              option = "assay.findings.rules.${builtins.toJSON key}.reason";
+              inherit (r) reason;
+            }
+          ]
+        else
+          [ ]
+      ) cfg.findings.rules
+    );
+
   # A loosening: the repo turns one of assay's default checks off, or redefines its exec.
   loosenings = lib.concatLists (
     lib.mapAttrsToList (
@@ -46,12 +123,19 @@ let
         [ ]
     ) defaultChecks
   );
-  unreasoned = builtins.filter (l: l.reason == null) loosenings;
-  unreasonedMessage = ''
-    assay: a loosening needs a reason; set assay.checks.<name>.reason for:
-    ${lib.concatMapStringsSep "\n" (
-      l: "  - ${l.check}: ${if l.kind == "off" then "turned off" else "exec redefined"}"
-    ) unreasoned}'';
+  unreasonedChecks = builtins.filter (l: l.reason == null) loosenings;
+  unreasonedFindings = builtins.filter (l: l.reason == null) findingsLoosenings;
+  unreasoned = unreasonedChecks ++ unreasonedFindings;
+  unreasonedMessage = lib.concatStringsSep "\n" (
+    lib.optional (unreasonedChecks != [ ]) ''
+      assay: a loosening needs a reason; set assay.checks.<name>.reason for:
+      ${lib.concatMapStringsSep "\n" (
+        l: "  - ${l.check}: ${if l.kind == "off" then "turned off" else "exec redefined"}"
+      ) unreasonedChecks}''
+    ++ lib.optional (unreasonedFindings != [ ]) ''
+      assay: a loosening of the analyzer needs a reason; set:
+      ${lib.concatMapStringsSep "\n" (l: "  - ${l.option}: ${l.what}") unreasonedFindings}''
+  );
 
   # Check names become log file names.
   badNames = builtins.filter (n: builtins.match "[A-Za-z0-9][A-Za-z0-9._-]*" n == null) (
@@ -78,7 +162,21 @@ let
               requires
               ;
           }) cfg.checks;
-          loosenings = map (l: { inherit (l) check kind reason; }) loosenings;
+          loosenings =
+            map (l: { inherit (l) check kind reason; }) loosenings
+            ++ map (l: {
+              check = "findings";
+              kind = "setting";
+              inherit (l) what reason;
+            }) findingsLoosenings;
+          findings = {
+            radarlint = radarlintLanguages;
+            rules = lib.mapAttrs (_: r: r.enable) cfg.findings.rules;
+            smells = lib.mapAttrs (kind: _: {
+              inherit (cfg.findings.smells.${kind}) enable threshold;
+            }) smellDefaults;
+            duplication = { inherit (cfg.findings.smells.duplication) nodes_threshold; };
+          };
         }
       );
 
@@ -122,6 +220,30 @@ let
       };
     };
   };
+
+  reasonOption = mkOption {
+    type = types.nullOr types.nonEmptyStr;
+    default = null;
+    description = ''
+      Why the repo loosens the analyzer's policy here. A loosening without a reason fails evaluation; with one,
+      `assay check` lists it in its header on every run.
+    '';
+  };
+  smellModule = kind: threshold: {
+    options = {
+      enable = mkOption {
+        type = types.bool;
+        default = true;
+        description = "Whether qlty reports the ${kind} smell. Turning it off is a loosening and needs `reason`.";
+      };
+      threshold = mkOption {
+        type = types.ints.positive;
+        default = threshold;
+        description = "qlty's ${kind} threshold (qlty's default, ${toString threshold}). Raising it is a loosening and needs `reason`.";
+      };
+      reason = reasonOption;
+    };
+  };
 in
 {
   options.assay = {
@@ -129,6 +251,67 @@ in
       type = types.attrsOf (types.submodule checkModule);
       default = { };
       description = "The repo's named checks, run by `assay check`, assay's default checks included.";
+    };
+    findings = {
+      smells = mkOption {
+        type = types.submodule {
+          options =
+            lib.mapAttrs (
+              kind: threshold:
+              mkOption {
+                type = types.submodule (smellModule kind threshold);
+                default = { };
+                description = "qlty's `[smells.${kind}]`.";
+              }
+            ) smellDefaults
+            // {
+              duplication = mkOption {
+                type = types.submodule {
+                  options = {
+                    nodes_threshold = mkOption {
+                      type = types.ints.positive;
+                      default = nodesThresholdDefault;
+                      description = ''
+                        The size, in syntax nodes, from which qlty compares code for clones (qlty's default,
+                        ${toString nodesThresholdDefault}; Rust's own, 50, stays). Raising it is a loosening and needs
+                        `reason`.
+                      '';
+                    };
+                    reason = reasonOption;
+                  };
+                };
+                default = { };
+                description = "qlty's `[smells.duplication]`.";
+              };
+            };
+        };
+        default = { };
+        description = ''
+          qlty's smells, which `assay findings` shows and whose new ones fail the `findings` check: each kind's
+          `enable` and `threshold`, with qlty's names and defaults.
+        '';
+      };
+      rules = mkOption {
+        type = types.attrsOf (
+          types.submodule {
+            options = {
+              enable = mkOption {
+                type = types.bool;
+                default = true;
+                description = "Whether radarlint reports the rule. Turning one off is a loosening and needs `reason`.";
+              };
+              reason = reasonOption;
+            };
+          }
+        );
+        default = { };
+        example = lib.literalExpression ''{ "python:S1192" = { enable = false; reason = "..."; }; }'';
+        description = ''
+          radarlint's rules, by Sonar's key (`python:S3776`). A rule nobody wants is turned off, not downgraded:
+          every finding on new code fails the `findings` check. Sonar's cognitive complexity (`S3776`) is off by
+          default, since qlty's smells measure complexity.
+        '';
+      };
     };
     seed = mkOption {
       type = types.ints.between 1 2147483647;
@@ -143,6 +326,7 @@ in
 
   config = {
     assay.checks = lib.mapAttrs (_: lib.mapAttrs (_: mkDefault)) defaultChecks;
+    assay.findings.rules = lib.mapAttrs (_: enable: { enable = mkDefault enable; }) ruleDefaults;
 
     packages = [ assay ] ++ defaultTools;
     env.ASSAY_CONFIG = "${configFile}";

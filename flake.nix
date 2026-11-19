@@ -47,18 +47,27 @@
 
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {
-          packages = with pkgs; [
-            bats
-            shellcheck
-            nixfmt
-            jq
-            git
-            gawk
-            # The built-in checks' tools, which assay's devenv module adds to every repo's devenv.
-            actionlint
-            gitleaks
-            oxfmt
-          ];
+          packages =
+            with pkgs;
+            [
+              bats
+              shellcheck
+              nixfmt
+              jq
+              git
+              gawk
+              # The built-in checks' tools, which assay's devenv module adds to every repo's devenv (radarlint to those
+              # with Python or Scala).
+              actionlint
+              gitleaks
+              oxfmt
+            ]
+            ++ builtins.attrValues (
+              removeAttrs self.packages.${pkgs.stdenv.hostPlatform.system} [
+                "assay"
+                "default"
+              ]
+            );
         };
       });
 

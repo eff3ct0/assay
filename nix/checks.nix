@@ -13,6 +13,14 @@ let
           type = lib.types.str;
           default = "/repo";
         };
+        languages.python.enable = lib.mkOption {
+          type = lib.types.bool;
+          default = false;
+        };
+        languages.scala.enable = lib.mkOption {
+          type = lib.types.bool;
+          default = false;
+        };
         languages.javascript = {
           enable = lib.mkOption {
             type = lib.types.bool;
@@ -72,6 +80,7 @@ let
   evalBuiltin = evalModule (import ../devenv/defaults.nix);
   builtinPlain = evalBuiltin { };
   builtinJavascript = evalBuiltin { languages.javascript.enable = true; };
+  builtinPython = evalBuiltin { languages.python.enable = true; };
   javascriptIn =
     directory:
     evalBuiltin {
@@ -222,6 +231,7 @@ in
         same ${builtinPlain.env.ASSAY_CONFIG} ${../test/defaults/plain.json}
         same ${builtinJavascript.env.ASSAY_CONFIG} ${../test/defaults/javascript.json}
         same ${builtinFrontend.env.ASSAY_CONFIG} ${../test/defaults/javascript-frontend.json}
+        same ${builtinPython.env.ASSAY_CONFIG} ${../test/defaults/python.json}
         touch $out
       '';
 }
