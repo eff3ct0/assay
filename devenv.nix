@@ -2,6 +2,8 @@
 { pkgs, ... }:
 {
   packages = with pkgs; [
+    # ast-grep: the guard's tests run assay.sh, which finds it on the PATH.
+    ast-grep
     bats
     git
     jq
