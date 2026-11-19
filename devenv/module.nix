@@ -112,7 +112,7 @@ let
   defaultNewCode = 80;
 
   # A loosening: the repo turns one of assay's default checks off, redefines its exec, or changes the coverage
-  # report it is measured with; or it lowers assay.coverage.newCode.
+  # report it is measured with; or it lowers assay.coverage.newCode; or it loosens the analyzer (findingsLoosenings).
   loosenings =
     lib.concatLists (
       lib.mapAttrsToList (

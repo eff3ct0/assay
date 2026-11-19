@@ -23,7 +23,8 @@ _Avoid_: marker (for the required file; the agent marker is another thing)
 
 **Loosening**:
 An override that makes one of assay's default checks less strict than the default: turning it off, redefining its
-command or its coverage report, or lowering the coverage of new code it asks for.
+command or its coverage report, lowering the coverage of new code it asks for, or, for the analyzer, raising a smell's
+threshold or turning a smell or a rule off.
 
 **Built-in check**:
 One of assay's default checks that every repo importing its devenv module runs, whatever the repo's languages.
