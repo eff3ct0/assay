@@ -63,12 +63,22 @@ nixos-config issues it links (#50, #52, #58, #56, #47). Branch `agent/nix-bash-d
 - **assay itself:** `devenv.nix` enables `languages.nix` and `languages.shell`, drops its `bats` check; each check's
   cleanup of the tree is its own commit (shfmt's reformat to tabs, shellcheck over the `.bats` files, ...).
 
+## Merge with main (#19, the built-in checks)
+
+- main's `devenv/defaults.nix` holds the built-in checks; each language's checks live in `devenv/languages/nix.nix`
+  and `devenv/languages/bash.nix`, which it adds; the helpers' package is `nix/check-helpers.nix`.
+- `test/devenv/defaults.bats` imports a copy of assay with the languages' checks alone (`ASSAY_LANGUAGES`), so the
+  built-in ones (agents-md, oxfmt...) stay out of its fixtures.
+- Shell files were merged three-way after formatting base and main with shfmt; main's new test files got the same
+  shellcheck cleanup (source with a directive; SC2016 with a reason).
+- After the merge commit the base is main's tip (b93c455); `devenv test` passes, bats covering 91% of the new lines.
+  Before that commit, diff-cover counted all of main's code as staged, new code (57%): measure only committed merges.
+
 ## Remaining steps
 
-Done: steps 1-6 and the code review (its fixes in `fix: review findings…`: assay-bats names every script to kcov at
-line 0, since kcov's walk misses a `.bash` library without "sh" in its first 80 bytes).
+Done: steps 1-6, the code review, the critic's four failures (`fix: critic findings…`) and the merge with main.
 
-1. Critic, then one recheck critic on its failures.
+1. One recheck critic on the critic's failures and the diff of the fix (`654b504..HEAD`).
 
 Open decisions for p3rkins (not to be decided by an agent):
 
@@ -77,3 +87,5 @@ Open decisions for p3rkins (not to be decided by an agent):
 - kcov is nixpkgs' kcov patched (`nix/kcov.nix`), so it builds from source where no cache has it.
 - `ASSAY_DIR` and the `coverage` loosening kind are interface the issue did not name.
 - With a script at the repo root, kcov's `--bash-parse-files-in-dir` walks the whole root, ignored trees included.
+- kcov counts the lines inside a multi-line string (assay.sh's embedded jq and awk programs) as code that never runs:
+  a change to such a program is new code no test can cover. Worth an issue of its own.
