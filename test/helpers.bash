@@ -135,6 +135,14 @@ builtin_checks() {
 	PATH=$DEVENV_STUB_PROFILE:$PATH
 }
 
+# tla_on: the built-in checks' configuration of a plain repo (builtin_checks plain) with the tla check turned on, as a
+# repo turns it on in its devenv.nix.
+tla_on() {
+	builtin_checks plain
+	jq '.checks.tla.enable = true' "$ASSAY_CONFIG" >"$T/tla.json"
+	export ASSAY_CONFIG=$T/tla.json
+}
+
 # shaped_repo: a repo with one commit that every built-in check passes, as the current directory.
 shaped_repo() {
 	local_repo

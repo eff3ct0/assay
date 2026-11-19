@@ -122,6 +122,7 @@ let
   builtinFrontend = javascriptIn "./frontend";
   oxfmtExec = config: config.assay.checks.oxfmt.exec;
   builtinDemoPack = evalBuiltin { assay.rulePacks = [ "demo" ]; };
+  builtinTla = evalBuiltin { assay.checks.tla.enable = true; };
   languagesOn = evalWith {
     languages = {
       javascript.enable = true;
@@ -424,6 +425,24 @@ let
         ];
     "redefining a built-in check's exec is a loosening" =
       !evaluatesBuiltin { assay.checks.oxfmt.exec = "oxfmt --check ."; };
+    "the tla check is off by default, runs in the full run only, and requires tla/*.cfg" =
+      (listed builtinPlain).tla == {
+        fast = false;
+        enable = false;
+        requires = "tla/*.cfg";
+        coverage = null;
+      }
+      && builtinPlain.assay.checks.tla.exec == "assay builtin tla";
+    "TLC joins the devenv only once the repo turns the tla check on" =
+      !(lib.elem "tlaplus" (names builtinPlain)) && lib.elem "tlaplus" (names builtinTla);
+    "a default check on by default keeps its tools when the repo turns it off" = lib.elem "gitleaks" (
+      names (evalBuiltin {
+        assay.checks.gitleaks = {
+          enable = false;
+          reason = "off for the test";
+        };
+      })
+    );
   };
   failed = lib.attrNames (lib.filterAttrs (_: ok: !ok) expectations);
 
@@ -446,6 +465,10 @@ let
       ];
     };
   exampleRules = import ../test/rules/example.nix;
+  # assay's skills, each a directory of skills/, in name order.
+  skillNames = lib.attrNames (
+    lib.filterAttrs (_: type: type == "directory") (builtins.readDir ../skills)
+  );
   home = homeWith {
     programs.assay = {
       enable = true;
@@ -585,9 +608,11 @@ let
       w: lib.hasInfix "no commit or push runs assay's rules" w
     ) withoutGit.config.warnings;
     "disabled, the module registers no hook" = !(disabled.config.programs.git.settings ? hook);
-    "disabled, the module installs no skill" =
-      !(disabled.config.home.file ? ".claude/skills/assay-rule")
-      && !(disabled.config.xdg.configFile ? "opencode/skills/assay-rule");
+    "disabled, the module installs no skill" = lib.all (
+      skill:
+      !(disabled.config.home.file ? ".claude/skills/${skill}")
+      && !(disabled.config.xdg.configFile ? "opencode/skills/${skill}")
+    ) skillNames;
   };
   homeFailed = lib.attrNames (lib.filterAttrs (_: ok: !ok) homeExpectations);
 
@@ -662,6 +687,8 @@ in
         same ${builtinJavascript.env.ASSAY_CONFIG} ${../test/defaults/javascript.json}
         same ${builtinFrontend.env.ASSAY_CONFIG} ${../test/defaults/javascript-frontend.json}
         same ${builtinPython.env.ASSAY_CONFIG} ${../test/defaults/python.json}
+        # Turning the tla check on is no loosening.
+        jq -e '.checks.tla.enable and .loosenings == []' ${builtinTla.env.ASSAY_CONFIG}
         # A loosening of the analyzer, with what it is; a tightening, none.
         jq -e '.loosenings == [
             {check: "findings", kind: "setting", reason: "parsers are one big match",
@@ -709,9 +736,12 @@ in
         }
         # assay is on the user's PATH.
         test -x ${home.activationPackage}/home-path/bin/assay
-        # The skills, where Claude Code loads them and where OpenCode does, as the repo holds them.
+        # Every skill, where Claude Code loads them and where OpenCode does, as the repo holds them, and nothing else.
         for dir in .claude/skills .config/opencode/skills; do
-          cmp ${home.activationPackage}/home-files/$dir/assay-rule/SKILL.md ${../skills/assay-rule/SKILL.md}
+          [ "$(ls ${home.activationPackage}/home-files/$dir)" = ${lib.escapeShellArg (lib.concatStringsSep "\n" skillNames)} ]
+          for skill in ${lib.escapeShellArgs skillNames}; do
+            cmp ${home.activationPackage}/home-files/$dir/$skill/SKILL.md ${../skills}/$skill/SKILL.md
+          done
         done
         # The generated git config holds both hooks.
         gitconfig=${home.activationPackage}/home-files/.config/git/config

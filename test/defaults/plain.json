@@ -63,6 +63,13 @@
       "enable": true,
       "requires": null,
       "coverage": null
+    },
+    "tla": {
+      "exec": "assay builtin tla",
+      "fast": false,
+      "enable": false,
+      "requires": "tla/*.cfg",
+      "coverage": null
     }
   },
   "loosenings": [],

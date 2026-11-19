@@ -2,9 +2,10 @@
 # { <name> = { exec; fast; enable ? true; requires ? null; coverage ? null; packages ? [ ]; }; }. The module sets each
 # check field with lib.mkDefault, so a plain definition in the repo overrides it; turning one off, redefining its exec
 # or changing its coverage is a loosening, which needs `assay.checks.<name>.reason`. `packages` are the tools the
-# check runs, which join the repo's devenv whether the check is on or not. test/defaults/*.json hold the configuration
-# these give, which nix/checks.nix compares with the module's and the bats suite runs. The built-in checks, which
-# every repo runs, are here; each language's, on when the repo enables the language, in languages/.
+# check runs, which join the repo's devenv whether the check is on or not; those of a check off by default, only once
+# the repo turns it on. test/defaults/*.json hold the configuration these give, which nix/checks.nix compares with the
+# module's and the bats suite runs. The built-in checks, which every repo runs, and the opt-in ones, off until a repo
+# turns them on, are here; each language's, on when the repo enables the language, in languages/.
 args@{
   config,
   lib,
@@ -101,6 +102,16 @@ in
   suppressions = {
     exec = "assay builtin suppressions";
     fast = true;
+  };
+  # TLC over the repo's TLA+ models: each tla/<Name>.cfg against tla/<Name>.tla. Off by default, since on it would
+  # bring Java 21 into every repo's devenv for a tool few repos use: a repo turns it on in its devenv.nix
+  # (assay.checks.tla.enable = true), which brings tlaplus18 (TLC 1.8.0) into its devenv.
+  tla = {
+    exec = "assay builtin tla";
+    fast = false;
+    enable = false;
+    requires = "tla/*.cfg";
+    packages = [ pkgs.tlaplus18 ];
   };
 }
 // import ./languages/nix.nix args
