@@ -1026,9 +1026,10 @@ def clone: .ruleId | IN("qlty:identical-code", "qlty:similar-code");
 
 # The findings on the change as one SARIF log, {"runs": [lint, smells]}, each result marked new or not with SARIF's
 # baselineState. A finding about a line is new when that line is new code. One about a function, a file or a clone is
-# new when the base has no counterpart: the same rule, file (through renames) and function; for a clone, the same file
-# and clone (qlty's structural hash). With more of one counterpart now than at the base, the ones that do not start on
-# new code take the base'"'"'s first.
+# new when the base has no counterpart: the same rule, file (through renames) and function; for a clone's place, a
+# clone's place in the same file, between the same files. qlty's hash of a clone is no identity: a clone grows or
+# shrinks to the largest piece of code its places share, so an unrelated edit next to one changes it. With more of one
+# counterpart now than at the base, the ones that do not start on new code take the base'"'"'s first.
 # shellcheck disable=SC2016 # jq's $variables, not the shell's
 findings_jq='
 ($config[0].findings.rules // {}) as $rules
@@ -1037,15 +1038,20 @@ findings_jq='
   def rule_on: ($rules[.ruleId // "" | sub("^[^:]*:"; "")]) != false;
   def on_new_code: path as $p | line as $l | any($new[$p][]?; .[0] <= $l and $l <= .[1]);
   def function: .message.text // "" | capture("\\(count = [0-9]+\\): (?<name>.*)$").name // "";
-  def counterpart($p): if clone then ["clone", $p, .properties.structural_hash] else [.ruleId, $p, function] end | tojson;
+  def counterpart($paths):
+    path as $p
+    | if clone then ["clone", ($paths[$p] // $p),
+        ([place, .relatedLocations[]?.physicalLocation] | map(.artifactLocation.uri // "" | uri_path | $paths[.] // .) | unique)]
+      else [.ruleId, ($paths[$p] // $p), function] end
+    | tojson;
   def results: [.[0].runs[]?.results[]?];
   ($lint | results | map(select(rule_on) | . + {baselineState: (if on_new_code then "new" else "unchanged" end)}))
     as $lint_results
-| ($base | results | map(select(smell_language and (about_a_line("smells") | not)) | counterpart(path))
+| ($base | results | map(select(smell_language and (about_a_line("smells") | not)) | counterpart({}))
     | reduce .[] as $k ({}; .[$k] += 1)) as $counts
 | ($smells | results | map(select(smell_language)) | to_entries
     | map({i: .key, result: .value, fresh: (.value | on_new_code),
-        key: (.value | if about_a_line("smells") then null else counterpart($renames[path] // path) end)})) as $entries
+        key: (.value | if about_a_line("smells") then null else counterpart($renames) end)})) as $entries
 | (reduce ($entries | map(select(.key != null)) | group_by(.key)[]) as $group ({};
       ($counts[$group[0].key] // 0) as $k
       | reduce ($group | sort_by(.fresh, (.result | line)) | to_entries[]) as $e (.;
