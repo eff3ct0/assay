@@ -50,4 +50,8 @@ The issue links its spec: eff3ct0/nixos-config#58 (its resolution comment) and #
    one set of files each); `assay preset bash` on assay itself. (done)
 7. `devenv test`, `bats test/devenv`, `nix flake check`; commits. (done: `devenv test` passed, 206 tests, new code
    87% covered)
-8. Review (`code-review` skill): fixes applied. Critic, then the pull request. (in progress)
+8. Review (`code-review` skill): fixes applied. (done)
+9. `origin/main` (#24: `assay rule new`, the `ast-grep` check, rule packs) merged in: the configuration's `languages`
+   is main's (ast-grep's names, shell as `bash`), which the presets read; main's new scripts and tests pass the
+   preset's optional checks. `devenv test` passed again. (done)
+10. Critic on the branch against its new base, 62bc336; then the pull request. (in progress)
