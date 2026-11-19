@@ -8,9 +8,17 @@ lib.optionalAttrs (config.languages.scala.enable or false) (
     scalafmt = {
       # Use scalafmt's native-image version check on the JVM: even for complex HOCON, a mismatch prints the
       # bundled version to set instead of starting the dynamic (downloading) runner.
-      exec = ''JDK_JAVA_OPTIONS="''${JDK_JAVA_OPTIONS:-} -Dscalafmt.native-image=true" scalafmt --test'';
+      exec = ''
+        set -o pipefail
+        export JDK_JAVA_OPTIONS="''${JDK_JAVA_OPTIONS:-} -Dscalafmt.native-image=true"
+        assay-files '**/*.scala' '**/*.sc' '**/*.sbt' | sed -z 's|^|./|' |
+          xargs -0 -r scalafmt --test --respect-project-filters
+      '';
       fast = true;
-      packages = [ pkgs.scalafmt ];
+      packages = [
+        pkgs.scalafmt
+        (pkgs.callPackage ../../nix/check-helpers.nix { })
+      ];
     };
     scala-compile = {
       exec = "env -u SBT_TPOLECAT_DEV sbt --server --batch ';compile;Test/compile'";

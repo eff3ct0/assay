@@ -1256,7 +1256,12 @@ record_changed=0
 
 render_scalafmt() {
 	local version
-	version=$(scalafmt --version) || die "cannot read scalafmt's version"
+	version=
+	if [ $# -eq 3 ]; then
+		version=$(sed -n 's/^# assay preset base: \(scalafmt [0-9.]*\)$/\1/p' "$3") || die "cannot read $3"
+	fi
+	# A file kept at adoption may lack the preset's stamp. Do not infer its base from its editable version setting.
+	if [ -z "$version" ]; then version=$(scalafmt --version) || die "cannot read scalafmt's version"; fi
 	[[ $version =~ ^scalafmt\ ([0-9]+(\.[0-9]+)+)$ ]] || die "unexpected scalafmt version: $version"
 	sed "s/@SCALAFMT_VERSION@/${BASH_REMATCH[1]}/g" "$1" >"$2" || die "cannot render $1"
 }
@@ -1332,7 +1337,7 @@ apply_preset() {
 		fi
 		if [ -f "$presets/$lang/$from/$f" ]; then
 			if [[ $lang/$f == scala/.scalafmt.conf ]]; then
-				render_scalafmt "$presets/$lang/$from/$f" "$base"
+				render_scalafmt "$presets/$lang/$from/$f" "$base" "$target"
 			else
 				cat -- "$presets/$lang/$from/$f" >"$base" || die "cannot read $lang's preset $from"
 			fi

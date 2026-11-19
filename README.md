@@ -397,7 +397,8 @@ ignored files are never read; with nothing to check, it passes.
   `$ASSAY_DIR/kcov/bats/cobertura.xml`, lists every shell script, those no test runs included, and nothing else.
   nixpkgs has kcov for Linux only: elsewhere `bats` fails on the missing tool until the repo turns it off with a
   reason.
-- Scala checks require `build.sbt`; a scala-cli project without one skips all four. `assay preset scala` supplies the
+- Scala checks require `build.sbt`. Without it, `assay check --list` still lists all four by name; running `assay check`
+  reports `skip <name> (no build.sbt)`. `assay preset scala` supplies the
   [sbt plugins and linter settings](preset/README.md#scala). There is no on-change advisory check for sbt.
 - The commands call three helpers the module puts on the PATH (`devenv/bin`): `assay-files [<glob>...]` (the files
   git sees that exist, NUL-terminated), `assay-nixf-tidy <file>...` and `assay-bats <dir>`.

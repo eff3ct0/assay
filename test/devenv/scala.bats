@@ -47,7 +47,13 @@ scala_check() {
 	sed -i 's/ = n/  =  n/' "$src"
 	scala_check 1 scalafmt
 	git restore "$src"
+	mkdir -p target/generated
+	printf 'object  Generated{val x=1}\n' >target/generated/Generated.scala
 	scala_check 0 scalafmt
+	cp target/generated/Generated.scala 'New file.scala'
+	scala_check 1 scalafmt
+	[[ $output == *"New file.scala"* ]]
+	rm 'New file.scala'
 
 	sed -i '/object Calc {/a\  var counter: Int = 0' "$src"
 	scala_check 1 scala-compile
