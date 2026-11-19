@@ -6,7 +6,7 @@ source "${BATS_TEST_DIRNAME:?}/helpers.bash"
 	local_repo
 	languages scala
 	mkdir "$T/bin"
-	printf '%s\n' '#!/usr/bin/env bash' 'echo "scalafmt 3.11.5"' >"$T/bin/scalafmt"
+	printf '%s\n' "#!${BASH:?}" 'echo "scalafmt 3.11.5"' >"$T/bin/scalafmt"
 	chmod +x "$T/bin/scalafmt"
 	export PATH=$T/bin:$PATH assay_presets=$T/presets
 	cp -r "$BATS_TEST_DIRNAME/../preset" "$assay_presets"
