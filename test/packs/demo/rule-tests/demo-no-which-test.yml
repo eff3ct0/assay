@@ -1,0 +1,8 @@
+id: demo-no-which
+invalid:
+  - which git
+  - if which git >/dev/null; then echo found; fi
+valid:
+  - command -v git
+  - echo which git
+  - "# which git"
