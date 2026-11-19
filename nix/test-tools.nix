@@ -22,6 +22,8 @@ lib.optional (lib.meta.availableOn stdenv.hostPlatform kcov) (callPackage ./kcov
   shfmt
   nixf
   gawk
+  python3Packages.jsonschema
+  xmlstarlet
   ast-grep
   yq-go
   # The built-in checks' tools, which assay's devenv module adds to every repo's devenv.

@@ -38,6 +38,7 @@ usage: assay check [--fast] [--base <rev>] [<check>...]    run the repo's checks
        assay builtin findings [--base <rev>]
        assay builtin tla
        assay findings [--base <rev>] [--sarif]             the analyzer's findings on the change
+       assay measure                                       the tree's snapshot metrics, as JSON
        assay new-code [--base <rev>]                       the change's new code, as JSON
        assay rule new <kebab-name> [--lang <lang>] [--from <file>:<line>[-<line>]]
                                                            scaffold an ast-grep rule and its tests
@@ -45,7 +46,7 @@ usage: assay check [--fast] [--base <rev>] [<check>...]    run the repo's checks
        assay git-hook --rules <file> <hook> [<git's arguments>]
                                                            a global git hook: commit-msg or pre-push
 
-Outside the repo's devenv (ASSAY_CONFIG unset), check, preset, builtin, findings, new-code and rule
+Outside the repo's devenv (ASSAY_CONFIG unset), check, preset, builtin, findings, measure, new-code and rule
 run themselves inside it: devenv shell -- assay <command>, so the version the repo pins decides.
 guard and git-hook run where they are called, over the rule list given with --rules.
 The base of the change: --base, else ASSAY_BASE, else GitHub's event (GITHUB_EVENT_PATH), else the
@@ -53,8 +54,8 @@ fork point of HEAD from the default branch, else their merge base. assay never f
 Exit codes: 0 every selected check passed, 1 at least one failed, 2 assay could not run;
 assay preset exits 1 on a conflict or on a kept file that differs from the preset;
 assay builtin exits 127 when the tool its check runs is missing, and assay rule new 1 when a rule of
-that name already exists; assay findings exits 0 whenever it ran, with findings or without. assay
-guard exits 0 with its answer on stdout, and 1 on its own error, which lets the call through; assay
+that name already exists; assay findings and measure exit 0 whenever they ran, regardless of findings or
+failing checks. assay guard exits 0 with its answer on stdout, and 1 on its own error, which lets the call through; assay
 git-hook exits 1 when a rule is violated or cannot be evaluated.
 EOF
 }
@@ -87,6 +88,9 @@ usage_error() {
 }
 # Temporary files and directories, removed on exit.
 tmp_paths=()
+snapshot_gitfile=
+snapshot_qlty_files=()
+snapshot_qlty_dirs=()
 # tmp_file <var> [-d] [<template>]: a new temporary file (or directory, with -d), removed on exit, its path in <var>.
 tmp_file() {
 	local -n tmp_var=$1
@@ -97,6 +101,9 @@ tmp_file() {
 # shellcheck disable=SC2329 # invoked by the EXIT trap
 on_exit() {
 	local rc=$?
+	if [ ${#snapshot_qlty_files[@]} -gt 0 ]; then rm -f -- "${snapshot_qlty_files[@]}" || true; fi
+	if [ ${#snapshot_qlty_dirs[@]} -gt 0 ]; then rmdir -- "${snapshot_qlty_dirs[@]}" 2>/dev/null || true; fi
+	if [ -n "$snapshot_gitfile" ]; then rm -f -- "$snapshot_gitfile" || true; fi
 	if [ ${#tmp_paths[@]} -gt 0 ]; then rm -rf -- "${tmp_paths[@]}"; fi
 	if [ -z "$exiting" ] && [ "$rc" -ne 0 ]; then
 		echo "assay: ${die_prefix}unexpected failure (exit $rc)" >&2
@@ -399,7 +406,7 @@ resolve_base() {
 # requires_met <glob>: some file git sees in the working tree (tracked or untracked, not ignored) matches the glob,
 # relative to the repo root.
 requires_met() {
-	local f list=$gitdir/assay/requires.tmp
+	local f list=${2:-$gitdir/assay/requires.tmp}
 	git ls-files -z --cached --others --exclude-standard -- ":(top,glob)$1" >"$list" ||
 		die "cannot match '$1' against the working tree"
 	while IFS= read -r -d '' f; do
@@ -2486,6 +2493,222 @@ cmd_check() {
 	run_checks
 }
 
+# A snapshot can be extracted below another repo; do not climb out of it to that repo's .git.
+find_snapshot() {
+	local dir=$PWD
+	while [ "$dir" != / ]; do
+		if [ -e "$dir/.git" ] || [ -L "$dir/.git" ] || [ -f "$dir/devenv.nix" ]; then
+			root=$dir
+			cd "$root"
+			return
+		fi
+		dir=${dir%/*}
+		dir=${dir:-/}
+	done
+	root=$PWD
+}
+
+snapshot_git() {
+	local dir=$1
+	if [ -e .git ] || [ -L .git ]; then
+		gitdir=$(git rev-parse --absolute-git-dir) || die "cannot find the git directory"
+		return
+	fi
+	# qlty and the file-based checks discover .git, and bats needs an index. Supply one without a commit,
+	# parent, remote or hooks. Only the temporary gitfile lives in the extracted tree.
+	unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR
+	git init --quiet --template= --separate-git-dir="$dir/git" || die "cannot create snapshot git metadata"
+	snapshot_gitfile=$root/.git
+	gitdir=$dir/git
+	mkdir -p "$gitdir/info"
+	printf '%s\n' /.devenv/ /.devenv.flake.nix /.pre-commit-config.yaml /.qlty/ >"$gitdir/info/exclude"
+	# An archive can contain committed files that now match a .gitignore pattern. Keep them, but not
+	# the shell's generated files. Do not run global clean filters when constructing the index.
+	GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -c core.autocrlf=false add -f -- . \
+		':(exclude,top).devenv' ':(exclude,top).direnv' ':(exclude,top).devenv.flake.nix' \
+		':(exclude,top).pre-commit-config.yaml' || die "cannot index the snapshot"
+}
+
+snapshot_checks() {
+	local dir=$1 artifacts=$2 n report rc start now secs
+	local -a checks_failed=()
+	now_us
+	start=$now
+	for n in "${names[@]}"; do
+		[ "${c_enable[$n]}" = 1 ] || continue
+		case $n in
+		commit-trailers | findings | suppressions | mutation | diff-cover | advisory | advisories | \
+			*-advisory | *-advisories | osv-scanner | osv-scanner-*)
+			continue
+			;;
+		esac
+		report=
+		if [ -n "${c_coverage[$n]}" ]; then
+			printf '%s\n' null >"$dir/coverage/$n"
+			report=$(report_path "${c_coverage[$n]}" "$artifacts")
+		fi
+		if [ -n "${c_requires[$n]}" ] && ! requires_met "${c_requires[$n]}" "$dir/requires"; then continue; fi
+		# Never consume a report from an earlier run, even if the check passes.
+		if [ -n "$report" ] && ! rm -f -- "$report"; then report=; fi
+		rc=0
+		PATH=$caller_path ASSAY_DIR=$artifacts "$BASH" -c "${c_exec[$n]}" </dev/null >"$dir/check.log" 2>&1 || rc=$?
+		if [ "$rc" -ne 0 ]; then
+			checks_failed+=("$n")
+			printf 'assay: measure: %s failed (exit %s)\n' "$n" "$rc" >&2
+			print_head "$dir/check.log" >&2
+		elif [ -n "$report" ]; then
+			snapshot_coverage "$report" >"$dir/coverage/$n"
+		fi
+	done
+	now_us
+	fmt_secs secs "$((now - start))"
+	jq -nc --argjson seconds "${secs%s}" --args \
+		'{seconds: $seconds, failed: $ARGS.positional}' "${checks_failed[@]}" >"$dir/checks.json"
+}
+
+# LCOV summaries are per source record. Some producers omit them; DA records still carry the counts.
+IFS= read -r -d '' snapshot_lcov_awk <<'AWK' || true
+{ sub(/\r$/, "") }
+$1 == "SF" { if (open || length($0) < 4) bad = 1; open = 1; lf = lh = -1; da = hit = 0 }
+$1 == "LF" { if (!open || $2 !~ /^[0-9]+$/ || lf >= 0) bad = 1; lf = $2 + 0 }
+$1 == "LH" { if (!open || $2 !~ /^[0-9]+$/ || lh >= 0) bad = 1; lh = $2 + 0 }
+$1 == "DA" { if (!open || $2 !~ /^[1-9][0-9]*$/ || $3 !~ /^[0-9]+$/) bad = 1; da++; hit += ($3 > 0) }
+$0 == "end_of_record" {
+  if (!open || (lf < 0) != (lh < 0) || lh > lf) bad = 1
+  total += (lf < 0 ? da : lf); covered += (lh < 0 ? hit : lh); records++; open = 0
+}
+END { if (bad || open || !records) exit 1; printf "%.0f %.0f\n", covered, total }
+AWK
+
+snapshot_coverage() {
+	local report=$1 counts covered total
+	if [ -f "$report" ]; then
+		# Cobertura's root attributes count distinct covered and coverable lines.
+		local -a counters=(-v /coverage/@lines-covered -o ' ' -v /coverage/@lines-valid)
+		if ! counts=$(xmlstarlet sel -T -t "${counters[@]}" "$report" 2>/dev/null); then
+			counts=$(awk -F '[:,]' "$snapshot_lcov_awk" "$report") || counts=
+		fi
+		read -r covered total <<<"$counts"
+		if [[ $covered =~ ^[0-9]+$ && $total =~ ^[0-9]+$ ]]; then
+			if jq -enc --arg c "$covered" --arg t "$total" '{covered: ($c|tonumber), total: ($t|tonumber)}
+				| select(.covered <= .total)'; then return; fi
+		fi
+	fi
+	printf '%s\n' null
+}
+
+# Each probe writes exactly one value. A failure (including a malformed report) is local to that metric.
+snapshot_metric() {
+	local out=$1 metric=$2 value
+	shift 2
+	if value=$("$@"); then
+		printf '%s\n' "$value" >"$out"
+	else
+		printf 'assay: measure: could not measure %s\n' "$metric" >&2
+		printf '%s\n' null >"$out"
+	fi
+}
+
+snapshot_qlty() {
+	local kind=$1 tmp=$2 filter=$3
+	shift 3
+	QLTY_TELEMETRY=off qlty --no-upgrade-check "$kind" --all --sarif "$@" >"$tmp" || return 1
+	jq -ces '
+		def text: type == "string" and length > 0;
+		select(length == 1) | .[0]
+		| if type != "object" or (.runs | type) != "array" then error("invalid SARIF") else . end
+		| [.runs[]
+			| if any(.invocations[]?; .executionSuccessful == false) then error("failed SARIF invocation") else . end
+			| .tool.driver.name as $driver
+			| (.results // [])[]
+			| if (.ruleId | text | not) then error("missing SARIF rule") else . end
+			| {tool: (if .ruleId | contains(":") then .ruleId | split(":")[0] else $driver end),
+				rule: .ruleId, level: (.level // "warning")}
+			| if all(.[]; text) then . else error("invalid SARIF result") end]
+		| '"$filter" "$tmp"
+}
+
+snapshot_duplication() {
+	local dir=$1
+	printf '{}\n' >"$dir/jscpd.json" || return 1
+	jscpd --config "$dir/jscpd.json" --gitignore --noSymlinks --reporters json --output "$dir" \
+		--ignore '**/.git/**,**/.devenv/**,**/.qlty/**' . >&2 || return 1
+	jq -ces 'def count: type == "number" and . >= 0 and . == floor;
+		select(length == 1) | .[0].statistics.total | {duplicated: .duplicatedLines, total: .lines}
+		| select(all(.[]; count))' "$dir/jscpd-report.json"
+}
+
+snapshot_loc() {
+	scc --format json --exclude-dir .devenv,.qlty . |
+		jq -ces 'select(length == 1) | .[0] | select(type == "array" and
+			all(.[]; (.Name | type == "string" and length > 0) and
+				(.Code | type == "number" and . >= 0 and . == floor)))
+			| map({language: .Name, lines: .Code}) | sort_by(.language)'
+}
+
+# On an archive, keep any pre-existing configuration intact and remove only assay's generated files.
+snapshot_prepare_qlty() {
+	if [ -L .qlty ] || [ -L .qlty/configs ] || [ -L .qlty/qlty.toml ] ||
+		[ -L .qlty/configs/radarlint.properties ]; then
+		printf 'assay: measure: cannot prepare qlty configuration through a symlink\n' >&2
+		return 1
+	fi
+	if [ -n "$snapshot_gitfile" ]; then
+		if [ -e .qlty/qlty.toml ] || [ -e .qlty/configs/radarlint.properties ]; then
+			printf 'assay: measure: the archive already contains qlty configuration; use assay.findings instead\n' >&2
+			return 1
+		fi
+		snapshot_qlty_files=("$root/.qlty/qlty.toml" "$root/.qlty/configs/radarlint.properties")
+		if [ ! -d .qlty/configs ]; then snapshot_qlty_dirs+=("$root/.qlty/configs"); fi
+		if [ ! -d .qlty ]; then snapshot_qlty_dirs+=("$root/.qlty"); fi
+	fi
+	(findings_prepare)
+}
+
+cmd_measure() {
+	[ $# -eq 0 ] || usage_error "measure takes no argument"
+	local dir artifacts report n qlty_ready=0 lint_ready=0 tool_missing='' radarlint_bin=''
+	load_config
+	find_snapshot
+	tmp_file dir -d
+	# A check chooses its own names under ASSAY_DIR. Keep those separate from snapshot bookkeeping.
+	tmp_file artifacts -d
+	snapshot_git "$dir"
+	unset ASSAY_BASE ASSAY_HITS_LOG
+	mkdir "$dir/coverage"
+	snapshot_metric "$dir/duplication.json" duplication snapshot_duplication "$dir"
+	snapshot_metric "$dir/loc.json" 'lines of code' snapshot_loc
+	if command -v qlty >/dev/null; then
+		if findings_tools; then lint_ready=1; else printf 'assay: %s\n' "$tool_missing" >&2; fi
+		if snapshot_prepare_qlty; then qlty_ready=1; fi
+	fi
+	if [ "$qlty_ready" = 1 ]; then
+		snapshot_metric "$dir/smells.json" smells snapshot_qlty smells "$dir/sarif.json" \
+			'group_by(.rule) | map({kind: .[0].rule, count: length})' --quiet
+	else
+		printf '%s\n' null >"$dir/smells.json"
+	fi
+	if [ "$qlty_ready" = 1 ] && [ "$lint_ready" = 1 ]; then
+		snapshot_metric "$dir/lint.json" lint snapshot_qlty check "$dir/sarif.json" \
+			'group_by([.tool, .rule, .level]) | map(.[0] + {count: length})' \
+			--no-progress --no-fail --no-formatters --level note
+	else
+		printf '%s\n' null >"$dir/lint.json"
+	fi
+	snapshot_checks "$dir" "$artifacts"
+	for report in "$dir"/coverage/*; do
+		[ -f "$report" ] || continue
+		n=${report##*/}
+		jq -nc --arg n "$n" --slurpfile counts "$report" '{($n): $counts[0]}'
+	done >"$dir/coverage.json"
+	jq -n --slurpfile checks "$dir/checks.json" --slurpfile coverage "$dir/coverage.json" \
+		--slurpfile lint "$dir/lint.json" --slurpfile smells "$dir/smells.json" \
+		--slurpfile duplication "$dir/duplication.json" --slurpfile loc "$dir/loc.json" \
+		'{version: 1} + $checks[0] + {coverage: ($coverage | add // {}), lint: $lint[0],
+			smells: $smells[0], duplication: $duplication[0], loc: $loc[0]}'
+	finish 0
+}
+
 # not_adopted <why>: exit 2 for a repo that has not adopted assay, naming the procedure.
 not_adopted() {
 	{
@@ -2516,7 +2739,7 @@ exec assay "$@"'
 # repo root, so that the version the repo pins decides. devenv runs with the caller's PATH, not assay's own tools.
 delegate() {
 	local rc=0 cwd=$PWD
-	find_repo
+	if [ "$1" = measure ]; then find_snapshot; else find_repo; fi
 	[ -f "$root/devenv.nix" ] || not_adopted "$root has no devenv.nix"
 	PATH=$caller_path command -v devenv >/dev/null ||
 		die "cannot find devenv on the PATH, which assay needs to run inside the repo's devenv"
@@ -3115,6 +3338,11 @@ main() {
 		shift
 		if [ -z "${ASSAY_CONFIG:-}" ]; then delegate findings "$@"; fi
 		cmd_findings "$@"
+		;;
+	measure)
+		shift
+		if [ -z "${ASSAY_CONFIG:-}" ]; then delegate measure "$@"; fi
+		cmd_measure "$@"
 		;;
 	rule)
 		shift

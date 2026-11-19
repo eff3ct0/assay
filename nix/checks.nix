@@ -259,6 +259,9 @@ let
     "packages has the CLI, the default checks' tools and diff-cover" =
       names plain == [
         "assay"
+        "jscpd"
+        "scc"
+        "xmlstarlet"
         "hello"
         "diff-cover"
       ];
@@ -331,10 +334,7 @@ let
         }).env.ASSAY_CONFIG
       ).success;
     "without an enabled check that declares coverage, no diff-cover" =
-      names untested == [
-        "assay"
-        "hello"
-      ];
+      !(lib.elem "diff-cover" (names untested));
     "the preset check is built in, fast, and runs assay builtin preset" =
       builtinPlain.assay.checks.preset == {
         exec = "assay builtin preset";
@@ -347,6 +347,9 @@ let
     "the built-in checks' tools join every repo's devenv, beside the CLI" =
       map lib.getName builtinPlain.packages == [
         "assay"
+        "jscpd"
+        "scc"
+        "xmlstarlet"
         "actionlint"
         "ast-grep"
         "qlty"
