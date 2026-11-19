@@ -16,6 +16,13 @@ python_devenv() {
 }"
 }
 
+# init_library: generate the stock library with the interpreter the fixture's devenv will sync.
+init_library() {
+	devenv_nix '{ languages.python = { enable = true; uv.enable = true; }; }'
+	devenv shell -- bash -ec 'uv init --quiet --lib --name demo --no-pin-python --python "$(command -v python3)" .'
+	python_devenv
+}
+
 # check_fails <check> <text>: `assay check <check>` fails, and its output holds the text.
 check_fails() {
 	run --separate-stderr devenv shell -- assay check "$1"
@@ -36,14 +43,12 @@ check_passes() {
 # and Python's preset taken by `assay preset python`, whose output is checked; not committed.
 python_project() {
 	consumer "${1:-$ASSAY_LANGUAGES}"
-	# Bootstrap with uv from the flake shell, before a Python project exists.
 	printf '%s\n' .venv/ __pycache__/ .pytest_cache/ .ruff_cache/ .hypothesis/ >>.gitignore
-	uv init --quiet --lib --name demo --no-pin-python .
+	init_library
 	[ -f pyproject.toml ]
-	python_devenv
 	# Entering the shell now syncs the project before running the preset.
 	run --separate-stderr devenv shell -- bash -ec 'test -f uv.lock; assay preset python'
-	echo "$output"
+	echo "$output$stderr"
 	[ "$status" -eq 0 ]
 	output_is 'wrote .coveragerc' 'wrote conftest.py' 'wrote pyrightconfig.json' 'wrote ruff.toml' \
 		'added dependency pytest' 'added dependency coverage' 'added dependency hypothesis' 'added dependency deptry' \
@@ -148,10 +153,10 @@ assert set(requirement.removeprefix("coverage[toml]").split(",")) == {"<9", ">=7
 
 @test "Python: real uv excludes a marker-only pytest and assay does not record adoption" {
 	consumer "$ASSAY_LANGUAGES"
-	uv init --quiet --lib --name demo --no-pin-python .
-	python_devenv
+	init_library
 	devenv shell -- uv add --dev --no-sync "pytest; python_version < '3.10'"
 	devenv shell -- python -c 'import importlib.util; assert importlib.util.find_spec("pytest") is None'
+	[ -f uv.lock ]
 	cp pyproject.toml "$T/before.toml"
 	run --separate-stderr devenv shell -- assay preset python
 	echo "$output$stderr"
