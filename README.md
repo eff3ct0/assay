@@ -68,7 +68,7 @@ default off, redefining its `exec` or changing its `coverage` is a **loosening**
 a `reason`, and `assay check` lists every loosening with its reason in its header on every run.
 
 `assay.seed` (a positive 32-bit integer, `42` unless set) is exported as `ASSAY_SEED`, so that property-based tests run
-with a fixed seed.
+with a fixed seed ([properties](#properties-and-the-tla-check)).
 
 `assay.rulePacks` (default `[]`) names the [rule packs](#rule-packs) the repo turns on.
 
@@ -92,9 +92,11 @@ declares `coverage`.
 
 ```
 assay check [--fast] [--base <rev>] [<check>...]    run the repo's checks
-assay check --list                                  list them, fast ones marked
+assay check --list                                  list them, fast and off ones marked
 ```
 
+- `--list` prints every check in name order, one per line, its name followed by `(fast)`, `(off)` or `(fast, off)`
+  where that applies.
 - Every selected check runs, one after another in name order, without stopping at the first failure. `--fast` selects
   the fast checks; names select those checks. A check runs over the whole working tree, never over the staged or
   changed files only.
@@ -280,12 +282,13 @@ assay builtin gitleaks                              secrets in the files git see
 assay builtin preset                                the enabled languages' presets are recorded
 assay builtin suppressions [--base <rev>]           new suppressions name their rule and give a reason
 assay builtin findings [--base <rev>]               no new finding on the change
+assay builtin tla                                   TLC over the repo's TLA+ models
 assay new-code [--base <rev>]                       the change's new code, as JSON
 ```
 
 The built-in checks that are assay's own code run as `assay builtin <check>`, which is their `exec`; an agent can run
 one alone. The base is `assay check`'s, from `ASSAY_BASE` when `assay check` runs them. Exit codes: `0` passed, `1`
-failed, `2` could not run, `127` the check's tool (gitleaks, ast-grep, qlty, radarlint) is missing. Outside the repo's
+failed, `2` could not run, `127` the check's tool (gitleaks, ast-grep, qlty, radarlint, tlc) is missing. Outside the repo's
 devenv they re-execute themselves through it, as `assay check` does.
 
 ## `assay findings`
@@ -395,6 +398,36 @@ ignored files are never read; with nothing to check, it passes.
 - The commands call three helpers the module puts on the PATH (`devenv/bin`): `assay-files [<glob>...]` (the files
   git sees that exist, NUL-terminated), `assay-nixf-tidy <file>...` and `assay-bats <dir>`.
 
+## Properties and the `tla` check
+
+A **property** is a statement that holds for every input or every behaviour: a property-based test tries it on
+generated inputs, TLC checks it on every state of a bounded TLA+ model, and Lean proves it. The
+[`assay-property` skill](skills/assay-property/SKILL.md) tells an agent which of them pays off, from an example test up
+to a Lean proof, and how to keep it next to the code. Property-based tests are ordinary tests, run by the repo's test
+check with the fixed seed `ASSAY_SEED` and counted in its coverage of new code; they have no check of their own.
+
+A TLA+ model lives in `tla/<Name>.tla` with its configuration `tla/<Name>.cfg`, at the root; a second configuration of a
+spec is an `MC<Name>` module that extends it. The `tla` check is an **opt-in check**: the module defines it, off, and a
+repo turns it on in its `devenv.nix`, which brings `tlaplus18` (TLC 1.8.0, Java 21) into its devenv:
+
+```nix
+{ assay.checks.tla.enable = true; }
+```
+
+On by default, it would bring Java 21 into every repo's devenv for a tool few repos use. Once on, it runs in the full
+run only, and is skipped without a `tla/*.cfg`.
+
+- It checks each `tla/<Name>.cfg` git sees (tracked, or untracked and not ignored) against `tla/<Name>.tla`, in name
+  order, every one run so that one run shows every failure:
+  `tlc -workers 1 -fp 0 -noGenerateSpecTE -metadir <git-dir>/assay/tla -config tla/<Name>.cfg tla/<Name>.tla`, with
+  Java's temporary directory in `<git-dir>/assay/tla/tmp`. One worker and a pinned fingerprint keep the result and a
+  violation's trace the same from run to run, and nothing is written into the tree; `<git-dir>/assay/tla` is emptied
+  at the start of each run.
+- Any non-zero exit of TLC fails it (12 an invariant violated, 11 a deadlock, 150 and 151 parse and configuration
+  errors), and so does a `.cfg` without its `.tla`. The trace is in the check's log, and its last lines name each
+  failing configuration with TLC's exit code.
+- Each configuration finishes in under a minute: a model shrinks its constants rather than grow the budget.
+
 ## Code rules
 
 A **code rule** is a check born from a correction, about a repo's contents and kept in that repo. Most are a line in a
@@ -500,7 +533,8 @@ security boundary: matching command text can be evaded (`bash -c`, variables), a
   `pre-push`. With `programs.git.enable` off they are not written, and evaluation warns.
 - `ASSAY_HITS_LOG` set to `$XDG_STATE_HOME/assay/hits.jsonl` in the user's environment (`home.sessionVariables`), so
   only this machine records [hits](#the-hits-log).
-- assay's skills (`skills/<name>/SKILL.md`, today [`assay-rule`](skills/assay-rule/SKILL.md)), linked at
+- assay's skills (`skills/<name>/SKILL.md`, today [`assay-rule`](skills/assay-rule/SKILL.md) and
+  [`assay-property`](skills/assay-property/SKILL.md)), linked at
   `~/.claude/skills/<name>`, where Claude Code loads them and `/<name>` invokes one, and at
   `$XDG_CONFIG_HOME/opencode/skills/<name>`, where OpenCode does. OpenCode also reads `~/.claude/skills` and lists a
   skill found in both places once.

@@ -29,6 +29,10 @@ threshold or turning a smell or a rule off.
 **Built-in check**:
 One of assay's default checks that every repo importing its devenv module runs, whatever the repo's languages.
 
+**Opt-in check**:
+One of assay's default checks that is off until a repo turns it on in its `devenv.nix`, such as `tla`; its tools join
+the repo's devenv only then.
+
 **Base**:
 The commit a change is measured against; the change is everything between it and the working tree.
 

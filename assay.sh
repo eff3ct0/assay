@@ -1913,7 +1913,11 @@ builtin_tla() {
 	done
 	[ ${#failures[@]} -gt 0 ] || finish 0
 	printf '%s\n' "${failures[@]}"
-	echo "${#failures[@]} of ${#cfgs[@]} TLA+ configurations failed"
+	if [ ${#cfgs[@]} -eq 1 ]; then
+		echo "1 of 1 TLA+ configuration failed"
+	else
+		echo "${#failures[@]} of ${#cfgs[@]} TLA+ configurations failed"
+	fi
 	finish 1
 }
 
