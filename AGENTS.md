@@ -12,8 +12,9 @@ and the specifications it links, before changing behaviour.
 - Depends on: none.
 - Used by, named generically on purpose (assay is public, and the repos that use it may be private):
   - the repos that import its devenv module through a devenv input `assay` (`imports: [ assay/devenv ]`). They rely
-    on the module's options (`assay.checks.<name>`, `assay.seed`), the `ASSAY_CONFIG` and `ASSAY_SEED` variables,
-    the pre-commit hook and `enterTest` it adds, and `assay check`'s output and exit codes;
+    on the module's options (`assay.checks.<name>`, `assay.coverage`, `assay.seed`), the default checks it turns on
+    for the languages they enable, the `ASSAY_CONFIG`, `ASSAY_SEED` and `ASSAY_DIR` variables, the pre-commit hook
+    and `enterTest` it adds, and `assay check`'s output and exit codes;
   - home-manager configurations, through the package and `homeManagerModules.default` (not exported yet: the guard's
     issue adds it). They rely on `assay` re-executing itself through the repo's `devenv shell` when `ASSAY_CONFIG` is
     unset, its exit 2 naming `docs/adoption.md` in a repo that has not adopted assay, and the hits log's lines
@@ -24,23 +25,32 @@ and the specifications it links, before changing behaviour.
 - In this repo, or one that imports the module: `assay check [--fast] [--base <rev>] [<check>...]` or
   `assay check --list`, from the devenv (`devenv shell -- assay check`) or from outside it (plain `assay check`, or
   `nix run . -- check` here), which re-executes itself through `devenv shell` from the repo root.
-- From this checkout without devenv: `ASSAY_CONFIG=<file> ./assay.sh check`, with git and jq on the PATH. The file
-  has the shape `devenv/module.nix` writes; `test/helpers.bash` builds one by hand.
+- From this checkout without devenv: `ASSAY_CONFIG=<file> ./assay.sh check`, with git and jq on the PATH (and
+  diff-cover for a check with `coverage`). The file has the shape `devenv/module.nix` writes; `test/helpers.bash`
+  builds one by hand.
 - `nix build .#assay` builds the CLI.
 
 ## Test
 
 - `devenv test`: what CI runs (`.github/workflows/check.yml`): the pre-commit hooks over all files, then
-  `assay check`, whose `bats` check is the suite in `test/`. While working, `devenv shell -- assay check [--fast]
-  [<check>...]`; `git commit` runs `assay check --fast`.
+  `assay check`. assay enables Nix's and bash's default checks, so that is nixfmt, statix, deadnix, nixf-tidy,
+  shellcheck, shfmt, `nix flake check`, and `bats` over every `.bats` file (`test/` and `test/devenv/`) under kcov,
+  with coverage of the branch's new lines. It needs the network the first time and takes about three minutes. While
+  working, `devenv shell -- assay check [--fast] [<check>...]`; `git commit` runs `assay check --fast`.
 - `nix develop -c bats test`: the CLI against hand-written configurations in throwaway repos, with a stub `devenv`
   (`test/stub/devenv`); the base of the change in `test/base.bats`, delegation in `test/delegate.bats`, the hits log
-  in `test/hits.bats`. New behaviour gets a test there.
+  in `test/hits.bats`, coverage of new code in `test/coverage.bats` (real diff-cover), the default checks' helpers
+  (`devenv/bin`) in `test/defaults.bats` (real kcov, bats, shfmt, nixf). New behaviour gets a test there. The tools
+  it needs are `nix/test-tools.nix`, shared by the devShell and the sandbox.
 - `nix develop -c bats test/devenv`: the devenv module in throwaway repos that import a `git+file:` copy of this
-  working tree, and assay's own adoption, through the `devenv` on the PATH (2.4.0 or later). It needs the network the
-  first time and takes about a minute.
-- `nix develop -c shellcheck assay.sh test/helpers.bash test/devenv/helpers.bash test/stub/devenv`
+  working tree, and assay's own adoption, through the `devenv` on the PATH (2.4.0 or later); the Nix and bash
+  fixtures of the default checks in `test/devenv/defaults.bats`. It needs the network the first time and takes a few
+  minutes.
+- `nix develop -c shellcheck assay.sh test/helpers.bash test/devenv/helpers.bash test/stub/devenv devenv/bin/*`
 - `nix flake check`: shellcheck, `bats test`, the CLI's build and the module's evaluation against a stand-in for
-  devenv's options (`nix/checks.nix`), in the sandbox. It does not run `test/devenv`.
+  devenv's options (`nix/checks.nix`), with the real `devenv/defaults.nix` too, in the sandbox. It does not run
+  `test/devenv`.
+- kcov is `nix/kcov.nix`: nixpkgs' kcov 43 with upstream's fix for ANSI-C quoted strings, without which bats 1.14
+  loses all coverage after its first `run`. Drop the patch once nixpkgs' kcov has it.
 
 Keep everything generic: no machine names, people, secrets backends or absolute paths outside test fixtures.
