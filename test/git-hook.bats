@@ -1,7 +1,7 @@
 # shellcheck disable=SC2030,SC2031 # bats runs each test in a process of its own: what one test sets, no other reads
 bats_require_minimum_version 1.5.0
 # shellcheck source=test/helpers.bash
-source "$BATS_TEST_DIRNAME/helpers.bash"
+source "${BATS_TEST_DIRNAME:?}/helpers.bash"
 
 # assay git-hook: the global git hooks, commit-msg and pre-push, registered as config-based hooks (git 2.54). A violated
 # rule exits 1 with its message; a hook that cannot evaluate its rules exits 1 too (it fails closed). The rules come
@@ -78,12 +78,16 @@ global_hooks() {
 	echo "status $status, stderr: $stderr"
 	[ "$status" -ne 0 ]
 	[[ $stderr == *"$coauthor"* ]]
-	[ "$(git rev-list --count HEAD)" -eq 1 ]
-	[ "$(wc -l <"$T/own-hook.log")" -eq 1 ]
+	commits=$(git rev-list --count HEAD)
+	[ "$commits" -eq 1 ]
+	ran=$(wc -l <"$T/own-hook.log")
+	[ "$ran" -eq 1 ]
 	run --separate-stderr git commit --allow-empty -m Fix
 	[ "$status" -eq 0 ]
-	[ "$(git rev-list --count HEAD)" -eq 2 ]
-	[ "$(wc -l <"$T/own-hook.log")" -eq 2 ]
+	commits=$(git rev-list --count HEAD)
+	[ "$commits" -eq 2 ]
+	ran=$(wc -l <"$T/own-hook.log")
+	[ "$ran" -eq 2 ]
 }
 
 @test "a rule for agents runs only with ASSAY_AGENT set; a hook with no rules accepts anything" {
@@ -101,7 +105,8 @@ global_hooks() {
 	accepted
 	checkouts
 	cd "$T/worktree"
-	ASSAY_AGENT=claude-code pre_push "refs/heads/x $(sha HEAD) refs/heads/feature $zero"
+	head=$(sha HEAD)
+	ASSAY_AGENT=claude-code pre_push "refs/heads/x $head refs/heads/feature $zero"
 	accepted
 }
 
@@ -154,11 +159,11 @@ global_hooks() {
 
 # tip <claude-md content>: a commit on top of HEAD, not checked out, whose CLAUDE.md holds the content.
 tip() {
-	local tree
+	local blob tree
+	blob=$(printf '%s' "$1" | git hash-object -w --stdin)
 	tree=$( (
 		git ls-tree HEAD | grep -v $'\tCLAUDE.md$' || true
-		printf '100644 blob %s\tCLAUDE.md\n' \
-			"$(printf '%s' "$1" | git hash-object -w --stdin)"
+		printf '100644 blob %s\tCLAUDE.md\n' "$blob"
 	) | git mktree)
 	git commit-tree "$tree" -p HEAD -m tip
 }
@@ -173,7 +178,8 @@ tip() {
 	git add AGENTS.md CLAUDE.md
 	git commit --quiet -m shape
 	good=$(sha HEAD)
-	copy=$(tip "$(cat AGENTS.md)"$'\n')
+	agents=$(cat AGENTS.md)
+	copy=$(tip "$agents"$'\n')
 	pre_push "refs/heads/agent/example $copy refs/heads/agent/example $good"
 	rejected "assay: agents-md-shape: $shape" \
 		"refs/heads/agent/example: CLAUDE.md copies AGENTS.md: a copy falls short, even an identical one"
@@ -182,7 +188,8 @@ tip() {
 	# The tip's tree is read, not the working tree; tags are not branch tips.
 	pre_push "refs/tags/v1 $copy refs/tags/v1 $zero"
 	accepted
-	pre_push "refs/heads/README $(sha HEAD~1) refs/heads/agent/x $zero"
+	parent=$(sha HEAD~1)
+	pre_push "refs/heads/README $parent refs/heads/agent/x $zero"
 	rejected "refs/heads/agent/x: AGENTS.md is missing"
 }
 
@@ -199,7 +206,8 @@ tip() {
 	run --separate-stderr git push origin HEAD:refs/heads/feature
 	[ "$status" -ne 0 ]
 	[[ $stderr == *"$agent_branch"* ]]
-	[ -z "$(git ls-remote "$T/origin.git" refs/heads/feature)" ]
+	remote=$(git ls-remote "$T/origin.git" refs/heads/feature)
+	[ -z "$remote" ]
 	run --separate-stderr git push origin HEAD
 	echo "$stderr"
 	[ "$status" -eq 0 ]

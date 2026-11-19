@@ -1,7 +1,7 @@
 # shellcheck disable=SC2030,SC2031 # bats runs each test in a process of its own: what one test sets, no other reads
 bats_require_minimum_version 1.5.0
 # shellcheck source=test/helpers.bash
-source "$BATS_TEST_DIRNAME/helpers.bash"
+source "${BATS_TEST_DIRNAME:?}/helpers.bash"
 
 # Outside the repo's devenv (ASSAY_CONFIG unset), assay re-executes itself as `devenv shell -- assay <args>` from the
 # repo root. devenv here is test/stub/devenv.
@@ -17,8 +17,10 @@ source "$BATS_TEST_DIRNAME/helpers.bash"
 	run --separate-stderr "$assay" check --list
 	[ "$status" -eq 0 ]
 	[ "$output" = "$(printf 'alpha (fast)\nzeta')" ]
-	[ "$(wc -l <"$T/devenv.calls")" -eq 1 ]
-	[[ $(cat "$T/devenv.calls") == "$(printf %q "$T/work") shell -- "* ]]
+	calls=$(wc -l <"$T/devenv.calls")
+	[ "$calls" -eq 1 ]
+	call=$(cat "$T/devenv.calls")
+	[[ $call == "$(printf %q "$T/work") shell -- "* ]]
 }
 
 @test "the repo's assay gets the arguments as given, and its output and exit code come back" {
@@ -29,7 +31,8 @@ source "$BATS_TEST_DIRNAME/helpers.bash"
 	outside_devenv
 	run --separate-stderr "$assay" check --base "HEAD~1" fails passes
 	[ "$status" -eq 1 ]
-	[ "${lines[0]}" = "assay check fails passes · base HEAD~1@$(short HEAD~1) (--base)" ]
+	base=$(short HEAD~1)
+	[ "${lines[0]}" = "assay check fails passes · base HEAD~1@$base (--base)" ]
 	[[ ${lines[-1]} == *"; rerun: assay check --base 'HEAD~1' fails" ]]
 	run --separate-stderr "$assay" check --fast
 	[ "$status" -eq 0 ]
@@ -66,11 +69,13 @@ not_adopted() {
 	outside_devenv
 	run --separate-stderr "$assay" check
 	not_adopted "the devenv of $T/work does not import assay's module"
-	[ "$(wc -l <"$T/devenv.calls")" -eq 1 ]
+	calls=$(wc -l <"$T/devenv.calls")
+	[ "$calls" -eq 1 ]
 	# The same with an assay on the machine's PATH, which the devenv inherits: it never runs.
 	run --separate-stderr env PATH="$DEVENV_STUB_PROFILE:$PATH" "$assay" check --list
 	not_adopted "the devenv of $T/work does not import assay's module"
-	[ "$(wc -l <"$T/devenv.calls")" -eq 2 ]
+	calls=$(wc -l <"$T/devenv.calls")
+	[ "$calls" -eq 2 ]
 	[ ! -e "$T/ran" ]
 }
 
@@ -106,7 +111,10 @@ not_adopted() {
 	local_repo
 	devenv_files yes
 	mkdir "$T/bin"
-	for t in git jq mktemp rm; do ln -s "$(command -v "$t")" "$T/bin/$t"; done
+	for t in git jq mktemp rm; do
+		target=$(command -v "$t")
+		ln -s "$target" "$T/bin/$t"
+	done
 	run --separate-stderr env PATH="$T/bin" "$BASH" "$assay" check
 	[ "$status" -eq 2 ]
 	[ "$stderr" = "assay: cannot find devenv on the PATH, which assay needs to run inside the repo's devenv" ]
@@ -119,8 +127,9 @@ not_adopted() {
 	# shellcheck disable=SC2119 # no rule names: the whole example list
 	example_rules
 	export ASSAY_AGENT=claude-code
-	run --separate-stderr "$assay" guard --rules "$RULES" <<<"$(jq -nc --arg d "$PWD" \
-		'{hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: {command: "git clone x"}, cwd: $d}')"
+	event=$(jq -nc --arg d "$PWD" \
+		'{hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: {command: "git clone x"}, cwd: $d}')
+	run --separate-stderr "$assay" guard --rules "$RULES" <<<"$event"
 	[ "$status" -eq 0 ]
 	jq -e '.hookSpecificOutput.permissionDecision == "deny"' <<<"$output"
 	printf 'Fix\n\nCo-Authored-By: A\n' >"$T/msg"
@@ -161,9 +170,12 @@ not_adopted() {
 	run --separate-stderr "$assay" new-code --base HEAD
 	[ "$status" -eq 0 ]
 	[ "$output" = '{}' ]
-	[ "$(wc -l <"$T/devenv.calls")" -eq 2 ]
-	[[ $(sed -n 1p "$T/devenv.calls") == *" builtin agents-md" ]]
-	[[ $(sed -n 2p "$T/devenv.calls") == *" new-code --base HEAD" ]]
+	calls=$(wc -l <"$T/devenv.calls")
+	[ "$calls" -eq 2 ]
+	call=$(sed -n 1p "$T/devenv.calls")
+	[[ $call == *" builtin agents-md" ]]
+	call=$(sed -n 2p "$T/devenv.calls")
+	[[ $call == *" new-code --base HEAD" ]]
 }
 
 @test "outside the devenv, assay findings re-executes itself through devenv shell" {
@@ -174,8 +186,10 @@ not_adopted() {
 	echo "$output$stderr"
 	[ "$status" -eq 0 ]
 	[ "$output" = "no findings on the change" ]
-	[ "$(wc -l <"$T/devenv.calls")" -eq 1 ]
-	[[ $(cat "$T/devenv.calls") == *" findings --base HEAD" ]]
+	calls=$(wc -l <"$T/devenv.calls")
+	[ "$calls" -eq 1 ]
+	call=$(cat "$T/devenv.calls")
+	[[ $call == *" findings --base HEAD" ]]
 }
 
 @test "outside the devenv, assay rule new runs inside it from the caller's directory: --from's path is the caller's" {
@@ -189,8 +203,10 @@ not_adopted() {
 	echo "$stderr"
 	[ "$status" -eq 0 ]
 	[ "$output" = "$(printf '%s\n' ../sgconfig.yml ../rules/no-env-var.yml ../rule-tests/no-env-var-test.yml)" ]
-	[ "$(wc -l <"$T/devenv.calls")" -eq 1 ]
-	[[ $(cat "$T/devenv.calls") == "$(printf %q "$T/work") shell -- "* ]]
-	[ "$(yq -o=json '.invalid[0]' ../rule-tests/no-env-var-test.yml)" = '"let home = std::env::var(\"HOME\");\n"' ]
-	[ "$(yq '.language' ../rules/no-env-var.yml)" = rust ]
+	calls=$(wc -l <"$T/devenv.calls")
+	[ "$calls" -eq 1 ]
+	call=$(cat "$T/devenv.calls")
+	[[ $call == "$(printf %q "$T/work") shell -- "* ]]
+	prints '"let home = std::env::var(\"HOME\");\n"' yq -o=json '.invalid[0]' ../rule-tests/no-env-var-test.yml
+	prints rust yq '.language' ../rules/no-env-var.yml
 }

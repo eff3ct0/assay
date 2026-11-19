@@ -1,6 +1,6 @@
 # shellcheck disable=SC2030,SC2031 # bats runs each test in a process of its own: what one test sets, no other reads
 # shellcheck source=test/helpers.bash
-source "$BATS_TEST_DIRNAME/helpers.bash"
+source "${BATS_TEST_DIRNAME:?}/helpers.bash"
 
 bats_require_minimum_version 1.5.0
 
@@ -16,13 +16,15 @@ bats_require_minimum_version 1.5.0
 	[ "$output" = "no findings on the change" ]
 	[ -f .qlty/qlty.toml ]
 	grep -qx '.qlty/' .git/info/exclude
-	[ -z "$(git status --porcelain --untracked-files=all)" ]
+	porcelain=$(git status --porcelain --untracked-files=all)
+	[ -z "$porcelain" ]
 	# Written again on the next run, and listed once.
 	echo stale >.qlty/qlty.toml
 	run --separate-stderr "$assay" findings
 	[ "$status" -eq 0 ]
-	[ "$(cat .qlty/qlty.toml)" != stale ]
-	[ "$(grep -cx '.qlty/' .git/info/exclude)" -eq 1 ]
+	toml=$(cat .qlty/qlty.toml)
+	[ "$toml" != stale ]
+	prints 1 grep -cx '.qlty/' .git/info/exclude
 }
 
 # fixture <name> [<path>]: copy test/fixtures/findings/<name> into the repo, at <path> (default: <name>).
@@ -129,18 +131,17 @@ fixture() {
 	run --separate-stderr "$assay" findings --base HEAD --sarif
 	echo "$stderr"
 	[ "$status" -eq 0 ]
-	[ "$(jq -r '.version' <<<"$output")" = 2.1.0 ]
-	[ "$(jq '.runs | length' <<<"$output")" -eq 2 ]
-	[ "$(jq -c '.runs[0].results' <<<"$output")" = '[]' ]
-	[ "$(jq -c '[.runs[1].results[] | select(.ruleId == "qlty:function-complexity")
-    | [.locations[0].physicalLocation.artifactLocation.uri, .baselineState]]' <<<"$output")" = '[]' ]
+	prints 2.1.0 jq -r '.version' <<<"$output"
+	prints 2 jq '.runs | length' <<<"$output"
+	prints '[]' jq -c '.runs[0].results' <<<"$output"
+	prints '[]' jq -c '[.runs[1].results[] | select(.ruleId == "qlty:function-complexity")
+    | [.locations[0].physicalLocation.artifactLocation.uri, .baselineState]]' <<<"$output"
 	fixture tangled.py src/more.py
 	run --separate-stderr "$assay" findings --base HEAD --sarif
 	[ "$status" -eq 0 ]
-	[ "$(jq -c '[.runs[1].results[] | select(.ruleId == "qlty:function-complexity")
-    | [.locations[0].physicalLocation.artifactLocation.uri, .baselineState]]' <<<"$output")" = '[["src/more.py","new"]]' ]
-	[ "$(jq -c '[.runs[1].results[] | select(.ruleId == "qlty:identical-code") | .baselineState]' <<<"$output")" = \
-		'["new"]' ]
+	prints '[["src/more.py","new"]]' jq -c '[.runs[1].results[] | select(.ruleId == "qlty:function-complexity")
+    | [.locations[0].physicalLocation.artifactLocation.uri, .baselineState]]' <<<"$output"
+	prints '["new"]' jq -c '[.runs[1].results[] | select(.ruleId == "qlty:identical-code") | .baselineState]' <<<"$output"
 }
 
 @test "smells for TypeScript, Rust, Python and Scala only: not JavaScript or Go" {
@@ -150,7 +151,7 @@ fixture() {
 	run --separate-stderr "$assay" findings
 	echo "$output$stderr"
 	[ "$status" -eq 0 ]
-	[ "$(grep -c 'qlty/function-complexity' <<<"$output")" -eq 4 ]
+	prints 4 grep -c 'qlty/function-complexity' <<<"$output"
 	for f in tangled.ts tangled.rs tangled.scala tangled.py; do grep -q "^src/$f:[0-9]*: qlty/function-complexity: " <<<"$output"; done
 	[[ $output != *tangled.js* && $output != *tangled.go* ]]
 }
@@ -168,7 +169,7 @@ fixture() {
 	[ "$output" = "no findings on the change" ]
 	grep -qx 'threshold = 30' .qlty/qlty.toml
 	# duplication's nodes_threshold holds for every language, Rust's own default included.
-	[ "$(grep -c '^nodes_threshold = 64$\|^smells.duplication.nodes_threshold = 64$' .qlty/qlty.toml)" -eq 2 ]
+	prints 2 grep -c '^nodes_threshold = 64$\|^smells.duplication.nodes_threshold = 64$' .qlty/qlty.toml
 	jq '.findings.smells.function_complexity.threshold = 20' "$T/config.json" >"$T/config2.json"
 	ASSAY_CONFIG=$T/config2.json run --separate-stderr "$assay" findings
 	[ "${lines[0]}" = "src/app.py:1: qlty/function-complexity: Function with high complexity (count = 27): tangled" ]
@@ -196,19 +197,20 @@ fixture() {
 	[[ $output != *S3776* && $output != *src_old.py* && $output != *shellcheck* && $output != *run.sh* ]]
 	run --separate-stderr "$assay" findings --base HEAD --sarif
 	[ "$status" -eq 0 ]
-	[ "$(jq -c '[.runs[0].results[] | [.ruleId, .baselineState]]' <<<"$output")" = \
-		'[["radarlint-python:python:S1481","new"]]' ]
+	prints '[["radarlint-python:python:S1481","new"]]' jq -c '[.runs[0].results[] | [.ruleId, .baselineState]]' <<<"$output"
 	[[ $output != *S3776* ]]
 	run --separate-stderr "$assay" check --base HEAD findings
 	echo "$output$stderr"
 	[ "$status" -eq 1 ]
 	[[ $output == *$'\nsrc/app.py:23: radarlint-python/python:S1481: Remove the unused local variable "w".\n'* ]]
 	# radarlint is the only plugin, run from the PATH: qlty downloaded nothing, its tools cache holds a lock at most.
-	[ "$(grep '^name = ' .qlty/qlty.toml)" = 'name = "radarlint-python"' ]
-	grep -q "^script = \"'$(readlink -f "$(command -v radarlint)")' python \${target} # rules: python:S3776=false scala:S3776=false\"$" \
-		.qlty/qlty.toml
-	[ -z "$(find "$HOME/.qlty/cache/tools" -type f ! -name '*.lock' 2>/dev/null)" ]
-	[ "$(cat .qlty/configs/radarlint.properties)" = "$(printf '%s\n' radarlint.rules.python.S3776=false radarlint.rules.scala.S3776=false)" ]
+	prints 'name = "radarlint-python"' grep '^name = ' .qlty/qlty.toml
+	radarlint=$(command -v radarlint)
+	radarlint=$(readlink -f "$radarlint")
+	grep -q "^script = \"'$radarlint' python \${target} # rules: python:S3776=false scala:S3776=false\"$" .qlty/qlty.toml
+	find "$HOME/.qlty/cache/tools" -type f ! -name '*.lock' >"$T/downloaded" 2>/dev/null || true
+	[ ! -s "$T/downloaded" ]
+	holds .qlty/configs/radarlint.properties radarlint.rules.python.S3776=false radarlint.rules.scala.S3776=false
 	# A rule turned back on shows at once, though qlty caches radarlint's results for the same files.
 	jq '.findings.rules["python:S3776"] = true' "$ASSAY_CONFIG" >"$T/on.json"
 	ASSAY_CONFIG=$T/on.json run --separate-stderr "$assay" findings --base HEAD
@@ -276,8 +278,9 @@ without() {
 	run --separate-stderr "$assay" findings
 	[ "$status" -eq 2 ]
 	[[ $stderr == "assay: the repo tracks .qlty/qlty.toml, which assay writes on every run from assay.findings:"* ]]
-	[ "$(cat .qlty/qlty.toml)" = 'config_version = "0"' ]
-	[ -z "$(git status --porcelain)" ]
+	holds .qlty/qlty.toml 'config_version = "0"'
+	porcelain=$(git status --porcelain)
+	[ -z "$porcelain" ]
 }
 
 @test "the findings check's base is assay check's: --base, else ASSAY_BASE, else the fork point" {

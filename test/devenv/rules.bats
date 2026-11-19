@@ -1,7 +1,7 @@
 # shellcheck disable=SC2016 # the fixtures' scripts are literal text
 bats_require_minimum_version 1.5.0
 # shellcheck source=test/devenv/helpers.bash
-source "$BATS_TEST_DIRNAME/helpers.bash"
+source "${BATS_TEST_DIRNAME:?}/helpers.bash"
 
 # Code rules in a real devenv: the ast-grep check, a rule pack the repo turns on, and assay rule new.
 
@@ -22,7 +22,7 @@ source "$BATS_TEST_DIRNAME/helpers.bash"
 	[ ! -e sgconfig.yml ]
 	fix=$(grep -o 'ast-grep scan -c [^`]* -U' <<<"$output")
 	devenv shell -- bash -c "$fix" >/dev/null
-	[ "$(cat tool.sh)" = 'if command -v git >/dev/null; then echo yes; fi' ]
+	holds tool.sh 'if command -v git >/dev/null; then echo yes; fi'
 	run --separate-stderr devenv shell -- assay check ast-grep
 	echo "$output"
 	[ "$status" -eq 0 ]
@@ -36,7 +36,7 @@ source "$BATS_TEST_DIRNAME/helpers.bash"
 	echo "$stderr"
 	[ "$status" -eq 0 ]
 	[ "$output" = "$(printf '%s\n' sgconfig.yml rules/no-eval.yml rule-tests/no-eval-test.yml)" ]
-	[ "$(yq '.language' rules/no-eval.yml)" = bash ]
+	prints bash yq '.language' rules/no-eval.yml
 	run --separate-stderr devenv shell -- assay check ast-grep
 	echo "$output"
 	[ "$status" -eq 1 ]
@@ -45,7 +45,7 @@ source "$BATS_TEST_DIRNAME/helpers.bash"
 	run --separate-stderr "$ASSAY/assay.sh" rule new no-eval-either --from run.sh:2
 	echo "$stderr"
 	[ "$status" -eq 0 ]
-	[ "$(yq -o=json '.invalid[0]' rule-tests/no-eval-either-test.yml)" = '"eval \"$1\"\n"' ]
+	prints '"eval \"$1\"\n"' yq -o=json '.invalid[0]' rule-tests/no-eval-either-test.yml
 	rm rules/no-eval-either.yml rule-tests/no-eval-either-test.yml
 	# Filled in: test/projects/no-eval's rule and tests.
 	cp "$BATS_TEST_DIRNAME/../projects/no-eval/rules/no-eval.yml" rules/

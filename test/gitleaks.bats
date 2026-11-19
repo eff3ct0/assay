@@ -1,17 +1,17 @@
 bats_require_minimum_version 1.5.0
 # shellcheck source=test/helpers.bash
-source "$BATS_TEST_DIRNAME/helpers.bash"
+source "${BATS_TEST_DIRNAME:?}/helpers.bash"
 
 # gitleaks: gitleaks over the files git sees in the working tree, tracked or untracked but not ignored; history is not
 # scanned.
 
 # A GitHub token gitleaks's github-pat rule matches, put together here so that this file holds none.
-token() { printf '%s%s' ghp_ aB3dE5fG7hJ9kL1mN3pQ5rS7tU9vW1xY3zA5; }
+token=$(printf '%s%s' ghp_ aB3dE5fG7hJ9kL1mN3pQ5rS7tU9vW1xY3zA5)
 
 # plant <file>: a line holding the token, in <file>.
 plant() {
 	mkdir -p "$(dirname "$1")"
-	echo "url = \"https://x:$(token)@example.com\"" >"$1"
+	echo "url = \"https://x:$token@example.com\"" >"$1"
 }
 
 @test "a secret planted in a tracked or an untracked file fails, redacted, naming its place and fingerprint" {
@@ -27,8 +27,8 @@ plant() {
 tracked.txt:1: github-pat (fingerprint tracked.txt:github-pat:1)
 gitleaks found 2 secrets in the working tree: remove each one, and rotate it if it ever left this machine; a false positive's fingerprint goes in .gitleaksignore."
 	[ "$output" = "$expected" ]
-	[[ $output != *"$(token)"* ]]
-	[[ $stderr != *"$(token)"* ]]
+	[[ $output != *"$token"* ]]
+	[[ $stderr != *"$token"* ]]
 }
 
 @test "ignored files are not scanned: a local .env, .devenv/" {
@@ -83,7 +83,9 @@ EOF
 	run --separate-stderr "$assay" builtin gitleaks
 	echo "$stderr"
 	[ "$status" -eq 0 ]
-	[ -z "$(ls "$(git rev-parse --absolute-git-dir)/assay")" ]
+	git_dir=$(git rev-parse --absolute-git-dir)
+	left=$(ls "$git_dir/assay" || true)
+	[ -z "$left" ]
 }
 
 @test "without gitleaks on the PATH the check exits 127" {
@@ -91,7 +93,10 @@ EOF
 	check gitleaks "\"$assay\" builtin gitleaks"
 	# Only the tools assay check itself needs.
 	mkdir "$T/bin"
-	for t in bash git jq head tail wc mkdir rm; do ln -s "$(command -v "$t")" "$T/bin/$t"; done
+	for t in bash git jq head tail wc mkdir rm; do
+		target=$(command -v "$t")
+		ln -s "$target" "$T/bin/$t"
+	done
 	PATH=$T/bin run "$assay" check
 	[ "$status" -eq 1 ]
 	[[ ${lines[1]} == "FAIL gitleaks "*"(exit 127: tool not found)" ]]
@@ -102,9 +107,9 @@ EOF
 	plant tracked.txt
 	# A cp that refuses hard links, as across file systems.
 	mkdir "$T/bin"
+	real_cp=$(command -v cp)
 	# shellcheck disable=SC2016 # the stand-in's own $a
-	printf '%s\n' "#!$BASH" 'for a; do [ "$a" != --link ] || exit 1; done' "exec $(command -v cp) \"\$@\"" \
-		>"$T/bin/cp"
+	printf '%s\n' "#!$BASH" 'for a; do [ "$a" != --link ] || exit 1; done' "exec $real_cp \"\$@\"" >"$T/bin/cp"
 	chmod +x "$T/bin/cp"
 	PATH=$T/bin:$PATH run --separate-stderr "$assay" builtin gitleaks
 	[ "$status" -eq 1 ]

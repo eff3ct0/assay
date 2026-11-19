@@ -119,12 +119,59 @@ assay check --list                                  list them, fast ones marked
 activate direnv, `assay check <args>` re-executes itself as `devenv shell -- assay check <args>`, entering the devenv
 from the repo root and running from the caller's directory, so the version the repo pins always decides and a path
 among the arguments means what the caller meant; `nix run github:eff3ct0/assay -- check` behaves the same. So do
-`assay builtin`, `assay new-code` and `assay rule new`. A repo without
-`devenv.nix`, or whose devenv does not import assay's module, is exit 2: the message names
+`assay preset`, `assay builtin`, `assay new-code` and `assay rule new`; outside a git repo, each of them exits 2. A repo
+without `devenv.nix`, or whose devenv does not import assay's module, is exit 2: the message names
 [docs/adoption.md](docs/adoption.md) and says that an adoption is a change of its own, made before other work.
 
 The machine-level subcommands, [`guard` and `git-hook`](#on-a-machine-the-guard-and-the-global-git-hooks) and
 `collect`, never delegate; this version only prints `collect`'s usage.
+
+## `assay preset`
+
+```
+assay preset [<language>...]    write the languages' presets into the repo, or merge newer versions in
+```
+
+A language's **preset** is the configuration files and development dependencies its default checks need in a repo
+(bash's has no dependency). assay holds every version of each, under [`preset/`](preset/README.md); `assay preset` writes the version the repo pins (the highest) into the repo,
+which owns the files from then on, and merges later versions in. assay injects no configuration at run time.
+
+- With no language named, it takes every language the repo's devenv enables whose preset applies: bash's once the
+  repo tracks a shell script, as `shfmt -f` finds them. Nix has no preset. A language named is taken as given; one
+  assay has no preset for is exit 2.
+- A file the repo lacks is written from the pinned preset.
+- A file the repo has at an older recorded version is merged three ways with `git merge-file`: the base is the
+  recorded version's file, theirs the pinned one's, ours the repo's. A conflict is left as markers, with the base
+  between `|||||||` and `=======`, for a person, or an agent asked to, to resolve; every later run reports the markers
+  (exit 1) until they are gone.
+- A file the repo has with no version recorded (an adoption) is kept, and shown against the preset: the lines with `+`
+  are the preset's. The agent extends it by hand.
+- When the repo configures the tool in another file the tool reads (`shellcheckrc` for shellcheck), that file is the
+  tool's: the preset writes none of its own beside it, which would silently replace it, and merges into it and shows
+  it instead.
+- It records the version it took in `.assay-preset.json` at the root, `{"<language>": <version>}`, written with jq
+  (so oxfmt accepts it as is) and tracked. The version is recorded whatever the outcome, so that a conflict once
+  resolved, or a kept file once extended, is not merged again. A record newer than the pinned preset, or naming a
+  version assay lacks, is exit 2; languages it records that assay does not know are kept.
+- Output, on stdout: one line per file, `wrote`, `merged`, `conflict` or `kept` and its path, and one for the record
+  when it changed (a language with nothing to do says `<language>'s preset <version>: up to date`); then the kept
+  files' differences and what is left to do.
+- Exit codes: `0` everything applied, `1` a conflict or a kept file that differs from the preset, `2` it could not
+  run.
+
+```sh
+$ assay preset
+wrote .shellcheckrc
+wrote .assay-preset.json
+```
+
+When the record holds a language whose version is behind the pinned preset, `assay check`'s header says so on every
+run, as it lists loosenings and skipped checks; a version behind fails nothing:
+
+```
+assay check · base origin/main@ab03c18 (fork-point)
+  preset behind: bash 1 → 2 (assay preset bash)
+```
 
 ## Built-in checks
 
@@ -174,6 +221,8 @@ turning one off or redefining its `exec` is a loosening.
   `--check`, which `assay check` prints with the failure; a bare `oxfmt` would format more. A tool-written file of a
   checked type (a sops file, say) goes in the repo's `.oxfmtrc.json` under `ignorePatterns`, which is no loosening.
 
+- `preset`: every language the repo's devenv enables whose preset applies is in `.assay-preset.json`. It fails with
+  the command that fixes it, `assay preset <language>`; without shfmt, which tells shell scripts apart, it exits 127.
 - `suppressions`: a suppression (a comment or attribute that silences a finding at its place) added on new code
   names the rule it silences and gives a reason. Old suppressions never block a change: one on a line the change
   leaves alone is not read, and one the change also removes from the same file, with the same marker and rules (a
@@ -228,6 +277,7 @@ assay builtin agents-md [<commit>]                  the AGENTS.md / CLAUDE.md sh
 assay builtin ast-grep                              the repo's ast-grep rules and the rule packs it turns on
 assay builtin commit-trailers [--base <rev>]        no Co-Authored-By in base..HEAD
 assay builtin gitleaks                              secrets in the files git sees
+assay builtin preset                                the enabled languages' presets are recorded
 assay builtin suppressions [--base <rev>]           new suppressions name their rule and give a reason
 assay builtin findings [--base <rev>]               no new finding on the change
 assay new-code [--base <rev>]                       the change's new code, as JSON
@@ -336,7 +386,9 @@ ignored files are never read; with nothing to check, it passes.
 - Nix's checks run over the `.nix` files; `nixf-tidy` runs with `--variable-lookup` on each file, and any diagnostic
   fails it, whatever its severity. Nix has no coverage tool, so a Nix repo has no coverage check.
 - bash's checks run over the shell files `shfmt -f` finds (by extension or shebang, `.bats` files included). shfmt
-  keeps its defaults (tabs). `bats` runs the tracked `.bats` files under kcov, whose Cobertura report,
+  keeps its defaults (tabs). bash's preset is `.shellcheckrc`, which turns on shellcheck's optional checks that find
+  defects rather than set style: `check-extra-masked-returns`, `check-set-e-suppressed` and
+  `check-unassigned-uppercase`. `bats` runs the tracked `.bats` files under kcov, whose Cobertura report,
   `$ASSAY_DIR/kcov/bats/cobertura.xml`, lists every shell script, those no test runs included, and nothing else.
   nixpkgs has kcov for Linux only: elsewhere `bats` fails on the missing tool until the repo turns it off with a
   reason.

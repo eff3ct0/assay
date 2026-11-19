@@ -1,7 +1,7 @@
 # shellcheck disable=SC2016 # the skill's text and its backquotes are literal
 bats_require_minimum_version 1.5.0
 # shellcheck source=test/helpers.bash
-source "$BATS_TEST_DIRNAME/helpers.bash"
+source "${BATS_TEST_DIRNAME:?}/helpers.bash"
 
 # The skills assay ships (skills/<name>/SKILL.md), which its home-manager module installs for Claude Code and OpenCode.
 
@@ -15,8 +15,9 @@ frontmatter() { awk -v f="$2" 'NR == 1 && $0 != "---" { exit } NR > 1 && $0 == "
 	for dir in "$skills"/*/; do
 		dir=${dir%/}
 		echo "$dir"
-		[ "$(frontmatter "$dir/SKILL.md" name)" = "${dir##*/}" ]
-		[ -n "$(frontmatter "$dir/SKILL.md" description)" ]
+		prints "${dir##*/}" frontmatter "$dir/SKILL.md" name
+		description=$(frontmatter "$dir/SKILL.md" description)
+		[ -n "$description" ]
 		n=$((n + 1))
 	done
 	[ "$n" -ge 1 ]

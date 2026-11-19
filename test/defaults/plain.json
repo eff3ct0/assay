@@ -50,6 +50,13 @@
       "requires": null,
       "coverage": null
     },
+    "preset": {
+      "exec": "assay builtin preset",
+      "fast": true,
+      "enable": true,
+      "requires": null,
+      "coverage": null
+    },
     "suppressions": {
       "exec": "assay builtin suppressions",
       "fast": true,

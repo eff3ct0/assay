@@ -33,8 +33,12 @@ setup actions in CI. Two sources drift, and then CI and the agent check with dif
 
 ### Tool configuration
 
-The repo's own tool configuration stays the source. `assay preset` writes what is missing, and the adoption extends
-what exists; assay injects no configuration at run time.
+The repo's own tool configuration stays the source; assay injects none at run time. The adoption runs `assay preset`,
+which writes the presets' files the repo lacks, keeps the ones it has and shows each against the preset (exit 1 when
+they differ), and records the versions it took in `.assay-preset.json`, which is committed. The adoption then extends
+each kept file by hand to hold what the preset holds, keeping the repo's own settings; what the tree cannot meet yet is
+debt, held as below. The built-in `preset` check fails while an enabled language whose preset applies is missing from
+the record.
 
 ### CI
 

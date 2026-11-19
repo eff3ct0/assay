@@ -171,7 +171,9 @@ let
   })";
 
   # The languages the repo enables among assay's six, by the names ast-grep knows them by: devenv's own, but shell is
-  # bash. JavaScript and TypeScript stay two: an ast-grep rule for one does not read the other's files.
+  # bash. JavaScript and TypeScript stay two: an ast-grep rule for one does not read the other's files. They are also
+  # the names of assay's presets and of .assay-preset.json: `assay preset` and the `preset` check take the enabled
+  # languages that have a preset.
   languageNames = {
     javascript = "javascript";
     typescript = "typescript";
@@ -258,7 +260,7 @@ let
             }) smellDefaults;
             duplication = { inherit (cfg.findings.smells.duplication) nodes_threshold; };
           };
-          # assay rule new's default language, when the repo enables one.
+          # assay rule new's default language, when the repo enables one; the languages assay preset takes.
           inherit languages;
           # Each pack's directory, an ast-grep project of its own, which the ast-grep check runs.
           rulePacks = lib.genAttrs cfg.rulePacks (p: "${packs + "/${p}"}");

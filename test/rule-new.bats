@@ -1,7 +1,7 @@
 # shellcheck disable=SC2016 # the fixtures' scripts and rules, and the messages' backquotes, are literal text
 bats_require_minimum_version 1.5.0
 # shellcheck source=test/helpers.bash
-source "$BATS_TEST_DIRNAME/helpers.bash"
+source "${BATS_TEST_DIRNAME:?}/helpers.bash"
 
 # assay rule new <kebab-name> [--lang <lang>] [--from <file>:<line>[-<line>]]: an ast-grep rule's scaffold, written in
 # ast-grep's own layout, whose placeholders fail the ast-grep check until they are filled in.
@@ -26,11 +26,11 @@ rust_source() {
 	[ "$status" -eq 0 ]
 	[ "$output" = "$(printf '%s\n' sgconfig.yml rules/no-env-var.yml rule-tests/no-env-var-test.yml)" ]
 	[ -z "$stderr" ]
-	[ "$(yaml sgconfig.yml .ruleDirs)" = '["rules"]' ]
-	[ "$(yaml sgconfig.yml .testConfigs)" = '[{"testDir":"rule-tests"}]' ]
-	[ "$(yaml rule-tests/no-env-var-test.yml .id)" = '"no-env-var"' ]
-	[ "$(yaml rule-tests/no-env-var-test.yml '.invalid[0]')" = '"let home = std::env::var(\"HOME\");\n"' ]
-	[ "$(yaml rules/no-env-var.yml '[.id, .language, .severity]')" = '["no-env-var","rust","error"]' ]
+	prints '["rules"]' yaml sgconfig.yml .ruleDirs
+	prints '[{"testDir":"rule-tests"}]' yaml sgconfig.yml .testConfigs
+	prints '"no-env-var"' yaml rule-tests/no-env-var-test.yml .id
+	prints '"let home = std::env::var(\"HOME\");\n"' yaml rule-tests/no-env-var-test.yml '.invalid[0]'
+	prints '["no-env-var","rust","error"]' yaml rules/no-env-var.yml '[.id, .language, .severity]'
 	# The note's skeleton: Why, Fix, Not a fix, and the closing line.
 	note=$(yq '.note' rules/no-env-var.yml)
 	[[ $note == "Why: "*$'\nFix: '*$'\nNot a fix: '*$'\nIf the rule is wrong here, stop and tell the user; exceptions go in the rule'"'"'s own file.' ]]
@@ -74,8 +74,8 @@ rust_source() {
 	languages bash
 	run --separate-stderr "$assay" rule new no-eval
 	[ "$status" -eq 0 ]
-	[ "$(yaml rule-tests/no-eval-test.yml '.invalid')" = '["<fill in: the corrected code, cut down to the minimum>"]' ]
-	[ "$(yaml rules/no-eval.yml .language)" = '"bash"' ]
+	prints '["<fill in: the corrected code, cut down to the minimum>"]' yaml rule-tests/no-eval-test.yml '.invalid'
+	prints '"bash"' yaml rules/no-eval.yml .language
 }
 
 @test "a rule of that name that already exists: exit 1, nothing written" {
@@ -95,7 +95,9 @@ rust_source() {
 	run --separate-stderr "$assay" rule new no-env-var
 	[ "$status" -eq 1 ]
 	[ "$stderr" = "assay: a rule named no-env-var already exists: rules/env.yml" ]
-	[ "$(find . -path ./.git -prune -o -type f -print | sort | wc -l)" -eq 3 ]
+	find . -path ./.git -prune -o -type f -print >"$T/files"
+	files=$(wc -l <"$T/files")
+	[ "$files" -eq 3 ]
 }
 
 @test "the language: --lang, else --from's file, else the repo's single enabled language, else exit 2 asking for it" {
@@ -136,7 +138,7 @@ rust_source() {
 	"$assay" rule new h --from notes.txt:1 >/dev/null
 	for r in b:rust c:python d:bash e:Scala f:tsx g:rust h:rust go:go ts:typescript mjs:javascript tsx:tsx nix:nix \
 		scala:scala sh:bash; do
-		[ "$(yq '.language' "rules/${r%%:*}.yml")" = "${r#*:}" ]
+		prints "${r#*:}" yq '.language' "rules/${r%%:*}.yml"
 	done
 	languages
 	run --separate-stderr "$assay" rule new i
@@ -183,7 +185,8 @@ rust_source() {
 	[ "$status" -eq 0 ]
 	[ "$output" = "$(printf '%s\n' lint/rules/no-env-var.yml lint/tests/no-env-var-test.yml)" ]
 	cmp sgconfig.yml "$T/before"
-	[[ $(head -1 lint/tests/no-env-var-test.yml) == "# The tests of lint/rules/no-env-var.yml, "* ]]
+	first=$(head -1 lint/tests/no-env-var-test.yml)
+	[[ $first == "# The tests of lint/rules/no-env-var.yml, "* ]]
 	# A rule of that id in another of its rule directories.
 	mkdir more
 	printf '%s\n' 'id: "no-unwrap" # existing' 'language: rust' >more/x.yml
@@ -209,14 +212,14 @@ rust_source() {
 	local_repo
 	printf '%s\n' 'def f(x):' '    if x:' '        g(x,   ' '' '            "a\tb")' '    return x' >m.py
 	"$assay" rule new a --from m.py:2-5 >/dev/null
-	[ "$(yaml rule-tests/a-test.yml '.invalid[0]')" = '"if x:\n    g(x,\n\n        \"a\\tb\")\n"' ]
+	prints '"if x:\n    g(x,\n\n        \"a\\tb\")\n"' yaml rule-tests/a-test.yml '.invalid[0]'
 	grep -qx '  - |' rule-tests/a-test.yml
 	"$assay" rule new b --from m.py:3-6 >/dev/null
-	[ "$(yaml rule-tests/b-test.yml '.invalid[0]')" = '"    g(x,\n\n        \"a\\tb\")\nreturn x\n"' ]
+	prints '"    g(x,\n\n        \"a\\tb\")\nreturn x\n"' yaml rule-tests/b-test.yml '.invalid[0]'
 	run ! grep -qx '  - |' rule-tests/b-test.yml
 	printf 'a\r\nb\r\n' >crlf.py
 	"$assay" rule new c --from crlf.py:1-2 >/dev/null
-	[ "$(yaml rule-tests/c-test.yml '.invalid[0]')" = '"a\r\nb\r\n"' ]
+	prints '"a\r\nb\r\n"' yaml rule-tests/c-test.yml '.invalid[0]'
 	# Every one of them passes the built-in oxfmt check.
 	builtin_checks plain
 	run --separate-stderr "$assay" check --base HEAD oxfmt
@@ -232,11 +235,11 @@ rust_source() {
 	[ "$status" -eq 0 ]
 	[ "$output" = "$(printf '%s\n' ../sgconfig.yml ../rules/no-env-var.yml ../rule-tests/no-env-var-test.yml)" ]
 	[ -f ../rules/no-env-var.yml ]
-	[ "$(yaml ../rule-tests/no-env-var-test.yml '.invalid[0]')" = '"let home = std::env::var(\"HOME\");\n"' ]
+	prints '"let home = std::env::var(\"HOME\");\n"' yaml ../rule-tests/no-env-var-test.yml '.invalid[0]'
 	run --separate-stderr "$assay" rule new other --from=a.rs:2-3
 	[ "$status" -eq 0 ]
 	[ "$output" = "$(printf '%s\n' ../rules/other.yml ../rule-tests/other-test.yml)" ]
-	[ "$(yaml ../rule-tests/other-test.yml '.invalid[0]')" = '"let name = \"x\";\nlet home = std::env::var(\"HOME\");\n"' ]
+	prints '"let name = \"x\";\nlet home = std::env::var(\"HOME\");\n"' yaml ../rule-tests/other-test.yml '.invalid[0]'
 }
 
 @test "--help prints the usage and exits 0" {

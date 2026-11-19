@@ -1,6 +1,6 @@
 # shellcheck disable=SC2030,SC2031 # bats runs each test in a process of its own: what one test sets, no other reads
 # shellcheck source=test/helpers.bash
-source "$BATS_TEST_DIRNAME/helpers.bash"
+source "${BATS_TEST_DIRNAME:?}/helpers.bash"
 
 # The run's lines, without the timing.
 untimed() { sed -E 's/ [0-9]+\.[0-9]{2}s/ Ns/g' <<<"$output"; }
@@ -12,7 +12,7 @@ untimed() { sed -E 's/ [0-9]+\.[0-9]{2}s/ Ns/g' <<<"$output"; }
 	check b "echo b >>$T/ran; exit 3"
 	run "$assay" check
 	[ "$status" -eq 1 ]
-	[ "$(cat "$T/ran")" = "$(printf 'a\nb\nc')" ]
+	holds "$T/ran" a b c
 	[[ ${lines[1]} =~ ^ok\ \ \ a\ [0-9]+\.[0-9]{2}s$ ]]
 	[[ ${lines[2]} =~ ^FAIL\ b\ [0-9]+\.[0-9]{2}s\ \(exit\ 3\)$ ]]
 	[[ ${lines[3]} =~ ^ok\ \ \ c\ [0-9]+\.[0-9]{2}s$ ]]
@@ -26,7 +26,8 @@ untimed() { sed -E 's/ [0-9]+\.[0-9]{2}s/ Ns/g' <<<"$output"; }
 	run "$assay" check
 	[ "$status" -eq 1 ]
 	gitdir=$(git rev-parse --absolute-git-dir)
-	expected="assay check · base main@$(short HEAD) (fork-point)
+	head_short=$(short HEAD)
+	expected="assay check · base main@$head_short (fork-point)
 ok   fmt Ns
 FAIL lint Ns (exit 1)
 FAIL test Ns (exit 2)
@@ -43,7 +44,8 @@ $(seq 1 100)
 log: $gitdir/assay/test.log
 
 2 of 3 checks failed in Ns; rerun: assay check lint test"
-	diff <(echo "$expected") <(untimed)
+	actual=$(untimed)
+	diff <(echo "$expected") <(echo "$actual")
 }
 
 @test "a passing run ends with the count and exits 0" {
@@ -70,8 +72,9 @@ log: $gitdir/assay/test.log
 	"$assay" check || true
 	echo 2 >"$T/n"
 	run "$assay" check
-	[ "$(cat .git/assay/noisy.log)" = "run 2" ]
-	[ -z "$(git status --porcelain)" ]
+	holds .git/assay/noisy.log "run 2"
+	changes=$(git status --porcelain)
+	[ -z "$changes" ]
 }
 
 @test "the log lives in the worktree's own git directory" {
@@ -115,7 +118,7 @@ log: $gitdir/assay/test.log
 	check slow "echo slow >>$T/ran"
 	run "$assay" check --fast
 	[ "$status" -eq 0 ]
-	[ "$(cat "$T/ran")" = quick ]
+	holds "$T/ran" quick
 	[[ ${lines[0]} == "assay check --fast · base "* ]]
 }
 
@@ -126,7 +129,7 @@ log: $gitdir/assay/test.log
 	check off "echo off >>$T/ran" --off
 	run "$assay" check
 	[ "$status" -eq 0 ]
-	[ "$(cat "$T/ran")" = "$(printf 'quick\nslow')" ]
+	holds "$T/ran" quick slow
 }
 
 @test "going over the fast set's budget fails nothing" {
@@ -144,7 +147,7 @@ log: $gitdir/assay/test.log
 	check c "echo c >>$T/ran"
 	run "$assay" check c a c
 	[ "$status" -eq 0 ]
-	[ "$(cat "$T/ran")" = "$(printf 'a\nc')" ]
+	holds "$T/ran" a c
 	[[ ${lines[0]} == "assay check a c · base "* ]]
 }
 
@@ -154,7 +157,7 @@ log: $gitdir/assay/test.log
 	check b "echo b >>$T/ran" --fast
 	run "$assay" check --fast b
 	[ "$status" -eq 0 ]
-	[ "$(cat "$T/ran")" = b ]
+	holds "$T/ran" b
 }
 
 @test "naming an unknown, disabled or (with --fast) slow check exits 2" {
@@ -201,8 +204,10 @@ log: $gitdir/assay/test.log
 	cd sub
 	run "$assay" check
 	[ "$status" -eq 0 ]
-	[ "$(cat "$T/pwd")" = "$(cd "$T/work" && pwd -P)" ]
-	[ "$(cat "$T/base")" = "$(sha origin/main)" ]
+	root=$(cd "$T/work" && pwd -P)
+	holds "$T/pwd" "$root"
+	main=$(sha origin/main)
+	holds "$T/base" "$main"
 }
 
 @test "checks run with the caller's PATH, not assay's own tools" {
@@ -238,11 +243,11 @@ log: $gitdir/assay/test.log
 	rm .gitignore
 	run "$assay" check
 	[ "$status" -eq 0 ]
-	[ "$(cat "$T/ran")" = cargo ]
+	holds "$T/ran" cargo
 	git add Cargo.toml
 	git commit --quiet -m cargo
 	run "$assay" check
-	[ "$(cat "$T/ran")" = "$(printf 'cargo\ncargo')" ]
+	holds "$T/ran" cargo cargo
 }
 
 @test "requires: a glob is matched from the repo root, ** crossing directories" {
@@ -333,7 +338,8 @@ fails_closed() {
 	export ASSAY_CONFIG=$T
 	fails_closed directory
 	export ASSAY_CONFIG=$good
-	if [ "$(id -u)" -ne 0 ]; then
+	uid=$(id -u)
+	if [ "$uid" -ne 0 ]; then
 		chmod 000 "$ASSAY_CONFIG"
 		fails_closed "no read permission"
 	fi
@@ -347,35 +353,44 @@ fails_closed() {
 		printf '%s' "$2" >"$ASSAY_CONFIG"
 		fails_closed "$1"
 	}
+	# bad_jq <description> <jq filter>: bad, with the good configuration changed by the filter.
+	bad_jq() {
+		local json
+		json=$(jq -c "$2" <<<"$good")
+		bad "$1" "$json"
+	}
 	bad empty ""
 	bad truncated "${good:0:30}"
 	bad "two documents" "$good $good"
 	bad "not an object" "[$good]"
-	bad "no version" "$(jq -c 'del(.version)' <<<"$good")"
-	bad "another version" "$(jq -c '.version = 2' <<<"$good")"
-	bad "checks not an object" "$(jq -c '.checks = []' <<<"$good")"
-	bad "no loosenings" "$(jq -c 'del(.loosenings)' <<<"$good")"
-	bad "exec missing" "$(jq -c 'del(.checks.a.exec)' <<<"$good")"
-	bad "exec empty" "$(jq -c '.checks.a.exec = ""' <<<"$good")"
-	bad "fast not a boolean" "$(jq -c '.checks.a.fast = "yes"' <<<"$good")"
-	bad "enable missing" "$(jq -c 'del(.checks.a.enable)' <<<"$good")"
-	bad "requires not a string" "$(jq -c '.checks.a.requires = 1' <<<"$good")"
-	bad "a name with a slash" "$(jq -c '.checks["a/b"] = .checks.a' <<<"$good")"
-	bad "a loosening without a reason" "$(jq -c '.loosenings = [{check: "a", kind: "off"}]' <<<"$good")"
-	bad "a loosening of an unknown check" "$(jq -c '.loosenings = [{check: "z", kind: "off", reason: "r"}]' <<<"$good")"
-	bad "a loosening of an unknown kind" "$(jq -c '.loosenings = [{check: "a", kind: "x", reason: "r"}]' <<<"$good")"
-	bad "languages not a list" "$(jq -c '.languages = "rust"' <<<"$good")"
-	bad "a language that is not a name" "$(jq -c '.languages = ["Rust"]' <<<"$good")"
-	bad "rulePacks not an object" "$(jq -c '.rulePacks = ["demo"]' <<<"$good")"
-	bad "a rule pack without a directory" "$(jq -c '.rulePacks = {demo: ""}' <<<"$good")"
-	bad "a rule pack's name with a slash" "$(jq -c '.rulePacks = {"a/b": "/x"}' <<<"$good")"
+	bad_jq "no version" 'del(.version)'
+	bad_jq "another version" '.version = 2'
+	bad_jq "checks not an object" '.checks = []'
+	bad_jq "no loosenings" 'del(.loosenings)'
+	bad_jq "exec missing" 'del(.checks.a.exec)'
+	bad_jq "exec empty" '.checks.a.exec = ""'
+	bad_jq "fast not a boolean" '.checks.a.fast = "yes"'
+	bad_jq "enable missing" 'del(.checks.a.enable)'
+	bad_jq "requires not a string" '.checks.a.requires = 1'
+	bad_jq "a name with a slash" '.checks["a/b"] = .checks.a'
+	bad_jq "a loosening without a reason" '.loosenings = [{check: "a", kind: "off"}]'
+	bad_jq "a loosening of an unknown check" '.loosenings = [{check: "z", kind: "off", reason: "r"}]'
+	bad_jq "a loosening of an unknown kind" '.loosenings = [{check: "a", kind: "x", reason: "r"}]'
+	bad_jq "languages not a list" '.languages = "rust"'
+	bad_jq "a language that is not a name" '.languages = ["Rust"]'
+	bad_jq "rulePacks not an object" '.rulePacks = ["demo"]'
+	bad_jq "a rule pack without a directory" '.rulePacks = {demo: ""}'
+	bad_jq "a rule pack's name with a slash" '.rulePacks = {"a/b": "/x"}'
 }
 
 @test "without jq assay exits 2" {
 	local_repo
 	check a "touch $T/ran"
 	mkdir "$T/bin"
-	for t in git head tail wc mkdir rm; do ln -s "$(command -v "$t")" "$T/bin/$t"; done
+	for t in git head tail wc mkdir rm; do
+		tool=$(command -v "$t")
+		ln -s "$tool" "$T/bin/$t"
+	done
 	run env PATH="$T/bin" "$BASH" "$assay" check
 	[ "$status" -eq 2 ]
 	[ "$output" = "assay: cannot find jq on the PATH" ]
@@ -428,15 +443,20 @@ fails_closed() {
 		printf '%s' "$2" >"$ASSAY_CONFIG"
 		fails_closed "$1"
 	}
-	bad "findings not an object" "$(jq -c '.findings = []' <<<"$good")"
-	bad "radarlint for another language" "$(jq -c '.findings.radarlint = ["java"]' <<<"$good")"
-	bad "a rule not on or off" "$(jq -c '.findings.rules["python:S1"] = "off"' <<<"$good")"
-	bad "a rule key that is not a Sonar key" "$(jq -c '.findings.rules["python:S1\nx=1"] = false' <<<"$good")"
-	bad "an unknown smell" "$(jq -c '.findings.smells.long_lines = {enable: true, threshold: 1}' <<<"$good")"
-	bad "a threshold of zero" "$(jq -c '.findings.smells.function_complexity.threshold = 0' <<<"$good")"
-	bad "a fractional threshold" "$(jq -c '.findings.smells.function_complexity.threshold = 1.5' <<<"$good")"
-	bad "enable not a boolean" "$(jq -c '.findings.smells.function_complexity.enable = 1' <<<"$good")"
-	bad "nodes_threshold not a number" "$(jq -c '.findings.duplication.nodes_threshold = "64"' <<<"$good")"
-	bad "a setting's loosening that says nothing" \
-		"$(jq -c '.loosenings = [{check: "findings", kind: "setting", reason: "r"}]' <<<"$good")"
+	# bad_jq <description> <jq filter>: bad, with the good configuration changed by the filter.
+	bad_jq() {
+		local json
+		json=$(jq -c "$2" <<<"$good")
+		bad "$1" "$json"
+	}
+	bad_jq "findings not an object" '.findings = []'
+	bad_jq "radarlint for another language" '.findings.radarlint = ["java"]'
+	bad_jq "a rule not on or off" '.findings.rules["python:S1"] = "off"'
+	bad_jq "a rule key that is not a Sonar key" '.findings.rules["python:S1\nx=1"] = false'
+	bad_jq "an unknown smell" '.findings.smells.long_lines = {enable: true, threshold: 1}'
+	bad_jq "a threshold of zero" '.findings.smells.function_complexity.threshold = 0'
+	bad_jq "a fractional threshold" '.findings.smells.function_complexity.threshold = 1.5'
+	bad_jq "enable not a boolean" '.findings.smells.function_complexity.enable = 1'
+	bad_jq "nodes_threshold not a number" '.findings.duplication.nodes_threshold = "64"'
+	bad_jq "a setting's loosening that says nothing" '.loosenings = [{check: "findings", kind: "setting", reason: "r"}]'
 }

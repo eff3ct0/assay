@@ -1,7 +1,7 @@
 # shellcheck disable=SC2016 # the fixtures' scripts and rules, and the messages' backquotes, are literal text
 bats_require_minimum_version 1.5.0
 # shellcheck source=test/helpers.bash
-source "$BATS_TEST_DIRNAME/helpers.bash"
+source "${BATS_TEST_DIRNAME:?}/helpers.bash"
 
 # ast-grep: the repo's ast-grep rules (sgconfig.yml at the root) and the rule packs it turns on, in three steps, each
 # run only when the one before passed: a plain text search, `ast-grep test --skip-snapshot-tests`, `ast-grep scan`.
@@ -158,7 +158,7 @@ rules/no-eval.yml:4:message: "<fill in: what is wrong and what to do instead>"
 	[ "${lines[-1]}" = "ast-grep scan found code a rule forbids: fix each finding; \`ast-grep scan -c $pack/sgconfig.yml -U\` applies a pack rule's fix:, where it has one." ]
 	# The pack's fix, as the last line gives it.
 	ast-grep scan -c "$pack/sgconfig.yml" -U >/dev/null
-	[ "$(cat tool.sh)" = 'if command -v git >/dev/null; then echo yes; fi' ]
+	holds tool.sh 'if command -v git >/dev/null; then echo yes; fi'
 	# The repo's own rules and the pack's, together.
 	sg_project
 	printf '%s\n' 'which ls' 'eval "$x"' >>script.sh
@@ -173,7 +173,7 @@ rules/no-eval.yml:4:message: "<fill in: what is wrong and what to do instead>"
 	sg_project
 	mkdir "$T/bin"
 	for t in git jq yq awk mktemp rm cat realpath dirname; do
-		if command -v "$t" >/dev/null; then ln -s "$(command -v "$t")" "$T/bin/$t"; fi
+		if tool=$(command -v "$t"); then ln -s "$tool" "$T/bin/$t"; fi
 	done
 	run -127 --separate-stderr env PATH="$T/bin" "$BASH" "$assay" builtin ast-grep
 	[ "$status" -eq 127 ]

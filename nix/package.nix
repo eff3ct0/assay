@@ -12,7 +12,8 @@ writeShellApplication {
   name = "assay";
   # No runtimeInputs: they would come first on the PATH of every check too. The script puts these first on its own
   # PATH and runs each check with the PATH it was called with. ast-grep matches the guard's command rules and runs
-  # the ast-grep check; yq reads sgconfig.yml for that check and for `assay rule new`.
+  # the ast-grep check; yq reads sgconfig.yml for that check and for `assay rule new`. assay_presets is where
+  # `assay preset` finds every version of each language's preset.
   text = ''
     assay_tools=${
       lib.makeBinPath [
@@ -24,6 +25,7 @@ writeShellApplication {
         yq-go
       ]
     }
+    assay_presets=${../preset}
   ''
   + builtins.readFile ../assay.sh;
   meta = {

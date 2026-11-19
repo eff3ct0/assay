@@ -334,6 +334,15 @@ let
         "assay"
         "hello"
       ];
+    "the preset check is built in, fast, and runs assay builtin preset" =
+      builtinPlain.assay.checks.preset == {
+        exec = "assay builtin preset";
+        fast = true;
+        enable = true;
+        requires = null;
+        coverage = null;
+        reason = null;
+      };
     "the built-in checks' tools join every repo's devenv, beside the CLI" =
       map lib.getName builtinPlain.packages == [
         "assay"
@@ -608,7 +617,7 @@ in
         chmod -R u+w src
         cd src
         patchShebangs assay.sh test/stub devenv/bin
-        shellcheck assay.sh nix/rules-check.sh test/helpers.bash test/devenv/helpers.bash test/stub/devenv devenv/bin/*
+        shellcheck assay.sh nix/rules-check.sh test/assert.bash test/helpers.bash test/devenv/helpers.bash test/stub/devenv devenv/bin/*
         bats test
         touch $out
       '';

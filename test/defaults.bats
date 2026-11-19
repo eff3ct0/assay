@@ -1,14 +1,17 @@
 # shellcheck disable=SC2016 # the fixtures' shell text and the messages' backquotes are literal
 bats_require_minimum_version 1.5.0
 # shellcheck source=test/helpers.bash
-source "$BATS_TEST_DIRNAME/helpers.bash"
+source "${BATS_TEST_DIRNAME:?}/helpers.bash"
 
 # The helpers assay's default checks run (devenv/bin/), against throwaway repos, with the real tools on the PATH.
 
 bin=$BATS_TEST_DIRNAME/../devenv/bin
 
 # listed <command>...: the NUL-terminated entries a command prints, one per line.
-listed() { "$@" | tr '\0' '\n'; }
+listed() {
+	"$@" >"$T/listed" || return
+	tr '\0' '\n' <"$T/listed"
+}
 
 @test "assay-files lists the files git sees that exist, matching git glob pathspecs from the root" {
 	local_repo
@@ -66,7 +69,8 @@ hits() {
     /<source>/ { src = $0; sub(/.*<source>/, "", src); sub(/<\/source>.*/, "", src) }
     /<class / { f = $0; sub(/.*filename="/, "", f); sub(/".*/, "", f); if (f !~ /^\//) f = src f; sub("^" root, "", f) }
     /<line / { n = $0; sub(/.*number="/, "", n); sub(/".*/, "", n); h = $0; sub(/.*hits="/, "", h); sub(/".*/, "", h); print f ":" n ":" h }
-  ' "$1" | LC_ALL=C sort -t: -k1,1 -k2,2n
+  ' "$1" >"$T/hits" || return
+	LC_ALL=C sort -t: -k1,1 -k2,2n "$T/hits"
 }
 
 # needs_kcov: skip the test where nixpkgs has no kcov (it has it for Linux only).

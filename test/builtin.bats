@@ -1,6 +1,6 @@
 bats_require_minimum_version 1.5.0
 # shellcheck source=test/helpers.bash
-source "$BATS_TEST_DIRNAME/helpers.bash"
+source "${BATS_TEST_DIRNAME:?}/helpers.bash"
 
 # The built-in checks, as assay's devenv module configures them (test/defaults/*.json): their list, and the checks
 # that run a tool, oxfmt and actionlint. The checks that are assay's own code have a test file each.
@@ -13,7 +13,7 @@ untimed() { sed -E 's/ [0-9]+\.[0-9]{2}s/ Ns/g' <<<"$output"; }
 	run --separate-stderr "$assay" check --list
 	[ "$status" -eq 0 ]
 	[ "$output" = "$(printf '%s\n' 'actionlint (fast)' 'agents-md (fast)' 'ast-grep (fast)' 'commit-trailers (fast)' \
-		findings 'gitleaks (fast)' 'oxfmt (fast)' 'suppressions (fast)')" ]
+		findings 'gitleaks (fast)' 'oxfmt (fast)' 'preset (fast)' 'suppressions (fast)')" ]
 }
 
 @test "a repo in shape passes every built-in check; without workflows actionlint is skipped" {
@@ -25,7 +25,7 @@ untimed() { sed -E 's/ [0-9]+\.[0-9]{2}s/ Ns/g' <<<"$output"; }
 	run --separate-stderr "$assay" check --base HEAD
 	echo "$output"
 	[ "$status" -eq 0 ]
-	[ "${lines[-1]%% in *}" = "8 checks passed" ]
+	[ "${lines[-1]%% in *}" = "9 checks passed" ]
 	git rm --quiet -r .github
 	git commit --quiet -m "no workflows"
 	run --separate-stderr "$assay" check --base HEAD
@@ -64,7 +64,7 @@ untimed() { sed -E 's/ [0-9]+\.[0-9]{2}s/ Ns/g' <<<"$output"; }
 	[ "$status" -eq 1 ]
 	fix=$(jq -r '.checks.oxfmt.exec' "$ASSAY_CONFIG")
 	bash -c "${fix/ --check/}" >/dev/null 2>&1
-	[ "$(cat notes.md)" = "$(printf '%s\n' '# Notes' '' '- one')" ]
+	holds notes.md '# Notes' '' '- one'
 	run --separate-stderr "$assay" check oxfmt
 	[ "$status" -eq 0 ]
 	rm notes.md
@@ -106,7 +106,7 @@ untimed() { sed -E 's/ [0-9]+\.[0-9]{2}s/ Ns/g' <<<"$output"; }
 	# The fix formats the project's files and leaves the backend's JSON alone.
 	fix=$(jq -r '.checks.oxfmt.exec' "$ASSAY_CONFIG")
 	bash -c "${fix/ --check/}" >/dev/null 2>&1
-	[ "$(cat backend/data.json)" = "$(printf '%s\n' '{"a":1,' '"b":2}')" ]
+	holds backend/data.json '{"a":1,' '"b":2}'
 	run --separate-stderr "$assay" check oxfmt
 	[ "$status" -eq 0 ]
 }

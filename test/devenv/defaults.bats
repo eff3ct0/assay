@@ -1,7 +1,7 @@
 # shellcheck disable=SC2016 # the fixtures' shell and Nix text is literal
 bats_require_minimum_version 1.5.0
 # shellcheck source=test/devenv/helpers.bash
-source "$BATS_TEST_DIRNAME/helpers.bash"
+source "${BATS_TEST_DIRNAME:?}/helpers.bash"
 
 # Nix's and bash's default checks, through the real devenv: a fixture project per language, each check failing on a
 # defect and passing on its fix, and the coverage of new code of bash's test check. The consumers import a copy of
@@ -84,14 +84,20 @@ nix_fixture() {
 	check_passes nix-flake-check
 }
 
-# bash_fixture: a library with its bats test, and a script no test runs, committed; clean for shellcheck and shfmt.
+# bash_fixture: a library with its bats test, and a script no test runs, with bash's preset written by
+# `assay preset bash`, committed; clean for shellcheck under the preset and for shfmt.
 bash_fixture() {
 	mkdir -p lib test bin
 	printf '%s\n' '# shellcheck shell=bash' 'greet() {' '	echo "hello $1"' '}' >lib/greet.sh
 	printf '%s\n' '#!/usr/bin/env bash' 'echo "nobody runs me"' >bin/untested
 	chmod +x bin/untested
-	printf '%s\n' 'setup() {' '	# shellcheck source=lib/greet.sh' '	source "$BATS_TEST_DIRNAME/../lib/greet.sh"' '}' '' \
-		'@test "greets" {' '	run greet you' '	[ "$output" = "hello you" ]' '}' >test/greet.bats
+	printf '%s\n' 'setup() {' '	# shellcheck source=lib/greet.sh' '	source "${BATS_TEST_DIRNAME:?}/../lib/greet.sh"' '}' \
+		'' '@test "greets" {' '	run greet you' '	[ "$output" = "hello you" ]' '}' >test/greet.bats
+	local wrote expected
+	wrote=$(devenv shell -- assay preset bash)
+	expected=$(printf '%s\n' 'wrote .shellcheckrc' 'wrote .assay-preset.json')
+	[ "$wrote" = "$expected" ]
+	diff "$ASSAY/preset/bash/1/.shellcheckrc" .shellcheckrc
 	git add -A
 	git commit --quiet -m fixture
 }
@@ -116,12 +122,20 @@ bash_fixture() {
 	report=$(git rev-parse --absolute-git-dir)/assay/kcov/bats/cobertura.xml
 	[ -f "$report" ]
 	grep -q 'filename="[^"]*bin/untested"' "$report"
-	grep -A3 'filename="[^"]*bin/untested"' "$report" | grep -q 'hits="0"'
-	grep -A3 'filename="[^"]*lib/greet.sh"' "$report" | grep -q 'hits="1"'
+	untested=$(grep -A3 'filename="[^"]*bin/untested"' "$report")
+	grep -q 'hits="0"' <<<"$untested"
+	greet=$(grep -A3 'filename="[^"]*lib/greet.sh"' "$report")
+	grep -q 'hits="1"' <<<"$greet"
 
 	printf '%s\n' '#!/usr/bin/env bash' 'echo $1' >bin/lint
 	check_fails shellcheck "SC2086"
 	printf '%s\n' '#!/usr/bin/env bash' 'echo "$1"' >bin/lint
+	check_passes shellcheck
+
+	# The preset's optional checks hold: a masked return value fails.
+	printf '%s\n' '#!/usr/bin/env bash' 'echo "today: $(date)"' >bin/lint
+	check_fails shellcheck "SC2312"
+	printf '%s\n' '#!/usr/bin/env bash' 'today=$(date)' 'echo "today: $today"' >bin/lint
 	check_passes shellcheck
 
 	printf '%s\n' 'f() {' '  echo two spaces' '}' >lib/format.sh
