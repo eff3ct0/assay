@@ -1094,6 +1094,10 @@ applies_why=
 preset_applies() {
 	case $1 in
 	bash) has_shell_script ;;
+	scala)
+		applies_why="the repo has build.sbt"
+		[ -f build.sbt ]
+		;;
 	*) return 1 ;;
 	esac
 }
@@ -1245,6 +1249,13 @@ preset_shown=
 preset_todo=()
 record_changed=0
 
+render_scalafmt() {
+	local version
+	version=$(scalafmt --version) || die "cannot read scalafmt's version"
+	[[ $version =~ ^scalafmt\ ([0-9]+(\.[0-9]+)+)$ ]] || die "unexpected scalafmt version: $version"
+	sed "s/@SCALAFMT_VERSION@/${BASH_REMATCH[1]}/g" "$1" >"$2" || die "cannot render $1"
+}
+
 # apply_preset <language>: the language's pinned preset into the repo (the current directory, its root), file by
 # file, and its version into recorded. A file the repo lacks is written. With no version recorded (an adoption), a file
 # the repo has is kept, and shown against the preset when they differ. With an older version recorded, the repo's file
@@ -1269,6 +1280,10 @@ apply_preset() {
 	preset_files "$presets/$lang/$to" >"$files" || die "cannot list $presets/$lang/$to"
 	while IFS= read -r -d '' f; do
 		theirs=$presets/$lang/$to/$f
+		if [[ $lang/$f == scala/.scalafmt.conf ]]; then
+			tmp_file theirs
+			render_scalafmt "$presets/$lang/$to/$f" "$theirs"
+		fi
 		target=$f
 		if absent "$f"; then
 			preset_others "$lang" "$f"
@@ -1311,7 +1326,11 @@ apply_preset() {
 			continue
 		fi
 		if [ -f "$presets/$lang/$from/$f" ]; then
-			cat -- "$presets/$lang/$from/$f" >"$base" || die "cannot read $lang's preset $from"
+			if [[ $lang/$f == scala/.scalafmt.conf ]]; then
+				render_scalafmt "$presets/$lang/$from/$f" "$base"
+			else
+				cat -- "$presets/$lang/$from/$f" >"$base" || die "cannot read $lang's preset $from"
+			fi
 		else
 			: >"$base"
 		fi

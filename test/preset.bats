@@ -234,7 +234,7 @@ bash_repo() {
 	output_is 'wrote .shellcheckrc' 'wrote .assay-preset.json'
 	run --separate-stderr "$assay" preset nix
 	[ "$status" -eq 2 ]
-	[ "${stderr_lines[0]}" = "assay: assay has no preset for 'nix'; it has one for: bash" ]
+	[ "${stderr_lines[0]}" = "assay: assay has no preset for 'nix'; it has one for: bash scala" ]
 	run --separate-stderr "$assay" preset --force
 	[ "$status" -eq 2 ]
 	[ "${stderr_lines[0]}" = "assay: unknown option '--force'" ]
