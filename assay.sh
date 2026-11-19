@@ -24,13 +24,19 @@ usage: assay check [--fast] [--base <rev>] [<check>...]    run the repo's checks
        assay builtin gitleaks
        assay builtin suppressions [--base <rev>]
        assay new-code [--base <rev>]                       the change's new code, as JSON
+       assay guard --rules <file>                          the agent guard: one hook event on stdin
+       assay git-hook --rules <file> <hook> [<git's arguments>]
+                                                           a global git hook: commit-msg or pre-push
 
-Outside the repo's devenv (ASSAY_CONFIG unset), these run themselves inside it, from the repo root:
-devenv shell -- assay <command>, so the version the repo pins decides.
+Outside the repo's devenv (ASSAY_CONFIG unset), check, builtin and new-code run themselves inside it,
+from the repo root: devenv shell -- assay <command>, so the version the repo pins decides. guard and
+git-hook run where they are called, over the rule list given with --rules.
 The base of the change: --base, else ASSAY_BASE, else GitHub's event (GITHUB_EVENT_PATH), else the
 fork point of HEAD from the default branch, else their merge base. assay never fetches.
 Exit codes: 0 every selected check passed, 1 at least one failed, 2 assay could not run;
-assay builtin exits 127 when the tool its check runs is missing.
+assay builtin exits 127 when the tool its check runs is missing. assay guard exits 0 with its
+answer on stdout, and 1 on its own error, which lets the call through; assay git-hook exits 1 when
+a rule is violated or cannot be evaluated.
 EOF
 }
 
