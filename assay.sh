@@ -2566,25 +2566,27 @@ snapshot_checks() {
 		'{seconds: $seconds, failed: $ARGS.positional}' "${checks_failed[@]}" >"$dir/checks.json"
 }
 
+# LCOV summaries are per source record. Some producers omit them; DA records still carry the counts.
+IFS= read -r -d '' snapshot_lcov_awk <<'AWK' || true
+{ sub(/\r$/, "") }
+$1 == "SF" { if (open || length($0) < 4) bad = 1; open = 1; lf = lh = -1; da = hit = 0 }
+$1 == "LF" { if (!open || $2 !~ /^[0-9]+$/ || lf >= 0) bad = 1; lf = $2 + 0 }
+$1 == "LH" { if (!open || $2 !~ /^[0-9]+$/ || lh >= 0) bad = 1; lh = $2 + 0 }
+$1 == "DA" { if (!open || $2 !~ /^[1-9][0-9]*$/ || $3 !~ /^[0-9]+$/) bad = 1; da++; hit += ($3 > 0) }
+$0 == "end_of_record" {
+  if (!open || (lf < 0) != (lh < 0) || lh > lf) bad = 1
+  total += (lf < 0 ? da : lf); covered += (lh < 0 ? hit : lh); records++; open = 0
+}
+END { if (bad || open || !records) exit 1; printf "%.0f %.0f\n", covered, total }
+AWK
+
 snapshot_coverage() {
 	local report=$1 counts covered total
 	if [ -f "$report" ]; then
 		# Cobertura's root attributes count distinct covered and coverable lines.
-		if ! counts=$(xmlstarlet sel -T -t -v /coverage/@lines-covered -o ' ' -v /coverage/@lines-valid \
-			"$report" 2>/dev/null); then
-			# LCOV summaries are per source record. Some producers omit them; DA records still carry the counts.
-			counts=$(awk -F '[:,]' '
-				{ sub(/\r$/, "") }
-				$1 == "SF" { if (open || length($0) < 4) bad = 1; open = 1; lf = lh = -1; da = hit = 0 }
-				$1 == "LF" { if (!open || $2 !~ /^[0-9]+$/ || lf >= 0) bad = 1; lf = $2 + 0 }
-				$1 == "LH" { if (!open || $2 !~ /^[0-9]+$/ || lh >= 0) bad = 1; lh = $2 + 0 }
-				$1 == "DA" { if (!open || $2 !~ /^[1-9][0-9]*$/ || $3 !~ /^[0-9]+$/) bad = 1; da++; hit += ($3 > 0) }
-				$0 == "end_of_record" {
-					if (!open || (lf < 0) != (lh < 0) || lh > lf) bad = 1
-					total += (lf < 0 ? da : lf); covered += (lh < 0 ? hit : lh); records++; open = 0
-				}
-				END { if (bad || open || !records) exit 1; printf "%.0f %.0f\n", covered, total }
-			' "$report") || counts=
+		local -a counters=(-v /coverage/@lines-covered -o ' ' -v /coverage/@lines-valid)
+		if ! counts=$(xmlstarlet sel -T -t "${counters[@]}" "$report" 2>/dev/null); then
+			counts=$(awk -F '[:,]' "$snapshot_lcov_awk" "$report") || counts=
 		fi
 		read -r covered total <<<"$counts"
 		if [[ $covered =~ ^[0-9]+$ && $total =~ ^[0-9]+$ ]]; then

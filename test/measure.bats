@@ -186,6 +186,22 @@ EOF
 	[[ $stderr == *"could not measure lint"* ]]
 }
 
+@test "measure without analyzers still runs whole-tree checks and reports unavailable metrics" {
+	local_repo
+	archive_fixture
+	check tree 'git ls-files --error-unmatch a.txt'
+	mkdir "$T/only"
+	for tool in awk bash cat git jq mkdir mktemp rm rmdir; do
+		executable=$(command -v "$tool")
+		ln -s "$executable" "$T/only/$tool"
+	done
+	run --separate-stderr env PATH="$T/only" "$BASH" "$assay" measure
+	[ "$status" -eq 0 ]
+	jq -es 'length == 1 and (.[0] | .failed == [] and .coverage == {} and
+		.lint == null and .smells == null and .duplication == null and .loc == null)' <<<"$output"
+	[ ! -e .git ] && [ ! -e .qlty ]
+}
+
 @test "measure exits 2 without a devenv importing assay" {
 	local_repo
 	outside_devenv
