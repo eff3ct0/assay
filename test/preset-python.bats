@@ -275,5 +275,5 @@ dev_group() { awk '/^dev = \[$/ { on = 1; next } on && /^\]$/ { on = 0 } on' pyp
 	python_version_2 pytest '-x'
 	run --separate-stderr "$assay" preset
 	[ "$status" -eq 2 ]
-	[ "$stderr" = "assay: line 2 of $T/presets/python/2.dependencies names no package: -x" ]
+	[ "$stderr" = "assay: line 2 of $assay_presets/python/2.dependencies names no package: -x" ]
 }

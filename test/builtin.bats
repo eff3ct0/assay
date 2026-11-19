@@ -36,7 +36,8 @@ untimed() { sed -E 's/ [0-9]+\.[0-9]{2}s/ Ns/g' <<<"$output"; }
 	[ "$status" -eq 0 ]
 	[ "$output" = "$(printf '%s\n' 'actionlint (fast)' 'agents-md (fast)' 'ast-grep (fast)' 'commit-trailers (fast)' \
 		'deptry (fast)' findings 'gitleaks (fast)' 'import-linter (fast, off)' osv-scanner 'oxfmt (fast)' \
-		'preset (fast)' pyright pytest 'ruff-check (fast)' 'ruff-format (fast)' 'suppressions (fast)' 'vulture (fast)')" ]
+		'preset (fast)' pyright pytest 'ruff-check (fast)' 'ruff-format (fast)' 'suppressions (fast)' 'tla (off)' \
+		'vulture (fast)')" ]
 }
 
 @test "without pyproject.toml, Python's checks are skipped and listed" {

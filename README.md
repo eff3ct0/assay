@@ -436,8 +436,8 @@ venvs (below). With nothing to check, a check passes.
   - `deptry`: `assay-deptry`, deptry over the project with pytest's `conftest.py` files left out, since they import
     development dependencies (deptry leaves `tests/` out by itself), on top of the repo's own
     `[tool.deptry] extend_exclude`, which deptry's command line would otherwise replace.
-  - `pytest`: `assay-pytest "$ASSAY_DIR/pytest"`, which runs `coverage run --source=. -m pytest
---hypothesis-profile=ci` (Hypothesis's own `ci` profile: derandomized, no example database, no deadline) and
+  - `pytest`: `assay-pytest "$ASSAY_DIR/pytest"` runs pytest under coverage.py (`--source=.`) with
+    `--hypothesis-profile=ci` (derandomized, no example database, no deadline) and
     writes coverage.py's Cobertura report, `$ASSAY_DIR/pytest/coverage.xml`, its data beside it. pytest's exit 5, no
     test collected, passes, while the new lines of the sources stay uncovered. With the preset's `.coveragerc`, the
     report lists every Python file under the root but the venvs', those no test loads at 0%, a `src/` layout's
@@ -464,10 +464,9 @@ no severity threshold.
   aliases, is new when the base's copy has none of its ids on the same package version (ecosystem, name, version):
   the same version with the same advisory at the base is no new finding, while a version the change moves to is.
 - A lockfile the working tree lacks has nothing to check; one the base lacks makes all of its advisories new.
-- Advisories on untouched dependencies are never shown by assay:
-  reach the user through GitHub's Dependabot.
-- Output: one line per new advisory, `<lockfile>: <package> <version> (<ecosystem>): <ids>: <summary>; fixed in
-<versions>`, then their count. The fix is a version that fixes it, or leaving the dependency out of the change; an
+- Advisories on untouched dependencies reach the user through GitHub's Dependabot, not assay.
+- Output: one line per new advisory, then their count. Each line gives the lockfile, package, version, ecosystem,
+  advisory IDs, summary and fixed versions (when known). Move to a fixed version or leave the dependency out of the change; an
   advisory that does not apply goes in the repo's `osv-scanner.toml`, with its reason.
 - It needs the network (the OSV API), so the check runs in the full run only; osv-scanner failing is exit 2.
 
