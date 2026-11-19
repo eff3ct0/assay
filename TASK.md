@@ -81,29 +81,13 @@ Issue #7 is the specification; it links eff3ct0/nixos-config#58, #50, #52, #54 a
 
 ## Remaining steps
 
-1. Done: preset, dependencies, `assay builtin osv-scanner`, `--list`, the module, helpers, fixtures (all 8 of
-   test/devenv/python.bats pass; `bats test`: 266 ok), docs.
-2. Running when the session stopped: `nix flake check` then `nix develop -c bats test/devenv` (logs were in the
-   session's scratchpad); rerun both.
-3. Fix the code review's findings (base cdd2d67):
-   - Decide, do not defer: (a) vulture vs "devenv test passes" in a fresh `uv init --lib` project (recommendation:
-     keep vulture's default confidence; the placeholder needs its test); (b) the venv on the PATH: the module sets
-     neither `languages.python.venv.enable` nor `uv.sync.enable`, and uv sync fails without pyproject.toml.
-     Recommendation: the module sets `venv.enable` with python, and `uv.enable`/`uv.sync.enable` with mkDefault only
-     when pyproject.toml exists, if devenv's evaluation can see the file; else document it for the template.
-   - Make the package-manager layer generic: manifest name and its hint ("uv init"), and project_dependencies, behind
-     `case $manager`.
-   - Stale docs: AGENTS.md Run (yq and uv for `assay preset`), nix/package.nix, nix/test-tools.nix and
-     nix/check-helpers.nix comments, the comments above apply_preset and preset_lines; usage_text lists osv-scanner as
-     a built-in check; use GLOSSARY's "untouched dependency"; lines over 120 in docs/adoption.md, AGENTS.md, README.md.
-   - Duplication: one helper for apply_preset's two `git diff --no-index` blocks; a `path_without <tool>` test helper
-     for the four PATH-filtering loops; osv-scanner's own --base parsing vs parse_base_option; python_devenv pasted
-     twice in test/devenv/python.bats.
-   - Names: `python` in devenv/languages/python.nix (it adds `requires`), `lines()` in test/stub/osv-scanner.
-   - The "nothing written" comment in cmd_preset holds only for planning: a failing `uv add` after bash's files leaves
-     them; reword or order the dependency runs before any language's files.
-   - Keep, with the reason in the PR: `--no-fix` (a repo's `fix = true` would edit the tree), `--warnings` (#58: warnings
-     fail), `PLR09` (= #52's "PLR09xx"), setup.cfg/tox.ini sections (coverage.py reads them before pyproject.toml),
-     dependencies the project lacks added back (as a missing file is written again).
-4. Critic per ~/git/CLAUDE.md (brief with the safety limits quoted above), then its recheck; PR with
-   "Closes https://github.com/eff3ct0/assay/issues/7", not merged; remove this file once the last critic passes.
+The code review against `cdd2d67` is applied. Vulture retains default confidence: the generated public `hello()`
+is unused until the project adds a test, and the fixture proves both the failure and the pass. Assay now defaults
+the venv on with Python; real devenv sees the root manifest and turns uv and sync on once it exists. Validate the
+template's own switches separately (outside this issue). Advisory change tests use synthetic records; the Python
+fixture runs a clean scan with the real scanner.
+
+Rerun `nix flake check` and `nix develop -c bats test/devenv` on the final tree. The orchestrator owns the independent
+critic and any PR; report the pushed branch to `t32` and stop. Do not integrate PR #27 while it is open: it implements
+the same list markers, and its `tla (off)` fixture expectations must survive any later integration. Remove this file
+only after the last critic passes.

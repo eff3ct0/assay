@@ -26,6 +26,24 @@ setup() {
 	no_checks
 }
 
+# path_without <tool>: a PATH of links to the other executables, keeping their first occurrence.
+path_without() {
+	local d f name bin target
+	local -a dirs
+	bin=$(mktemp -d "${T:?}/without.XXXXXX")
+	IFS=: read -ra dirs <<<"$PATH"
+	for d in "${dirs[@]}"; do
+		for f in "${d:-.}"/*; do
+			name=${f##*/}
+			if [ "$name" != "$1" ] && [ -f "$f" ] && [ -x "$f" ] && [ ! -L "$bin/$name" ]; then
+				target=$(realpath -s -- "$f") || return 1
+				ln -s "$target" "$bin/$name" || return 1
+			fi
+		done
+	done
+	echo "$bin"
+}
+
 # outside_devenv: what follows runs as from a shell outside the repo's devenv: ASSAY_CONFIG unset, and the
 # configuration handed to the stub's devenv instead.
 outside_devenv() {

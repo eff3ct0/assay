@@ -4,7 +4,7 @@ source "${BATS_TEST_DIRNAME:?}/helpers.bash"
 
 # `assay builtin osv-scanner`: the advisories on the dependency versions a change adds or changes, against the base,
 # with the osv-scanner stub (test/stub/osv-scanner), which reads a lockfile as lines "<name> <version> [<advisory>...]".
-# test/devenv/python.bats runs the real osv-scanner on a real uv.lock.
+# The fixtures' package versions and advisory records are synthetic.
 
 # osv_calls: the stub logs its calls to $T/osv.calls.
 osv_calls() { export OSV_STUB_CALLS=$T/osv.calls; }
@@ -105,13 +105,9 @@ lock() {
 	[ "$status" -eq 2 ]
 	[ "${stderr_lines[0]}" = "failed to query the OSV API: the network is unreachable" ]
 	[ "${stderr_lines[1]}" = "assay: osv-scanner failed (exit 127)" ]
-	local dir path=""
-	local -a dirs
-	IFS=: read -ra dirs <<<"$PATH"
-	for dir in "${dirs[@]}"; do
-		if [ ! -x "$dir/osv-scanner" ]; then path+=$dir:; fi
-	done
-	run -127 --separate-stderr env PATH="${path%:}" "$assay" builtin osv-scanner --base HEAD uv.lock
+	local path
+	path=$(path_without osv-scanner)
+	run -127 --separate-stderr env PATH="$path" "$assay" builtin osv-scanner --base HEAD uv.lock
 	[ "$stderr" = "assay: cannot find osv-scanner on the PATH" ]
 }
 
@@ -132,6 +128,6 @@ lock() {
 	run --separate-stderr "$assay" builtin osv-scanner uv.lock --base
 	[ "$status" -eq 2 ]
 	lock uv.lock 'urllib3 2.2.1 GHSA-1'
-	run --separate-stderr "$assay" builtin osv-scanner --base=HEAD uv.lock
+	run --separate-stderr "$assay" builtin osv-scanner uv.lock --base=HEAD pnpm-lock.yaml
 	[ "$status" -eq 1 ]
 }

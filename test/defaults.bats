@@ -204,7 +204,7 @@ python_project() {
 @test "assay-pytest: no test is a pass, every source uncovered; a failing test fails; no Python file, an empty report" {
 	local_repo
 	python_project
-	rm -r tests
+	mv tests "$T/no-tests"
 	run --separate-stderr "$bin/assay-pytest" .git/assay/pytest
 	echo "$output"
 	[ "$status" -eq 0 ]
@@ -216,7 +216,7 @@ python_project() {
 	run --separate-stderr "$bin/assay-pytest" .git/assay/pytest
 	[ "$status" -eq 1 ]
 	[ ! -e .git/assay/pytest/coverage.xml ]
-	rm -r src tests conftest.py
+	mv src tests conftest.py "$T/no-tests"
 	run --separate-stderr "$bin/assay-pytest" .git/assay/pytest
 	echo "$output"
 	[ "$status" -eq 0 ]

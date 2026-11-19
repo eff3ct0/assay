@@ -39,7 +39,7 @@ done
 
 # One JSON object per lockfile line: the lockfile's path, then the line's words.
 # shellcheck disable=SC2094 # each lockfile is only read; its path is printed, not written to
-lines() {
+lockfile_records() {
 	local f
 	local -a words
 	for f in "${lockfiles[@]}"; do
@@ -48,7 +48,7 @@ lines() {
 		done <"$f"
 	done
 }
-found=$(lines)
+found=$(lockfile_records)
 # shellcheck disable=SC2016 # jq's variables, not the shell's
 jq -s --args '
   {results: [$ARGS.positional[] as $path

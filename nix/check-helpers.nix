@@ -1,4 +1,4 @@
-# The helpers the default checks run (devenv/bin): assay-files, assay-nixf-tidy, assay-bats.
+# The helpers the default checks run (devenv/bin), including assay-pytest and assay-deptry.
 { runCommandLocal }:
 runCommandLocal "assay-check-helpers" { } ''
   mkdir -p $out/bin

@@ -10,10 +10,10 @@
 }:
 let
   helpers = pkgs.callPackage ../../nix/check-helpers.nix { };
-  python = _: check: check // { requires = "pyproject.toml"; };
+  requirePythonProject = _: check: check // { requires = "pyproject.toml"; };
 in
 lib.optionalAttrs config.languages.python.enable (
-  lib.mapAttrs python {
+  lib.mapAttrs requirePythonProject {
     # RUF100 reports a noqa that no longer silences anything; --no-fix keeps a repo's `fix = true` from editing the
     # tree.
     ruff-check = {

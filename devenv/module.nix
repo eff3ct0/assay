@@ -453,6 +453,15 @@ in
     assay.checks = lib.mapAttrs (_: lib.mapAttrs (_: mkDefault)) defaultChecks;
     assay.findings.rules = lib.mapAttrs (_: enable: { enable = mkDefault enable; }) ruleDefaults;
 
+    languages.python = lib.mkIf (config.languages.python.enable or false) {
+      venv.enable = mkDefault true;
+      # Without a project, uv sync fails before enterShell can finish.
+      uv = lib.mkIf (builtins.pathExists "${config.devenv.root}/pyproject.toml") {
+        enable = mkDefault true;
+        sync.enable = mkDefault config.languages.python.uv.enable;
+      };
+    };
+
     # The CLI, the tools of assay's default checks, and diff-cover when an enabled check declares coverage.
     packages = [
       assay

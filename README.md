@@ -171,11 +171,11 @@ versions in. assay injects no configuration at run time.
   resolved, or a kept file once extended, is not merged again. A record newer than the pinned preset, or naming a
   version assay lacks, is exit 2; languages it records that assay does not know are kept.
 - Output, on stdout: one line per file or section, `wrote`, `merged`, `conflict` or `kept` and its path; one per
-  dependency, `added dependency <spec>`, `upgraded dependency <spec>` or `removed dependency <name>`; and one for the record
-  when it changed (a language with nothing to do says `<language>'s preset <version>: up to date`); then the kept
+  dependency (`added dependency <spec>`, `upgraded dependency <spec>` or `removed dependency <name>`); and one for
+  the record when it changed (a language with nothing to do says `<language>'s preset <version>: up to date`); then the kept
   files' differences and what is left to do.
-- Exit codes: `0` everything applied, `1` a conflict, a kept file that differs from the preset or a kept section, `2` it could not
-  run.
+- Exit codes: `0` everything applied, `1` a conflict, a kept file that differs from the preset or a kept section,
+  `2` it could not run.
 
 ```sh
 $ assay preset
@@ -427,13 +427,14 @@ venvs (below). With nothing to check, a check passes.
     its mode or a rule; warnings fail too.
   - `osv-scanner`: `assay builtin osv-scanner uv.lock`, [on the change](#advisories-on-the-change).
 - What loads the project's code runs from its venv, which the project's lockfile fills and Python's preset adds to:
-  `deptry`, `pytest` and `import-linter`. So the devenv puts the venv first on the PATH and installs the lockfile into
-  it: `languages.python.venv.enable`, with `uv.enable` and `uv.sync.enable`.
+  `deptry`, `pytest` and `import-linter`. Assay defaults `languages.python.venv.enable` to put the venv on `PATH`.
+  Once a root `pyproject.toml` exists, it also defaults `uv.enable` and `uv.sync.enable` (unless uv is disabled).
+  Use uv to initialize a project before syncing it. Repos can override these defaults in `devenv.nix`.
   - `deptry`: `assay-deptry`, deptry over the project with pytest's `conftest.py` files left out, since they import
     development dependencies (deptry leaves `tests/` out by itself), on top of the repo's own
     `[tool.deptry] extend_exclude`, which deptry's command line would otherwise replace.
   - `pytest`: `assay-pytest "$ASSAY_DIR/pytest"`, which runs `coverage run --source=. -m pytest
-    --hypothesis-profile=ci` (Hypothesis's own `ci` profile: derandomized, no example database, no deadline) and
+--hypothesis-profile=ci` (Hypothesis's own `ci` profile: derandomized, no example database, no deadline) and
     writes coverage.py's Cobertura report, `$ASSAY_DIR/pytest/coverage.xml`, its data beside it. pytest's exit 5, no
     test collected, passes, while the new lines of the sources stay uncovered. With the preset's `.coveragerc`, the
     report lists every Python file under the root but the venvs', those no test loads at 0%, a `src/` layout's
@@ -460,10 +461,10 @@ no severity threshold.
   aliases, is new when the base's copy has none of its ids on the same package version (ecosystem, name, version):
   the same version with the same advisory at the base is no new finding, while a version the change moves to is.
 - A lockfile the working tree lacks has nothing to check; one the base lacks makes all of its advisories new.
-- Advisories on the versions the change leaves alone are never shown, by `assay check` or by `assay findings`: they
+- Advisories on untouched dependencies are never shown by assay:
   reach the user through GitHub's Dependabot.
 - Output: one line per new advisory, `<lockfile>: <package> <version> (<ecosystem>): <ids>: <summary>; fixed in
-  <versions>`, then their count. The fix is a version that fixes it, or leaving the dependency out of the change; an
+<versions>`, then their count. The fix is a version that fixes it, or leaving the dependency out of the change; an
   advisory that does not apply goes in the repo's `osv-scanner.toml`, with its reason.
 - It needs the network (the OSV API), so the check runs in the full run only; osv-scanner failing is exit 2.
 

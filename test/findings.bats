@@ -219,25 +219,11 @@ fixture() {
 	grep -q '^src/app.py:1: radarlint-python/python:S3776: ' <<<"$output"
 }
 
-# without <tool>...: the PATH, less those tools: a new directory of links to everything else on it, first one first.
-without() {
-	local d f name bin
-	bin=$(mktemp -d "$T/without.XXXXXX")
-	IFS=: read -ra dirs <<<"$PATH"
-	for d in "${dirs[@]}"; do
-		for f in "$d"/*; do
-			name=${f##*/}
-			if [ -x "$f" ] && [ ! -e "$bin/$name" ] && [[ " $* " != *" $name "* ]]; then ln -s "$f" "$bin/$name"; fi
-		done
-	done
-	PATH=$bin
-}
-
 @test "without qlty, or radarlint when the configuration runs it: assay findings exits 2, the findings check 127" {
 	local_repo
 	builtin_checks python
 	local path=$PATH
-	without qlty
+	PATH=$(path_without qlty)
 	run --separate-stderr "$assay" findings
 	[ "$status" -eq 2 ]
 	[ "$stderr" = "assay: cannot find qlty on the PATH" ]
@@ -247,7 +233,7 @@ without() {
 	[ "$status" -eq 1 ]
 	[[ ${lines[1]} == "FAIL findings "*" (exit 127: tool not found)" ]]
 	PATH=$path
-	without radarlint
+	PATH=$(path_without radarlint)
 	run -127 --separate-stderr "$assay" builtin findings
 	[ "$stderr" = "assay: cannot find radarlint on the PATH, which the findings run for python" ]
 }

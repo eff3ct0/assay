@@ -49,13 +49,14 @@ implements one of this repo's GitHub issues: read it, and the specifications it 
   `assay check --list`, and `assay preset [<language>...]`, from the devenv (`devenv shell -- assay check`) or from
   outside it (plain `assay check`, or `nix run . -- check` here), which re-executes itself through `devenv shell`
   from the repo root.
-- From this checkout without devenv: `ASSAY_CONFIG=<file> ./assay.sh check`, with git, jq and awk on the PATH (and
-  diff-cover for a check with `coverage`, ast-grep and yq for the `ast-grep` check and `assay rule new`). The file has the shape `devenv/module.nix` writes; `test/helpers.bash`
-  builds one by hand.
+- From this checkout without devenv: `ASSAY_CONFIG=<file> ./assay.sh check`, with git, jq and awk on the PATH;
+  diff-cover for a check with `coverage`, and ast-grep and yq for the `ast-grep` check and `assay rule new`.
+  Python's `assay preset` also uses yq for TOML and uv when dependencies change. The config has the shape
+  `devenv/module.nix` writes; `test/helpers.bash` builds one by hand.
 - One built-in check alone: `assay builtin <check>` (its `exec`), and the advisories on the change in lockfiles:
   `assay builtin osv-scanner [--base <rev>] <lockfile>...` (osv-scanner on the PATH); a change's new code as JSON:
-  `assay new-code`; the
-  analyzer's findings on the change: `assay findings [--base <rev>] [--sarif]`; an ast-grep rule's scaffold:
+  `assay new-code`; the analyzer's findings on the change: `assay findings [--base <rev>] [--sarif]`;
+  an ast-grep rule's scaffold:
   `assay rule new <kebab-name> [--lang <lang>] [--from <file>:<line>[-<line>]]`.
 - The guard and the git hooks, from anywhere: `echo '<hook event>' | assay guard --rules <file>` and
   `assay git-hook --rules <file> <hook> [<git's arguments>]`, with ast-grep on the PATH too; `test/rules/example.json`
@@ -69,20 +70,20 @@ implements one of this repo's GitHub issues: read it, and the specifications it 
 - `devenv test`: what CI runs (`.github/workflows/check.yml`): the pre-commit hooks over all files, then
   `assay check`: the built-in checks, and Nix's and bash's, which assay enables: nixfmt, statix, deadnix, nixf-tidy,
   shellcheck, shfmt, `nix flake check`, and `bats` over every tracked `.bats` file (`test/` and `test/devenv/`)
-  under kcov, with coverage of the branch's new lines. It needs the network the first time and takes about three minutes. While
-  working, `devenv shell -- assay check [--fast] [<check>...]`; `git commit` runs `assay check --fast`.
+  under kcov, with coverage of the branch's new lines. It needs the network and takes about three minutes.
+  While working, `devenv shell -- assay check [--fast] [<check>...]`; `git commit` runs `assay check --fast`.
 - `nix develop -c bats test`: the CLI against hand-written configurations in throwaway repos, with stubs for `devenv`,
-  `uv` and `osv-scanner` (`test/stub/`); the base of the change in `test/base.bats`, delegation in `test/delegate.bats`, the hits log
-  in `test/hits.bats`, `assay preset`, the `preset` check and the header line for a preset behind in `test/preset.bats`
+  `uv` and `osv-scanner` (`test/stub/`); the base in `test/base.bats`, delegation in `test/delegate.bats`, the hits log
+  in `test/hits.bats`, and `assay preset`, the `preset` check and the header line for a preset behind in `test/preset.bats`
   (with a synthetic later version of bash's preset), Python's preset, its development dependencies through the `uv`
   stub and the sections of other files that hold a tool's configuration in `test/preset-python.bats`, the advisory
-  comparison in `test/osv-scanner.bats` (the `osv-scanner` stub), new code in `test/new-code.bats`, the guard in `test/guard.bats`,
-  the git hooks in `test/git-hook.bats`, the check builder's script in `test/rules-check.bats` (the last three over the
-  example rule list `test/rules/example.json`, which `nix flake check` compares with the home-manager module's rendering
-  of `test/rules/example.nix`), each built-in check that is assay's own code in a file of its own
+  comparison in `test/osv-scanner.bats` (synthetic advisory records), new code in `test/new-code.bats`, the guard in
+  `test/guard.bats`, the git hooks in `test/git-hook.bats`, and the check builder's script in `test/rules-check.bats`.
+  The last three use `test/rules/example.json`, which `nix flake check` compares with the home-manager module's rendering
+  of `test/rules/example.nix`. Each built-in check that is assay's own code has a file of its own
   (`test/agents-md.bats`, `test/ast-grep.bats`, `test/commit-trailers.bats`, `test/gitleaks.bats`,
-  `test/suppressions.bats`, `test/findings.bats`, with real qlty and radarlint over `test/fixtures/findings/`), `assay
-  rule new` in `test/rule-new.bats`, every rule pack's tests and shape in `test/packs.bats` (over `packs/` and
+  `test/suppressions.bats`, `test/findings.bats`, with real qlty and radarlint over `test/fixtures/findings/`),
+  `assay rule new` in `test/rule-new.bats`, every rule pack's tests and shape in `test/packs.bats` (over `packs/` and
   `test/packs/`), the skills' text in `test/skills.bats`, the built-in checks as the module configures them in
   `test/builtin.bats`, from `test/defaults/*.json`, which `nix flake check` compares with the module's, coverage of new
   code in `test/coverage.bats` (real diff-cover), and the language checks' helpers (`devenv/bin`) in
@@ -94,10 +95,10 @@ implements one of this repo's GitHub issues: read it, and the specifications it 
 - `nix develop -c bats test/devenv`: the devenv module in throwaway repos that import a `git+file:` copy of this working
   tree, and assay's own adoption, through the `devenv` on the PATH (2.4.0 or later); the Nix and bash fixtures of the
   default checks in `test/devenv/defaults.bats`, bash's built by `assay preset bash`; Python's fixture in
-  `test/devenv/python.bats`, built with `uv init --lib` and `assay preset python` (real uv, PyPI and the OSV API, so it
-  needs the network on every run); a rule pack and `assay rule new` in `test/devenv/rules.bats`. It needs the network
-  the first time and takes a few minutes.
-- `nix develop -c shellcheck assay.sh nix/rules-check.sh test/assert.bash test/helpers.bash test/devenv/helpers.bash test/stub/* devenv/bin/*`
+  `test/devenv/python.bats`, built with `uv init --lib` and `assay preset python`; a rule pack and `assay rule new`
+  in `test/devenv/rules.bats`. The Python fixture uses real uv, PyPI and OSV for the clean scan, so the suite needs
+  the network and takes a few minutes.
+- `nix develop -c shellcheck assay.sh nix/rules-check.sh test/*.bash test/devenv/*.bash test/stub/* devenv/bin/*`
 - `nix flake check`: shellcheck, `bats test`, the CLI's build, `qlty --version` with no network, the devenv module's
   evaluation against a stand-in for devenv's options (with `test/packs/` as its packs, and with the real
   `devenv/defaults.nix` and `packs/` too), and the home-manager module in a home built with the flake's `home-manager`

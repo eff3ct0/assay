@@ -34,7 +34,12 @@ let
           shell.enable = lib.mkEnableOption "shell";
           # The other languages the module reads, for assay rule new's default language, and one it does not.
           typescript.enable = lib.mkEnableOption "TypeScript";
-          python.enable = lib.mkEnableOption "Python";
+          python = {
+            enable = lib.mkEnableOption "Python";
+            venv.enable = lib.mkEnableOption "Python venv";
+            uv.enable = lib.mkEnableOption "uv";
+            uv.sync.enable = lib.mkEnableOption "uv sync";
+          };
           rust.enable = lib.mkEnableOption "Rust";
           scala.enable = lib.mkEnableOption "Scala";
           go.enable = lib.mkEnableOption "Go";

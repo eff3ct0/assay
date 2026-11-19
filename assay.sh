@@ -33,10 +33,10 @@ usage: assay check [--fast] [--base <rev>] [<check>...]    run the repo's checks
        assay builtin ast-grep
        assay builtin commit-trailers [--base <rev>]
        assay builtin gitleaks
-       assay builtin osv-scanner [--base <rev>] <lockfile>...
        assay builtin preset
        assay builtin suppressions [--base <rev>]
        assay builtin findings [--base <rev>]
+       assay builtin osv-scanner [--base <rev>] <lockfile>...  the advisory comparison, shared by language checks
        assay findings [--base <rev>] [--sarif]             the analyzer's findings on the change
        assay new-code [--base <rev>]                       the change's new code, as JSON
        assay rule new <kebab-name> [--lang <lang>] [--from <file>:<line>[-<line>]]
@@ -1065,8 +1065,8 @@ builtin_suppressions() {
 # so the check holds on the change: one osv-scanner run scans each lockfile as the working tree has it and its copy at
 # the base, which keeps the file's name (osv-scanner picks its parser by name), and an advisory (with its aliases) is
 # new when the base's copy has none of its ids on the same package version (ecosystem, name, version). A lockfile the
-# working tree lacks has nothing to check; one the base lacks makes all of its advisories new. Advisories on the
-# versions the change leaves alone are never shown: they reach the user through GitHub's Dependabot.
+# working tree lacks has nothing to check; one the base lacks makes all of its advisories new. Advisories on untouched
+# dependencies reach the user through GitHub's Dependabot, not assay.
 IFS= read -r -d '' osv_jq <<'JQ' || true
 def key: "\(.package.ecosystem)\u0000\(.package.name)\u0000\(.package.version)";
 def lower: ascii_downcase;
@@ -1086,23 +1086,21 @@ def lower: ascii_downcase;
 | unique[]
 JQ
 builtin_osv_scanner() {
-	local copies json log pairs lockfile current copy kind i=0 rc=0 found count
+	local copies json log pairs lockfile current copy kind i=0 rc=0 found count base_arg_count
 	local -a lockfiles=() args=()
 	while [ $# -gt 0 ]; do
+		if parse_base_arg "$@"; then
+			shift "$base_arg_count"
+			continue
+		fi
 		case $1 in
-		--base)
-			[ $# -ge 2 ] || usage_error "--base needs a revision"
-			opt_base=$2 opt_base_set=1
-			shift
-			;;
-		--base=*) opt_base=${1#--base=} opt_base_set=1 ;;
 		-*) usage_error "osv-scanner: unknown option '$1'" ;;
 		/*) usage_error "osv-scanner: a lockfile is a path from the repo root, not '$1'" ;;
 		*) lockfiles+=("${1#./}") ;;
 		esac
 		shift
 	done
-	if [ "$opt_base_set" = 1 ] && [ -z "$opt_base" ]; then usage_error "--base needs a revision"; fi
+	validate_base_option
 	[ ${#lockfiles[@]} -gt 0 ] || usage_error "osv-scanner needs the lockfiles to scan"
 	find_repo
 	resolve_base
@@ -1383,17 +1381,26 @@ same_content() {
 	[ "$a" = "$b" ]
 }
 
-# What `assay preset` did, filled by apply_preset: a line per file it wrote, merged or kept; the diffs of the kept
-# files that differ from the preset; the last lines, saying what is left to do; whether a version it recorded changed.
+# What `assay preset` did: lines for files, kept sections and dependency changes; diffs and instructions for manual
+# changes; whether a recorded preset version changed.
 preset_lines=()
 preset_shown=
 preset_todo=()
 record_changed=0
 
-# apply_preset <language>: the language's pinned preset into the repo (the current directory, its root), file by
-# file, and its version into recorded. A file the repo lacks is written. With no version recorded (an adoption), a file
-# the repo has is kept, and shown against the preset when they differ. With an older version recorded, the repo's file
-# is merged three ways (git merge-file): the base is the recorded version's file, theirs the pinned one's, ours the
+# preset_diff <old> <new> <scratch> <description>: print only the hunks of a known difference.
+preset_diff() {
+	local rc=0
+	git -c core.quotePath=false diff --no-index --no-color --no-ext-diff --no-textconv -U3 -- "$1" "$2" \
+		>"$3" || rc=$?
+	[ "$rc" -eq 1 ] || die "cannot compare $4 (git diff exit $rc)"
+	awk '/^@@/ { on = 1 } on' "$3" || die "cannot read the comparison of $4"
+}
+
+# apply_preset <language>: apply the pinned files from the repo root and update the in-memory version record. A
+# missing file is written. On adoption, an existing file is kept and shown against the preset if they differ.
+# A section in another format is kept and shown the preset's contents or the changes to them. With an older version,
+# a file is merged three ways (git merge-file): the base is the recorded version's file, theirs the pinned one's, ours the
 # repo's; a conflict leaves its markers in the file, and every later run reports them until they are resolved. The
 # version is recorded whatever the outcome, so that a conflict once resolved, or a kept file once extended, is not
 # merged again.
@@ -1436,12 +1443,8 @@ apply_preset() {
 				preset_shown+=$(sed 's/^/+/' -- "$theirs") || die "cannot read $theirs"
 				preset_todo+=("$todo extend it by hand to hold what $f holds (the + lines above), in its own syntax")
 			else
-				rc=0
-				git -c core.quotePath=false diff --no-index --no-color --no-ext-diff --no-textconv -U3 -- "$base" "$theirs" \
-					>"$diff" || rc=$?
-				[ "$rc" -eq 1 ] || die "cannot compare $lang's preset $from with $to (git diff exit $rc)"
 				preset_shown+=$'\n'"--- $f, from $lang's preset $from to $to, for $target (the + lines are $to's)"$'\n'
-				preset_shown+=$(awk '/^@@/ { on = 1 } on' "$diff") || die "cannot read the comparison of $f"
+				preset_shown+=$(preset_diff "$base" "$theirs" "$diff" "$lang's preset $from with $to") || finish 2
 				preset_todo+=("$todo make the change above to it by hand, in its own syntax")
 			fi
 			preset_shown+=$'\n'
@@ -1459,12 +1462,8 @@ apply_preset() {
 			preset_lines+=("kept $target")
 			changed=1
 			if same_content "$target" "$theirs"; then continue; fi
-			rc=0
-			git -c core.quotePath=false diff --no-index --no-color --no-ext-diff --no-textconv -U3 -- "$target" "$theirs" \
-				>"$diff" || rc=$?
-			[ "$rc" -eq 1 ] || die "cannot compare $target with $lang's preset (git diff exit $rc)"
 			preset_shown+=$'\n'"--- $target, kept, against $lang's preset $to (the + lines are the preset's)"$'\n'
-			preset_shown+=$(awk '/^@@/ { on = 1 } on' "$diff") || die "cannot read the comparison of $target"
+			preset_shown+=$(preset_diff "$target" "$theirs" "$diff" "$target with $lang's preset") || finish 2
 			preset_shown+=$'\n'
 			todo="$target differs from $lang's preset $to: extend it by hand to hold what the preset holds (the + lines"
 			preset_todo+=("$todo above), keeping what the repo needs of its own")
@@ -1534,13 +1533,19 @@ preset_span() {
 # "when <check> is on" for one that only that check needs; a line starting with # is a comment. `assay preset` adds
 # them to the project's manifest and lockfile with that package manager, never by editing a file itself.
 
-# preset_manager <language>: sets manager to the package manager that adds the development dependencies of the
-# language's preset (uv for python), empty for a language whose preset declares none.
+# preset_manager <language>: sets the manager (empty for languages without managed dependencies) and its manifest
+# and initialization command.
 manager=
+manifest=
+manager_init=
 preset_manager() {
 	case $1 in
 	python) manager=uv ;;
 	*) manager= ;;
+	esac
+	case $manager in
+	uv) manifest=pyproject.toml manager_init="uv init" ;;
+	*) manifest='' manager_init='' ;;
 	esac
 }
 
@@ -1549,12 +1554,16 @@ preset_manager() {
 dep_raw=
 dep_name=
 dependency_name() {
-	local re='^([A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?)'
-	[[ $1 =~ $re ]] || return 1
-	dep_raw=${BASH_REMATCH[1]}
-	dep_name=${dep_raw,,}
-	dep_name=${dep_name//[._]/-}
-	while [[ $dep_name == *--* ]]; do dep_name=${dep_name//--/-}; done
+	case $manager in
+	uv)
+		local re='^([A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?)'
+		[[ $1 =~ $re ]] || return 1
+		dep_raw=${BASH_REMATCH[1]}
+		dep_name=${dep_raw,,}
+		dep_name=${dep_name//[._]/-}
+		while [[ $dep_name == *--* ]]; do dep_name=${dep_name//--/-}; done
+		;;
+	esac
 }
 
 # read_dependencies <language> <version> <out>: the development dependencies a version of the language's preset
@@ -1581,9 +1590,13 @@ read_dependencies() {
 project_dependencies() {
 	local json spec specs
 	tmp_file specs
-	toml_json json pyproject.toml
-	jq -r '[(."dependency-groups"?.dev? // []), (.tool?.uv?."dev-dependencies"? // [])] | flatten | .[] | strings' \
-		<<<"$json" >"$specs" || die "cannot read the development dependencies in pyproject.toml"
+	case $manager in
+	uv)
+		toml_json json "$manifest"
+		jq -r '[(."dependency-groups"?.dev? // []), (.tool?.uv?."dev-dependencies"? // [])] | flatten | .[] | strings' \
+			<<<"$json" >"$specs" || die "cannot read the development dependencies in $manifest"
+		;;
+	esac
 	while IFS= read -r spec; do
 		spec=${spec#"${spec%%[![:space:]]*}"}
 		if dependency_name "$spec"; then echo "$dep_name"; fi
@@ -1613,8 +1626,8 @@ plan_dependencies() {
 	: >"$base"
 	if [ -n "$from" ] && [ "$from" != "$to" ]; then read_dependencies "$lang" "$from" "$base"; fi
 	if [ ! -s "$theirs" ] && [ ! -s "$base" ]; then return 0; fi
-	[ -f pyproject.toml ] || die "$lang's preset adds development dependencies to pyproject.toml, which the repo" \
-		"does not have: create the project first (uv init)"
+	[ -f "$manifest" ] || die "$lang's preset adds development dependencies to $manifest, which the repo" \
+		"does not have: create the project first ($manager_init)"
 	project_dependencies "$present"
 	while IFS= read -r name; do have[$name]=1; done <"$present"
 	while IFS=$'\t' read -r name spec check; do before[$name]=$spec; done <"$base"
@@ -1732,8 +1745,7 @@ cmd_preset() {
 		echo "no preset to apply: no language this repo's devenv enables has a preset that applies"
 		finish 0
 	fi
-	# Every language's dependencies are worked out before anything is written, so that a missing package manager or
-	# manifest leaves the repo as it was.
+	# Plan before writing: a missing manager or manifest leaves the repo untouched. Execution is not transactional.
 	for lang in "${langs[@]}"; do plan_dependencies "$lang"; done
 	for lang in "${langs[@]}"; do
 		apply_dependencies "$lang"
@@ -2480,23 +2492,32 @@ cmd_rule() {
 	esac
 }
 
+# parse_base_arg <arg>...: consume one --base option, setting base_arg_count for the caller's shift.
+parse_base_arg() {
+	case $1 in
+	--base)
+		[ $# -ge 2 ] || usage_error "--base needs a revision"
+		opt_base=$2 base_arg_count=2
+		;;
+	--base=*) opt_base=${1#--base=} base_arg_count=1 ;;
+	*) return 1 ;;
+	esac
+	opt_base_set=1
+}
+
+validate_base_option() {
+	if [ "$opt_base_set" = 1 ] && [ -z "$opt_base" ]; then usage_error "--base needs a revision"; fi
+}
+
 # parse_base_option <command> [--base <rev>]: the arguments of a command whose only option is --base.
 parse_base_option() {
-	local command=$1
+	local command=$1 base_arg_count
 	shift
 	while [ $# -gt 0 ]; do
-		case $1 in
-		--base)
-			[ $# -ge 2 ] || usage_error "--base needs a revision"
-			opt_base=$2 opt_base_set=1
-			shift
-			;;
-		--base=*) opt_base=${1#--base=} opt_base_set=1 ;;
-		*) usage_error "$command: unexpected argument '$1'" ;;
-		esac
-		shift
+		parse_base_arg "$@" || usage_error "$command: unexpected argument '$1'"
+		shift "$base_arg_count"
 	done
-	if [ "$opt_base_set" = 1 ] && [ -z "$opt_base" ]; then usage_error "--base needs a revision"; fi
+	validate_base_option
 }
 
 now_us() { now=${EPOCHREALTIME//[!0-9]/}; }

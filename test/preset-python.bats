@@ -25,11 +25,11 @@ python_repo() {
 # python_version_2 [<dependency line>...]: a copy of assay's presets with a synthetic version 2 of Python's, whose files
 # are version 1's and whose dependencies are the lines given, made the presets assay reads (assay_presets).
 python_version_2() {
-	rm -rf "${T:?}/presets"
-	cp -r "$BATS_TEST_DIRNAME/../preset" "$T/presets"
-	cp -r "$T/presets/python/1" "$T/presets/python/2"
-	printf '%s\n' "$@" >"$T/presets/python/2.dependencies"
-	export assay_presets=$T/presets
+	assay_presets=$(mktemp -d "${T:?}/presets.XXXXXX")
+	cp -r "$BATS_TEST_DIRNAME/../preset/." "$assay_presets"
+	cp -r "$assay_presets/python/1" "$assay_presets/python/2"
+	printf '%s\n' "$@" >"$assay_presets/python/2.dependencies"
+	export assay_presets
 }
 
 dev_group() { awk '/^dev = \[$/ { on = 1; next } on && /^\]$/ { on = 0 } on' pyproject.toml; }
@@ -180,7 +180,7 @@ dev_group() { awk '/^dev = \[$/ { on = 1; next } on && /^\]$/ { on = 0 } on' pyp
 		fi
 		[ ! -e .coveragerc ]
 		cd "$T"
-		rm -rf "${T:?}/work"
+		mv "$T/work" "$T/project-$file"
 	done
 	# A setup.cfg without coverage's sections is not coverage's configuration.
 	python_repo
@@ -239,18 +239,14 @@ dev_group() { awk '/^dev = \[$/ { on = 1; next } on && /^\]$/ { on = 0 } on' pyp
 
 @test "without uv, assay preset exits 2 and writes nothing; with nothing to change it does not need uv" {
 	python_repo
-	local dir path=""
-	local -a dirs
-	IFS=: read -ra dirs <<<"$PATH"
-	for dir in "${dirs[@]}"; do
-		if [ ! -x "$dir/uv" ]; then path+=$dir:; fi
-	done
-	run --separate-stderr env PATH="${path%:}" "$assay" preset
+	local path
+	path=$(path_without uv)
+	run --separate-stderr env PATH="$path" "$assay" preset
 	[ "$status" -eq 2 ]
 	[ "$stderr" = "assay: cannot find uv on the PATH, which adds python's development dependencies: turn on languages.python.uv.enable in devenv.nix" ]
 	[ ! -e ruff.toml ] && [ ! -e .assay-preset.json ]
 	"$assay" preset >/dev/null
-	run --separate-stderr env PATH="${path%:}" "$assay" preset
+	run --separate-stderr env PATH="$path" "$assay" preset
 	[ "$status" -eq 0 ]
 	output_is "python's preset 1: up to date"
 }

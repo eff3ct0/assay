@@ -3,24 +3,15 @@ bats_require_minimum_version 1.5.0
 # shellcheck source=test/devenv/helpers.bash
 source "${BATS_TEST_DIRNAME:?}/helpers.bash"
 
-# Python's default checks and preset through the real devenv, uv, PyPI and the OSV API: a fixture project built with
+# Python's default checks and preset through the real devenv, uv and PyPI: a fixture project built with
 # `uv init --lib` and `assay preset python`, each check failing on a defect and passing on its fix, the test check's
-# coverage of new code and fixed seed, and the advisory check on the change. The consumers import a copy of assay with
-# the languages' default checks alone, so that the built-in ones stay out of the way, except where `devenv test` runs
-# them all.
+# coverage of new code and fixed seed. Advisory comparisons use synthetic lockfiles in test/osv-scanner.bats.
+# The consumers import assay with the languages' checks alone, except where `devenv test` runs them all.
 
-# The devenv.nix of a Python project: the venv first on the PATH, and uv syncing it from the lockfile, as the python
-# template sets them.
-python_devenv='{
-  languages.python = {
-    enable = true;
-    venv.enable = true;
-    uv = {
-      enable = true;
-      sync.enable = true;
-    };
-  };
-}'
+# python_devenv [extra configuration]: assay defaults the venv and enables uv sync once the manifest exists.
+python_devenv() {
+	devenv_nix "{ languages.python.enable = true; ${1:-} }"
+}
 
 # check_fails <check> <text>: `assay check <check>` fails, and its output holds the text.
 check_fails() {
@@ -42,11 +33,13 @@ check_passes() {
 # and Python's preset taken by `assay preset python`, whose output is checked; not committed.
 python_project() {
 	consumer "${1:-$ASSAY_LANGUAGES}"
-	devenv_nix "$python_devenv"
+	# Bootstrap with uv from the flake shell, before a Python project exists.
+	python_devenv
 	printf '%s\n' .venv/ __pycache__/ .pytest_cache/ .ruff_cache/ .hypothesis/ >>.gitignore
-	devenv shell -- uv init --quiet --lib --name demo . >/dev/null 2>&1
+	devenv shell -- uv init --quiet --lib --name demo --no-pin-python .
 	[ -f pyproject.toml ]
-	run --separate-stderr devenv shell -- assay preset python
+	# Entering the shell now syncs the project before running the preset.
+	run --separate-stderr devenv shell -- bash -ec 'test -f uv.lock; assay preset python'
 	echo "$output"
 	[ "$status" -eq 0 ]
 	output_is 'wrote .coveragerc' 'wrote conftest.py' 'wrote pyrightconfig.json' 'wrote ruff.toml' \
@@ -79,10 +72,11 @@ hello_test() {
 
 @test "Python: --list shows four fast checks, import-linter off and three full; without pyproject.toml all are skipped" {
 	consumer "$ASSAY_LANGUAGES"
-	devenv_nix '{ languages.python.enable = true; }'
+	python_devenv 'enterShell = "touch entered";'
 	run --separate-stderr devenv shell -- assay check --list
 	echo "$output"
 	[ "$status" -eq 0 ]
+	[ -f entered ]
 	[ "$output" = "$(printf '%s\n' 'deptry (fast)' 'import-linter (fast, off)' osv-scanner pyright pytest \
 		'ruff-check (fast)' 'ruff-format (fast)' 'vulture (fast)')" ]
 	run --separate-stderr devenv shell -- assay check
@@ -95,7 +89,7 @@ hello_test() {
 	[ "${lines[-1]%% in *}" = "7 checks passed (7 skipped)" ]
 }
 
-@test "Python: in a fresh uv init --lib project, assay preset python takes the preset, and devenv test passes" {
+@test "Python: assay preset takes the preset after uv init --lib, and devenv test passes with a test for hello" {
 	python_project "$ASSAY"
 	shape
 	# uv's own placeholder, a public function nothing uses, is dead code to vulture until a test uses it.
@@ -188,7 +182,7 @@ hello_test() {
 	local log
 	log=$(git rev-parse --absolute-git-dir)/assay/pytest.log
 	grep -q '^assay-pytest: pytest collected no test (exit 5), which passes$' "$log"
-	git rm --quiet -r -f src conftest.py
+	git rm --quiet -f src/demo/__init__.py conftest.py
 	run --separate-stderr devenv shell -- assay check pytest
 	echo "$output"
 	[ "$status" -eq 0 ]
@@ -209,31 +203,10 @@ hello_test() {
 	[ ! -e .hypothesis/examples ]
 }
 
-@test "Python: a change that locks a version with an advisory fails osv-scanner; the same version at the base passes" {
-	python_project
-	commit_all project
-	check_passes osv-scanner
-	devenv shell -- uv add --quiet 'urllib3==2.2.1' >/dev/null 2>&1
-	check_fails osv-scanner "uv.lock: urllib3 2.2.1 (PyPI): "
-	[[ $output == *"on dependency versions this change adds or changes"* ]]
-	commit_all urllib3
-	check_passes osv-scanner
-}
-
 @test "Python: import-linter, once on, is added by assay preset python, and fails on a broken contract" {
 	python_project
 	commit_all project
-	devenv_nix '{
-  languages.python = {
-    enable = true;
-    venv.enable = true;
-    uv = {
-      enable = true;
-      sync.enable = true;
-    };
-  };
-  assay.checks.import-linter.enable = true;
-}'
+	python_devenv 'assay.checks.import-linter.enable = true;'
 	check_fails import-linter "assay preset python adds import-linter"
 	run --separate-stderr devenv shell -- assay preset python
 	echo "$output"

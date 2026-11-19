@@ -215,15 +215,11 @@ bash_repo() {
 
 @test "without shfmt, which tells shell scripts apart, the preset check exits 127 and assay preset exits 2" {
 	bash_repo
-	local dir path=""
-	local -a dirs
-	IFS=: read -ra dirs <<<"$PATH"
-	for dir in "${dirs[@]}"; do
-		if [ ! -x "$dir/shfmt" ]; then path+=$dir:; fi
-	done
-	run -127 --separate-stderr env PATH="${path%:}" "$assay" builtin preset
+	local path
+	path=$(path_without shfmt)
+	run -127 --separate-stderr env PATH="$path" "$assay" builtin preset
 	[ "$stderr" = "assay: cannot find shfmt on the PATH, which tells shell scripts apart" ]
-	run --separate-stderr env PATH="${path%:}" "$assay" preset
+	run --separate-stderr env PATH="$path" "$assay" preset
 	[ "$status" -eq 2 ]
 }
 
@@ -265,7 +261,7 @@ bash_repo() {
 	[ "$status" -eq 2 ]
 	[ "$stderr" = "assay: .assay-preset.json records bash's preset 2, newer than this assay's 1: update assay (devenv update assay)" ]
 	bash_version_2
-	rm -r "$T/presets/bash/1"
+	mv "$T/presets/bash/1" "$T/missing-version"
 	echo '{"bash": 1}' >.assay-preset.json
 	run --separate-stderr "$assay" preset
 	[ "$status" -eq 2 ]
