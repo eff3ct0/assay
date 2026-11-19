@@ -78,7 +78,15 @@ nixos-config issues it links (#50, #52, #58, #56, #47). Branch `agent/nix-bash-d
 
 Done: steps 1-6, the code review, the critic's four failures (`fix: critic findings…`) and the merge with main.
 
-1. One recheck critic on the critic's failures and the diff of the fix (`654b504..HEAD`).
+The recheck critic (the last round) found four of the critic's five failures fixed and the merge with main
+breaking nothing; one stays open, for p3rkins:
+
+- darwin, half fixed: the flake and a consumer evaluate there now, but `nix/checks.nix`'s expectation "bash's tools
+  join the devenv, kcov and diff-cover among them" requires kcov on every platform, so `checks.<darwin>.module`
+  always fails (its build script holds `exit 1`). The likely fix: expect kcov only where
+  `lib.meta.availableOn pkgs.stdenv.hostPlatform pkgs.kcov`.
+- Minor, not counted as a failure: README.md's language section says each check runs over the files git sees
+  (untracked ones included), while `bats` runs the tracked `.bats` files only.
 
 Open decisions for p3rkins (not to be decided by an agent):
 
