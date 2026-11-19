@@ -1,253 +1,258 @@
 bats_require_minimum_version 1.5.0
-load helpers
+# shellcheck source=test/devenv/helpers.bash
+source "$BATS_TEST_DIRNAME/helpers.bash"
 
 @test "devenv test runs every check; git commit runs only the fast ones, through the assay hook" {
-  consumer "$ASSAY_BARE"
-  devenv_nix "{
+	consumer "$ASSAY_BARE"
+	devenv_nix "{
     assay.checks.quick = { exec = \"echo quick >>$T/ran\"; fast = true; };
     assay.checks.full.exec = \"echo full >>$T/ran\";
   }"
-  run devenv test
-  echo "$output"
-  [ "$status" -eq 0 ]
-  # The hook (assay check --fast) runs over all files first, then enterTest (assay check), in name order.
-  [ "$(cat "$T/ran")" = "$(printf 'quick\nfull\nquick')" ]
-  [ "$(hook entry)" = '"devenv shell -- assay check --fast"' ]
-  [ "$(hook pass_filenames)" = false ]
-  [ "$(hook always_run)" = true ]
-  rm "$T/ran"
-  git add devenv.nix
-  run git commit -m checks
-  echo "$output"
-  [ "$status" -eq 0 ]
-  [[ $output == *"assay check --fast"*Passed* ]]
-  [ "$(cat "$T/ran")" = quick ]
+	run devenv test
+	echo "$output"
+	[ "$status" -eq 0 ]
+	# The hook (assay check --fast) runs over all files first, then enterTest (assay check), in name order.
+	[ "$(cat "$T/ran")" = "$(printf 'quick\nfull\nquick')" ]
+	[ "$(hook entry)" = '"devenv shell -- assay check --fast"' ]
+	[ "$(hook pass_filenames)" = false ]
+	[ "$(hook always_run)" = true ]
+	rm "$T/ran"
+	git add devenv.nix
+	run git commit -m checks
+	echo "$output"
+	[ "$status" -eq 0 ]
+	[[ $output == *"assay check --fast"*Passed* ]]
+	[ "$(cat "$T/ran")" = quick ]
 }
 
 @test "a failing check fails devenv test; a failing fast check also fails git commit" {
-  consumer "$ASSAY_BARE"
-  devenv_nix '{
+	consumer "$ASSAY_BARE"
+	devenv_nix '{
     assay.checks.quick = { exec = "true"; fast = true; };
     assay.checks.full.exec = "echo full failed; exit 3";
   }'
-  run devenv test
-  echo "$output"
-  [ "$status" -ne 0 ]
-  [[ $output == *"FAIL full"*"(exit 3)"* ]]
-  git add devenv.nix
-  run git commit -m "full fails"
-  echo "$output"
-  [ "$status" -eq 0 ]
-  devenv_nix '{
+	run devenv test
+	echo "$output"
+	[ "$status" -ne 0 ]
+	[[ $output == *"FAIL full"*"(exit 3)"* ]]
+	git add devenv.nix
+	run git commit -m "full fails"
+	echo "$output"
+	[ "$status" -eq 0 ]
+	devenv_nix '{
     assay.checks.quick = { exec = "echo quick failed; exit 4"; fast = true; };
   }'
-  git add devenv.nix
-  run git commit -m "quick fails"
-  echo "$output"
-  [ "$status" -ne 0 ]
-  [[ $output == *"FAIL quick"*"(exit 4)"* ]]
-  [ "$(git log -1 --format=%s)" = "full fails" ]
-  run devenv test
-  [ "$status" -ne 0 ]
+	git add devenv.nix
+	run git commit -m "quick fails"
+	echo "$output"
+	[ "$status" -ne 0 ]
+	[[ $output == *"FAIL quick"*"(exit 4)"* ]]
+	[ "$(git log -1 --format=%s)" = "full fails" ]
+	run devenv test
+	[ "$status" -ne 0 ]
 }
 
 @test "inside devenv shell: assay check reports, selects and lists; ASSAY_SEED comes from assay.seed" {
-  consumer "$ASSAY_BARE"
-  devenv_nix '{
+	consumer "$ASSAY_BARE"
+	# shellcheck disable=SC2016 # the check's own $ASSAY_SEED
+	devenv_nix '{
     assay.checks.lint = { exec = "echo lint"; fast = true; };
     assay.checks.test.exec = "echo seed=$ASSAY_SEED; exit 1";
     assay.checks.cargo = { exec = "cargo test"; requires = "Cargo.toml"; };
   }'
-  run --separate-stderr devenv shell -- assay check
-  echo "$output"
-  [ "$status" -eq 1 ]
-  [ "${lines[0]}" = "assay check · base main@$(git rev-parse --short HEAD) (fork-point)" ]
-  [ "${lines[1]}" = "  skipped: cargo (no Cargo.toml)" ]
-  [ "${lines[2]}" = "skip cargo (no Cargo.toml)" ]
-  [[ ${lines[3]} =~ ^ok\ \ \ lint\ [0-9.]+s$ ]]
-  [[ ${lines[4]} =~ ^FAIL\ test\ [0-9.]+s\ \(exit\ 1\)$ ]]
-  [[ $output == *$'\nseed=42\nlog: '"$(git rev-parse --absolute-git-dir)/assay/test.log"$'\n'* ]]
-  [[ ${lines[-1]} == "1 of 3 checks failed in "*"; rerun: assay check test" ]]
-  run --separate-stderr devenv shell -- assay check --fast
-  [ "$status" -eq 0 ]
-  [ "${lines[0]}" = "assay check --fast · base main@$(git rev-parse --short HEAD) (fork-point)" ]
-  run --separate-stderr devenv shell -- assay check --list
-  [ "$output" = "$(printf 'cargo\nlint (fast)\ntest')" ]
-  run --separate-stderr devenv shell -- assay check nope
-  [ "$status" -eq 2 ]
-  [[ $stderr == *"assay: no check named 'nope'"* ]]
-  devenv_nix '{ assay.seed = 7; }'
-  run --separate-stderr devenv shell -- printenv ASSAY_SEED
-  [ "$output" = 7 ]
+	run --separate-stderr devenv shell -- assay check
+	echo "$output"
+	[ "$status" -eq 1 ]
+	[ "${lines[0]}" = "assay check · base main@$(git rev-parse --short HEAD) (fork-point)" ]
+	[ "${lines[1]}" = "  skipped: cargo (no Cargo.toml)" ]
+	[ "${lines[2]}" = "skip cargo (no Cargo.toml)" ]
+	[[ ${lines[3]} =~ ^ok\ \ \ lint\ [0-9.]+s$ ]]
+	[[ ${lines[4]} =~ ^FAIL\ test\ [0-9.]+s\ \(exit\ 1\)$ ]]
+	[[ $output == *$'\nseed=42\nlog: '"$(git rev-parse --absolute-git-dir)/assay/test.log"$'\n'* ]]
+	[[ ${lines[-1]} == "1 of 3 checks failed in "*"; rerun: assay check test" ]]
+	run --separate-stderr devenv shell -- assay check --fast
+	[ "$status" -eq 0 ]
+	[ "${lines[0]}" = "assay check --fast · base main@$(git rev-parse --short HEAD) (fork-point)" ]
+	run --separate-stderr devenv shell -- assay check --list
+	[ "$output" = "$(printf 'cargo\nlint (fast)\ntest')" ]
+	run --separate-stderr devenv shell -- assay check nope
+	[ "$status" -eq 2 ]
+	[[ $stderr == *"assay: no check named 'nope'"* ]]
+	devenv_nix '{ assay.seed = 7; }'
+	run --separate-stderr devenv shell -- printenv ASSAY_SEED
+	[ "$output" = 7 ]
 }
 
 @test "turning a default check off needs a reason, which the header then lists" {
-  consumer "$ASSAY_WITH_DEFAULT"
-  run --separate-stderr devenv shell -- assay check --list
-  [ "$output" = "demo (fast)" ]
-  devenv_nix '{ assay.checks.demo.enable = false; }'
-  run devenv shell -- true
-  echo "$output"
-  [ "$status" -ne 0 ]
-  [[ $output == *"a loosening needs a reason; set assay.checks.<name>.reason for:"* ]]
-  [[ $output == *"- demo: turned off"* ]]
-  devenv_nix '{ assay.checks.demo = { enable = false; reason = "too slow on this repo"; }; }'
-  run --separate-stderr devenv shell -- assay check
-  echo "$output"
-  [ "$status" -eq 0 ]
-  [ "${lines[1]}" = "  loosening: demo is off: too slow on this repo" ]
+	consumer "$ASSAY_WITH_DEFAULT"
+	run --separate-stderr devenv shell -- assay check --list
+	[ "$output" = "demo (fast)" ]
+	devenv_nix '{ assay.checks.demo.enable = false; }'
+	run devenv shell -- true
+	echo "$output"
+	[ "$status" -ne 0 ]
+	[[ $output == *"a loosening needs a reason:"* ]]
+	[[ $output == *"- demo turned off; set assay.checks.demo.reason"* ]]
+	devenv_nix '{ assay.checks.demo = { enable = false; reason = "too slow on this repo"; }; }'
+	run --separate-stderr devenv shell -- assay check
+	echo "$output"
+	[ "$status" -eq 0 ]
+	[ "${lines[1]}" = "  loosening: demo is off: too slow on this repo" ]
 }
 
 @test "redefining a default check's exec needs a reason, which the header then lists" {
-  consumer "$ASSAY_WITH_DEFAULT"
-  devenv_nix '{ assay.checks.demo.exec = "echo mine"; }'
-  run devenv shell -- true
-  echo "$output"
-  [ "$status" -ne 0 ]
-  [[ $output == *"- demo: exec redefined"* ]]
-  devenv_nix '{ assay.checks.demo = { exec = "echo mine"; reason = "the repo has its own"; }; }'
-  run --separate-stderr devenv shell -- assay check
-  echo "$output"
-  [ "$status" -eq 0 ]
-  [ "${lines[1]}" = "  loosening: demo runs the repo's own exec: the repo has its own" ]
-  # Changing another field of a default is no loosening.
-  devenv_nix '{ assay.checks.demo.requires = "*.md"; }'
-  run --separate-stderr devenv shell -- assay check
-  [ "$status" -eq 0 ]
-  [ "${lines[1]}" = "  skipped: demo (no *.md)" ]
+	consumer "$ASSAY_WITH_DEFAULT"
+	devenv_nix '{ assay.checks.demo.exec = "echo mine"; }'
+	run devenv shell -- true
+	echo "$output"
+	[ "$status" -ne 0 ]
+	[[ $output == *"- demo's exec redefined; set assay.checks.demo.reason"* ]]
+	devenv_nix '{ assay.checks.demo = { exec = "echo mine"; reason = "the repo has its own"; }; }'
+	run --separate-stderr devenv shell -- assay check
+	echo "$output"
+	[ "$status" -eq 0 ]
+	[ "${lines[1]}" = "  loosening: demo runs the repo's own exec: the repo has its own" ]
+	# Changing another field of a default is no loosening.
+	devenv_nix '{ assay.checks.demo.requires = "*.md"; }'
+	run --separate-stderr devenv shell -- assay check
+	[ "$status" -eq 0 ]
+	[ "${lines[1]}" = "  skipped: demo (no *.md)" ]
 }
 
 @test "a plain definition in the repo changes a field of the hook" {
-  consumer "$ASSAY_BARE"
-  devenv_nix '{ git-hooks.hooks.assay.always_run = false; }'
-  run devenv shell -- true
-  [ "$status" -eq 0 ]
-  [ "$(hook always_run)" = false ]
-  [ "$(hook entry)" = '"devenv shell -- assay check --fast"' ]
+	consumer "$ASSAY_BARE"
+	devenv_nix '{ git-hooks.hooks.assay.always_run = false; }'
+	run devenv shell -- true
+	[ "$status" -eq 0 ]
+	[ "$(hook always_run)" = false ]
+	[ "$(hook entry)" = '"devenv shell -- assay check --fast"' ]
 }
 
 @test "outside the devenv, plain assay check re-executes itself through devenv shell" {
-  consumer "$ASSAY_BARE"
-  devenv_nix '{
+	consumer "$ASSAY_BARE"
+	devenv_nix '{
     assay.checks.lint = { exec = "echo lint"; fast = true; };
     assay.checks.test.exec = "echo tests failed; exit 1";
   }'
-  mkdir sub
-  cd sub
-  run --separate-stderr "$ASSAY/assay.sh" check --list
-  [ "$status" -eq 0 ]
-  [ "$output" = "$(printf 'lint (fast)\ntest')" ]
-  run --separate-stderr "$ASSAY/assay.sh" check
-  echo "$output"
-  [ "$status" -eq 1 ]
-  [[ ${lines[-1]} == "1 of 2 checks failed in "*"; rerun: assay check test" ]]
+	mkdir sub
+	cd sub
+	run --separate-stderr "$ASSAY/assay.sh" check --list
+	[ "$status" -eq 0 ]
+	[ "$output" = "$(printf 'lint (fast)\ntest')" ]
+	run --separate-stderr "$ASSAY/assay.sh" check
+	echo "$output"
+	[ "$status" -eq 1 ]
+	[[ ${lines[-1]} == "1 of 2 checks failed in "*"; rerun: assay check test" ]]
 }
 
 @test "a repo without devenv.nix, or whose devenv does not import assay's module, exits 2 naming docs/adoption.md" {
-  mkdir "$T/repo"
-  cd "$T/repo"
-  git init --quiet
-  git commit --quiet --allow-empty -m init
-  run --separate-stderr "$ASSAY/assay.sh" check
-  [ "$status" -eq 2 ]
-  [[ $stderr == *"has no devenv.nix"*"docs/adoption.md" ]]
-  printf '%s\n' inputs: '  nixpkgs:' "    url: github:NixOS/nixpkgs/$NIXPKGS_REV" >devenv.yaml
-  echo '{ }' >devenv.nix
-  printf '%s\n' .devenv/ .devenv.flake.nix devenv.lock >.gitignore
-  git add -A
-  git commit --quiet -m devenv
-  run --separate-stderr "$ASSAY/assay.sh" check
-  echo "$stderr"
-  [ "$status" -eq 2 ]
-  [[ $stderr == *"does not import assay's module"*"docs/adoption.md" ]]
+	mkdir "$T/repo"
+	cd "$T/repo"
+	git init --quiet
+	git commit --quiet --allow-empty -m init
+	run --separate-stderr "$ASSAY/assay.sh" check
+	[ "$status" -eq 2 ]
+	[[ $stderr == *"has no devenv.nix"*"docs/adoption.md" ]]
+	printf '%s\n' inputs: '  nixpkgs:' "    url: github:NixOS/nixpkgs/$NIXPKGS_REV" >devenv.yaml
+	echo '{ }' >devenv.nix
+	printf '%s\n' .devenv/ .devenv.flake.nix devenv.lock >.gitignore
+	git add -A
+	git commit --quiet -m devenv
+	run --separate-stderr "$ASSAY/assay.sh" check
+	echo "$stderr"
+	[ "$status" -eq 2 ]
+	[[ $stderr == *"does not import assay's module"*"docs/adoption.md" ]]
 }
 
 @test "assay adopts itself: nix run . -- check --list goes through its devenv, and git commit runs the fast checks" {
-  copy_assay "$T/self"
-  cd "$T/self"
-  run --separate-stderr nix run . -- check --list
-  echo "$stderr"
-  [ "$status" -eq 0 ]
-  [ "$output" = "$(printf '%s\n' 'actionlint (fast)' 'agents-md (fast)' bats 'commit-trailers (fast)' findings \
-    'gitleaks (fast)' 'oxfmt (fast)' 'suppressions (fast)')" ]
-  run git commit --allow-empty -m "an empty commit"
-  echo "$output"
-  [ "$status" -eq 0 ]
-  [[ $output == *"assay check --fast"*Passed* ]]
+	copy_assay "$T/self"
+	cd "$T/self"
+	run --separate-stderr nix run . -- check --list
+	echo "$stderr"
+	[ "$status" -eq 0 ]
+	[ "$output" = "$(printf '%s\n' 'actionlint (fast)' 'agents-md (fast)' bats 'commit-trailers (fast)' 'deadnix (fast)' \
+		findings 'gitleaks (fast)' nix-flake-check 'nixf-tidy (fast)' 'nixfmt (fast)' 'oxfmt (fast)' 'shellcheck (fast)' \
+		'shfmt (fast)' 'statix (fast)' 'suppressions (fast)')" ]
+	run git commit --allow-empty -m "an empty commit"
+	echo "$output"
+	[ "$status" -eq 0 ]
+	[[ $output == *"assay check --fast"*Passed* ]]
 }
 
 @test "a repo that imports assay's module runs the built-in checks, all fast but findings, with their tools in its devenv" {
-  consumer
-  shape
-  run --separate-stderr devenv shell -- assay check --list
-  echo "$stderr"
-  [ "$output" = "$(printf '%s\n' 'actionlint (fast)' 'agents-md (fast)' 'commit-trailers (fast)' findings \
-    'gitleaks (fast)' 'oxfmt (fast)' 'suppressions (fast)')" ]
-  run --separate-stderr devenv shell -- bash -c 'command -v oxfmt gitleaks actionlint qlty'
-  [ "$status" -eq 0 ]
-  # radarlint, a JVM, only for Python or Scala: the profile has qlty, not radarlint.
-  run --separate-stderr devenv shell -- bash -c 'test -x "$DEVENV_PROFILE/bin/qlty" && test ! -e "$DEVENV_PROFILE/bin/radarlint"'
-  [ "$status" -eq 0 ]
-  devenv_nix '{ languages.python.enable = true; }'
-  run --separate-stderr devenv shell -- bash -c 'test -x "$DEVENV_PROFILE/bin/radarlint"'
-  [ "$status" -eq 0 ]
-  devenv_nix '{ }'
-  run devenv test
-  echo "$output"
-  [ "$status" -eq 0 ]
-  # The hook stops a commit whose CLAUDE.md copies AGENTS.md.
-  cp AGENTS.md CLAUDE.md
-  git add CLAUDE.md
-  run git commit -m copy
-  echo "$output"
-  [ "$status" -ne 0 ]
-  [[ $output == *"CLAUDE.md copies AGENTS.md"* ]]
+	consumer
+	shape
+	run --separate-stderr devenv shell -- assay check --list
+	echo "$stderr"
+	[ "$output" = "$(printf '%s\n' 'actionlint (fast)' 'agents-md (fast)' 'commit-trailers (fast)' findings \
+		'gitleaks (fast)' 'oxfmt (fast)' 'suppressions (fast)')" ]
+	run --separate-stderr devenv shell -- bash -c 'command -v oxfmt gitleaks actionlint qlty'
+	[ "$status" -eq 0 ]
+	# radarlint, a JVM, only for Python or Scala: the profile has qlty, not radarlint.
+	# shellcheck disable=SC2016 # expanded by the devenv's bash
+	run --separate-stderr devenv shell -- bash -c 'test -x "$DEVENV_PROFILE/bin/qlty" && test ! -e "$DEVENV_PROFILE/bin/radarlint"'
+	[ "$status" -eq 0 ]
+	devenv_nix '{ languages.python.enable = true; }'
+	# shellcheck disable=SC2016 # expanded by the devenv's bash
+	run --separate-stderr devenv shell -- bash -c 'test -x "$DEVENV_PROFILE/bin/radarlint"'
+	[ "$status" -eq 0 ]
+	devenv_nix '{ }'
+	run devenv test
+	echo "$output"
+	[ "$status" -eq 0 ]
+	# The hook stops a commit whose CLAUDE.md copies AGENTS.md.
+	cp AGENTS.md CLAUDE.md
+	git add CLAUDE.md
+	run git commit -m copy
+	echo "$output"
+	[ "$status" -ne 0 ]
+	[[ $output == *"CLAUDE.md copies AGENTS.md"* ]]
 }
 
 @test "oxfmt follows languages.javascript and its directory in a real devenv" {
-  consumer
-  shape
-  mkdir frontend backend
-  printf '%s\n' '{"a":1,' '"b":2}' | tee frontend/x.json >backend/x.json
-  devenv_nix '{ languages.javascript.enable = true; }'
-  run --separate-stderr devenv shell -- assay check oxfmt
-  echo "$output"
-  [ "$status" -eq 1 ]
-  [[ $output == *"$ oxfmt --check --no-error-on-unmatched-pattern '**/*.{md,mdx,yml,yaml}' '**/*.{js,"* ]]
-  [[ $output == *"frontend/x.json"* && $output == *"backend/x.json"* ]]
-  devenv_nix '{ languages.javascript = { enable = true; directory = "frontend"; }; }'
-  run --separate-stderr devenv shell -- assay check oxfmt
-  echo "$output"
-  [ "$status" -eq 1 ]
-  [[ $output == *" 'frontend/**/*.{js,"* ]]
-  [[ $output == *"frontend/x.json"* && $output != *"backend/x.json"* ]]
+	consumer
+	shape
+	mkdir frontend backend
+	printf '%s\n' '{"a":1,' '"b":2}' | tee frontend/x.json >backend/x.json
+	devenv_nix '{ languages.javascript.enable = true; }'
+	run --separate-stderr devenv shell -- assay check oxfmt
+	echo "$output"
+	[ "$status" -eq 1 ]
+	[[ $output == *"$ oxfmt --check --no-error-on-unmatched-pattern '**/*.{md,mdx,yml,yaml}' '**/*.{js,"* ]]
+	[[ $output == *"frontend/x.json"* && $output == *"backend/x.json"* ]]
+	devenv_nix '{ languages.javascript = { enable = true; directory = "frontend"; }; }'
+	run --separate-stderr devenv shell -- assay check oxfmt
+	echo "$output"
+	[ "$status" -eq 1 ]
+	[[ $output == *" 'frontend/**/*.{js,"* ]]
+	[[ $output == *"frontend/x.json"* && $output != *"backend/x.json"* ]]
 }
 
 @test "outside the devenv, assay findings runs qlty from the repo's devenv; raising a smell threshold needs a reason, which the header lists" {
-  consumer
-  shape
-  mkdir src
-  cp "$BATS_TEST_DIRNAME/../fixtures/findings/tangled.py" src/app.py
-  run --separate-stderr "$ASSAY/assay.sh" findings
-  echo "$output$stderr"
-  [ "$status" -eq 0 ]
-  [ "${lines[0]}" = "src/app.py:1: qlty/function-complexity: Function with high complexity (count = 27): tangled" ]
-  [ -z "$(git status --porcelain --untracked-files=all -- .qlty)" ]
-  run --separate-stderr devenv shell -- assay check findings
-  [ "$status" -eq 1 ]
-  devenv_nix '{ assay.findings.smells.function_complexity.threshold = 30; }'
-  run devenv shell -- true
-  echo "$output"
-  [ "$status" -ne 0 ]
-  [[ $output == *"a loosening of the analyzer needs a reason; set:"* ]]
-  [[ $output == *"- assay.findings.smells.function_complexity.reason: smells.function_complexity.threshold is 30, above qlty's 18"* ]]
-  devenv_nix '{
+	consumer
+	shape
+	mkdir src
+	cp "$BATS_TEST_DIRNAME/../fixtures/findings/tangled.py" src/app.py
+	run --separate-stderr "$ASSAY/assay.sh" findings
+	echo "$output$stderr"
+	[ "$status" -eq 0 ]
+	[ "${lines[0]}" = "src/app.py:1: qlty/function-complexity: Function with high complexity (count = 27): tangled" ]
+	[ -z "$(git status --porcelain --untracked-files=all -- .qlty)" ]
+	run --separate-stderr devenv shell -- assay check findings
+	[ "$status" -eq 1 ]
+	devenv_nix '{ assay.findings.smells.function_complexity.threshold = 30; }'
+	run devenv shell -- true
+	echo "$output"
+	[ "$status" -ne 0 ]
+	[[ $output == *"a loosening of the analyzer needs a reason; set:"* ]]
+	[[ $output == *"- assay.findings.smells.function_complexity.reason: smells.function_complexity.threshold is 30, above qlty's 18"* ]]
+	devenv_nix '{
     assay.findings.smells.function_complexity = { threshold = 30; reason = "a parser"; };
     assay.findings.smells.nested_control_flow = { threshold = 7; reason = "a parser"; };
   }'
-  run --separate-stderr devenv shell -- assay check findings
-  echo "$output$stderr"
-  [ "$status" -eq 0 ]
-  [ "${lines[1]}" = "  loosening: findings smells.function_complexity.threshold is 30, above qlty's 18: a parser" ]
-  [ "${lines[2]}" = "  loosening: findings smells.nested_control_flow.threshold is 7, above qlty's 5: a parser" ]
+	run --separate-stderr devenv shell -- assay check findings
+	echo "$output$stderr"
+	[ "$status" -eq 0 ]
+	[ "${lines[1]}" = "  loosening: findings smells.function_complexity.threshold is 30, above qlty's 18: a parser" ]
+	[ "${lines[2]}" = "  loosening: findings smells.nested_control_flow.threshold is 7, above qlty's 5: a parser" ]
 }

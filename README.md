@@ -57,16 +57,34 @@ assay; `devenv update assay` moves it.
 - `requires` (default `null`): a glob relative to the repo root, in git's glob pathspec syntax (`**/` crosses
   directories). When no file git sees in the working tree matches it, the check is skipped and counts as passing: a
   new repo has no project yet.
+- `coverage` (default `null`): the coverage report the check writes, LCOV or Cobertura (see below): a path, absolute
+  or relative to the repo root, in which `$ASSAY_DIR` (or `${ASSAY_DIR}`) stands for `<git-dir>/assay`.
 - `reason` (default `null`): why the repo loosens one of assay's default checks.
 
 Names match `[A-Za-z0-9][A-Za-z0-9._-]*`.
 
 assay's own default checks are set with `lib.mkDefault`, so a plain definition in the repo overrides one. Turning a
-default off or redefining its `exec` is a **loosening**: evaluation fails until the check has a `reason`, and
-`assay check` lists every loosening with its reason in its header on every run.
+default off, redefining its `exec` or changing its `coverage` is a **loosening**: evaluation fails until the check has
+a `reason`, and `assay check` lists every loosening with its reason in its header on every run.
 
 `assay.seed` (a positive 32-bit integer, `42` unless set) is exported as `ASSAY_SEED`, so that property-based tests run
 with a fixed seed.
+
+### Coverage of new code
+
+A check that declares `coverage` is measured on the change. `assay check` removes the report before the check runs;
+when the check passes, it runs diff-cover on the report against the base (the base's tree against the working tree,
+untracked files included), and the check fails unless `assay.coverage.newCode` percent (`80` unless set) of the new
+lines the report can cover are covered. No exemption for small changes. A missing report, or a diff-cover that cannot
+run, fails the check too. diff-cover comes from the module, which adds it to the devenv when an enabled check
+declares `coverage`.
+
+- Only the lines the report lists count: a file the report does not list counts neither as covered nor as
+  uncovered. So each test check's report lists exactly its own language's sources, the ones no test loads included,
+  and one language's report never counts another's new lines as uncovered.
+- Lowering `assay.coverage.newCode` is a loosening: evaluation fails until `assay.coverage.reason` says why. Raising it
+  is free.
+- Whole-tree coverage is a metric, never a check.
 
 ## `assay check`
 
@@ -79,9 +97,10 @@ assay check --list                                  list them, fast ones marked
   the fast checks; names select those checks. A check runs over the whole working tree, never over the staged or
   changed files only.
 - Output, on stdout: a header with the mode and the base, the loosenings and the skipped checks; one line per check
-  (`ok`, `FAIL` or `skip`, its name, its seconds); for each failure its command, the first 100 lines of its output
-  and its full log, `<git-dir>/assay/<check>.log`; a last line with the count and the command that reruns the
-  failures.
+  (`ok`, `FAIL` or `skip`, its name, its seconds, and for a check with `coverage` how many new lines its report
+  covers); for each failure its command, the first 100 lines of its output (of diff-cover's report, when it failed
+  on coverage) and its full log, `<git-dir>/assay/<check>.log`; a last line with the count and the command that
+  reruns the failures.
 - Exit codes: `0` every selected check passed, `1` at least one failed, `2` assay could not run (usage, no
   configuration, no base, not in a git repo, a repo that has not adopted assay), with an `assay:` message on stderr.
 - The base of the change, exported to each check as `ASSAY_BASE`: `--base`, else `ASSAY_BASE`, else GitHub's event
@@ -89,6 +108,8 @@ assay check --list                                  list them, fast ones marked
   `git merge-base --fork-point <default> HEAD`, else `git merge-base <default> HEAD`. The default branch is
   `origin/HEAD`'s target, else `origin/main`, `origin/master`, `main` or `master`. assay never fetches: a base missing
   from the clone is exit 2.
+- Each check also gets `ASSAY_DIR`, assay's directory in the git directory (`<git-dir>/assay`), where a check writes
+  what must stay out of the tree, such as its coverage report.
 
 ### From outside the devenv
 
@@ -280,6 +301,29 @@ every language (it replaces qlty's own 50 for Rust: values are per repo, not per
   is set, and `assay check` lists it in its header
   (`loosening: findings smells.function_complexity.threshold is 25, above qlty's 18: <reason>`). Lowering a threshold
   or turning a rule on is free.
+
+## Each language's checks
+
+Each language's checks are on when the repo enables the language in devenv (`languages.<language>.enable`), are named
+after their tool, and bring their tools into the devenv. They are default checks: turning one off, redefining its
+`exec` or changing its `coverage` is a loosening. Each runs over the files git sees (tracked, or untracked and
+not ignored), though `bats` runs only the tracked `.bats` files as tests; none runs over `.`, so `.devenv/` and other
+ignored files are never read; with nothing to check, it passes.
+
+| Language                       | `--fast`                                   | full run only                                               |
+| ------------------------------ | ------------------------------------------ | ----------------------------------------------------------- |
+| Nix, `languages.nix.enable`    | `nixfmt`, `statix`, `deadnix`, `nixf-tidy` | `nix-flake-check` (`nix flake check`), requires `flake.nix` |
+| bash, `languages.shell.enable` | `shellcheck`, `shfmt`                      | `bats`, with `coverage`                                     |
+
+- Nix's checks run over the `.nix` files; `nixf-tidy` runs with `--variable-lookup` on each file, and any diagnostic
+  fails it, whatever its severity. Nix has no coverage tool, so a Nix repo has no coverage check.
+- bash's checks run over the shell files `shfmt -f` finds (by extension or shebang, `.bats` files included). shfmt
+  keeps its defaults (tabs). `bats` runs the tracked `.bats` files under kcov, whose Cobertura report,
+  `$ASSAY_DIR/kcov/bats/cobertura.xml`, lists every shell script, those no test runs included, and nothing else.
+  nixpkgs has kcov for Linux only: elsewhere `bats` fails on the missing tool until the repo turns it off with a
+  reason.
+- The commands call three helpers the module puts on the PATH (`devenv/bin`): `assay-files [<glob>...]` (the files
+  git sees that exist, NUL-terminated), `assay-nixf-tidy <file>...` and `assay-bats <dir>`.
 
 ## On a machine: the guard and the global git hooks
 

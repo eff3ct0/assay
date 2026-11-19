@@ -2,49 +2,59 @@
   "version": 1,
   "checks": {
     "actionlint": {
-      "enable": true,
       "exec": "actionlint",
       "fast": true,
-      "requires": ".github/workflows/*"
+      "enable": true,
+      "requires": ".github/workflows/*",
+      "coverage": null
     },
     "agents-md": {
-      "enable": true,
       "exec": "assay builtin agents-md",
       "fast": true,
-      "requires": null
+      "enable": true,
+      "requires": null,
+      "coverage": null
     },
     "commit-trailers": {
-      "enable": true,
       "exec": "assay builtin commit-trailers",
       "fast": true,
-      "requires": null
+      "enable": true,
+      "requires": null,
+      "coverage": null
     },
     "findings": {
-      "enable": true,
       "exec": "assay builtin findings",
       "fast": false,
-      "requires": null
+      "enable": true,
+      "requires": null,
+      "coverage": null
     },
     "gitleaks": {
-      "enable": true,
       "exec": "assay builtin gitleaks",
       "fast": true,
-      "requires": null
+      "enable": true,
+      "requires": null,
+      "coverage": null
     },
     "oxfmt": {
-      "enable": true,
       "exec": "oxfmt --check --no-error-on-unmatched-pattern '**/*.{md,mdx,yml,yaml}' '**/*.{js,jsx,mjs,cjs,ts,tsx,mts,cts,json,jsonc,json5,css,scss,less,html,vue}'",
       "fast": true,
-      "requires": null
+      "enable": true,
+      "requires": null,
+      "coverage": null
     },
     "suppressions": {
-      "enable": true,
       "exec": "assay builtin suppressions",
       "fast": true,
-      "requires": null
+      "enable": true,
+      "requires": null,
+      "coverage": null
     }
   },
   "loosenings": [],
+  "coverage": {
+    "newCode": 80
+  },
   "findings": {
     "duplication": {
       "nodes_threshold": 64

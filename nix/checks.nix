@@ -19,23 +19,21 @@ let
           type = lib.types.str;
           default = "/repo";
         };
-        languages.python.enable = lib.mkOption {
-          type = lib.types.bool;
-          default = false;
-        };
-        languages.scala.enable = lib.mkOption {
-          type = lib.types.bool;
-          default = false;
-        };
-        languages.javascript = {
-          enable = lib.mkOption {
-            type = lib.types.bool;
-            default = false;
+        languages = {
+          python.enable = lib.mkEnableOption "Python";
+          scala.enable = lib.mkEnableOption "Scala";
+          javascript = {
+            enable = lib.mkOption {
+              type = lib.types.bool;
+              default = false;
+            };
+            directory = lib.mkOption {
+              type = lib.types.str;
+              default = config.devenv.root;
+            };
           };
-          directory = lib.mkOption {
-            type = lib.types.str;
-            default = config.devenv.root;
-          };
+          nix.enable = lib.mkEnableOption "Nix";
+          shell.enable = lib.mkEnableOption "shell";
         };
         packages = lib.mkOption {
           type = lib.types.listOf lib.types.package;
@@ -74,11 +72,16 @@ let
       ];
     }).config;
 
-  # The module with one default check, `demo`.
+  # The module with two default checks, `demo` and `tested` (which writes a coverage report and needs a tool).
   evalWith = evalModule (_: {
     demo = {
       exec = "true";
       fast = true;
+    };
+    tested = {
+      exec = "run-tests";
+      coverage = "$ASSAY_DIR/t.xml";
+      packages = [ pkgs.hello ];
     };
   });
 
@@ -88,15 +91,19 @@ let
   builtinJavascript = evalBuiltin { languages.javascript.enable = true; };
   builtinPython = evalBuiltin { languages.python.enable = true; };
   builtinLoosened = evalBuiltin {
-    assay.findings.smells.function_complexity = {
-      threshold = 25;
-      reason = "parsers are one big match";
+    assay.findings = {
+      smells.function_complexity = {
+        threshold = 25;
+        reason = "parsers are one big match";
+      };
+      rules = {
+        "python:S1481" = {
+          enable = false;
+          reason = "generated code";
+        };
+        "python:S3776".enable = true;
+      };
     };
-    assay.findings.rules."python:S1481" = {
-      enable = false;
-      reason = "generated code";
-    };
-    assay.findings.rules."python:S3776".enable = true;
   };
   javascriptIn =
     directory:
@@ -134,6 +141,49 @@ let
     assay.seed = 7;
     git-hooks.hooks.assay.entry = "other";
   };
+  lowered = evalWith {
+    assay.coverage = {
+      newCode = 50;
+      reason = "legacy scripts";
+    };
+  };
+  uncovered = evalWith {
+    assay.checks.tested = {
+      coverage = null;
+      reason = "no report for the test";
+    };
+  };
+  untested = evalWith {
+    assay.checks.tested = {
+      enable = false;
+      reason = "off for the test";
+    };
+  };
+  names = config: map (p: lib.getName p) config.packages;
+
+  # The module with each language's default checks alone (devenv/languages/), for the languages a repo enables.
+  withLanguages = evalModule (
+    args: import ../devenv/languages/nix.nix args // import ../devenv/languages/bash.nix args
+  );
+  nixRepo = withLanguages { languages.nix.enable = true; };
+  shellRepo = withLanguages { languages.shell.enable = true; };
+  # Each check's name with what `assay check --list` shows of it: fast or not, and what it requires and covers.
+  listed =
+    config:
+    lib.mapAttrs (_: c: {
+      inherit (c)
+        fast
+        enable
+        requires
+        coverage
+        ;
+    }) config.assay.checks;
+  fastCheck = {
+    fast = true;
+    enable = true;
+    requires = null;
+    coverage = null;
+  };
 
   expectations = {
     "turning a default off without a reason fails evaluation" =
@@ -154,6 +204,22 @@ let
       };
     };
     "the repo's own check is no loosening" = evaluates { assay.checks.own.exec = "true"; };
+    "lowering assay.coverage.newCode without a reason fails evaluation" =
+      !evaluates {
+        assay.coverage.newCode = 79;
+      };
+    "raising assay.coverage.newCode is no loosening" = evaluates { assay.coverage.newCode = 90; };
+    "dropping a default check's coverage without a reason fails evaluation" =
+      !evaluates {
+        assay.checks.tested.coverage = null;
+      };
+    "changing a default check's coverage report without a reason fails evaluation" =
+      !evaluates {
+        assay.checks.tested.coverage = "other.xml";
+      };
+    "adding coverage to a check is no loosening" = evaluates {
+      assay.checks.demo.coverage = "lcov.info";
+    };
     "a check name that cannot be a file name fails evaluation" =
       !evaluates {
         assay.checks."a/b".exec = "true";
@@ -170,7 +236,85 @@ let
       };
     "a plain definition changes a hook field" = own.git-hooks.hooks.assay.entry == "other";
     "enterTest runs assay check" = lib.hasInfix "assay check\n" plain.enterTest;
-    "packages has the CLI" = map (p: p.name) plain.packages == [ "assay" ];
+    "packages has the CLI, the default checks' tools and diff-cover" =
+      names plain == [
+        "assay"
+        "hello"
+        "diff-cover"
+      ];
+    "a repo that enables no language gets no language's check" =
+      (withLanguages { }).assay.checks == { };
+    "assay's defaults are the built-in checks and the enabled languages' checks" =
+      let
+        all =
+          lib.attrNames
+            (evalBuiltin {
+              languages.nix.enable = true;
+              languages.shell.enable = true;
+            }).assay.checks;
+      in
+      lib.all (n: builtins.elem n all) (
+        lib.attrNames builtinPlain.assay.checks
+        ++ lib.attrNames nixRepo.assay.checks
+        ++ lib.attrNames shellRepo.assay.checks
+      );
+    "Nix's defaults: nixfmt, statix, deadnix and nixf-tidy fast, nix flake check when flake.nix exists" =
+      listed nixRepo == {
+        nixfmt = fastCheck;
+        statix = fastCheck;
+        deadnix = fastCheck;
+        nixf-tidy = fastCheck;
+        nix-flake-check = {
+          fast = false;
+          enable = true;
+          requires = "flake.nix";
+          coverage = null;
+        };
+      };
+    "bash's defaults: shellcheck and shfmt fast, bats with its coverage report under ASSAY_DIR" =
+      listed shellRepo == {
+        shellcheck = fastCheck;
+        shfmt = fastCheck;
+        bats = {
+          fast = false;
+          enable = true;
+          requires = null;
+          coverage = "$ASSAY_DIR/kcov/bats/cobertura.xml";
+        };
+      };
+    "Nix's tools join the devenv, nixfmt and nixf among them" =
+      lib.all (t: builtins.elem t (names nixRepo))
+        [
+          "assay-check-helpers"
+          "nixfmt"
+          "statix"
+          "deadnix"
+          "nixf"
+          "jq"
+        ];
+    "bash's tools join the devenv, diff-cover among them" =
+      lib.all (t: builtins.elem t (names shellRepo))
+        [
+          "assay-check-helpers"
+          "ShellCheck"
+          "shfmt"
+          "bats"
+          "diff-cover"
+        ];
+    "kcov joins the devenv where nixpkgs has it (Linux), and only there" =
+      builtins.elem "kcov" (names shellRepo) == lib.meta.availableOn pkgs.stdenv.hostPlatform pkgs.kcov;
+    "dropping the bats check's coverage is a loosening" =
+      !(builtins.tryEval
+        (withLanguages {
+          languages.shell.enable = true;
+          assay.checks.bats.coverage = null;
+        }).env.ASSAY_CONFIG
+      ).success;
+    "without an enabled check that declares coverage, no diff-cover" =
+      names untested == [
+        "assay"
+        "hello"
+      ];
     "the built-in checks' tools join every repo's devenv, beside the CLI" =
       map lib.getName builtinPlain.packages == [
         "assay"
@@ -426,29 +570,14 @@ in
   tests =
     pkgs.runCommand "assay-tests"
       {
-        nativeBuildInputs =
-          with pkgs;
-          [
-            bats
-            shellcheck
-            git
-            jq
-            coreutils
-            gawk
-            ast-grep
-            actionlint
-            gitleaks
-            oxfmt
-            (callPackage ./radarlint.nix { })
-          ]
-          ++ lib.optional (lib.meta.availableOn pkgs.stdenv.hostPlatform qlty) qlty;
+        nativeBuildInputs = import ./test-tools.nix { inherit pkgs; } ++ [ pkgs.coreutils ];
       }
       ''
         cp -r ${src} src
         chmod -R u+w src
         cd src
-        patchShebangs assay.sh test/stub
-        shellcheck assay.sh nix/rules-check.sh test/helpers.bash test/devenv/helpers.bash test/stub/devenv
+        patchShebangs assay.sh test/stub devenv/bin
+        shellcheck assay.sh nix/rules-check.sh test/helpers.bash test/devenv/helpers.bash test/stub/devenv devenv/bin/*
         bats test
         touch $out
       '';
@@ -461,15 +590,22 @@ in
       ''
         ${lib.concatMapStrings (f: "echo ${lib.escapeShellArg "FAIL: ${f}"} >&2\n") failed}
         ${lib.optionalString (failed != [ ]) "exit 1"}
-        jq -e 'del(.findings)
-          == {version: 1, checks: {demo: {exec: "true", fast: true, enable: true, requires: null}}, loosenings: []}' \
+        jq -e 'del(.findings) == {version: 1,
+          checks: {
+            demo: {exec: "true", fast: true, enable: true, requires: null, coverage: null},
+            tested: {exec: "run-tests", fast: false, enable: true, requires: null, coverage: "$ASSAY_DIR/t.xml"}},
+          coverage: {newCode: 80}, loosenings: []}' \
           ${plain.env.ASSAY_CONFIG}
         jq -e '.checks.demo.enable == false and .loosenings == [{check: "demo", kind: "off", reason: "off for the test"}]' \
           ${off.env.ASSAY_CONFIG}
         jq -e '.checks.demo.exec == "echo mine" and .loosenings == [{check: "demo", kind: "exec", reason: "mine for the test"}]' \
           ${exec.env.ASSAY_CONFIG}
-        jq -e '.checks.own == {exec: "make lint", fast: false, enable: true, requires: "Makefile"} and .loosenings == []' \
+        jq -e '.checks.own == {exec: "make lint", fast: false, enable: true, requires: "Makefile", coverage: null} and .loosenings == []' \
           ${own.env.ASSAY_CONFIG}
+        jq -e '.coverage == {newCode: 50} and .loosenings == [{kind: "new-code", newCode: 50, default: 80, reason: "legacy scripts"}]' \
+          ${lowered.env.ASSAY_CONFIG}
+        jq -e '.checks.tested.coverage == null and .loosenings == [{check: "tested", kind: "coverage", reason: "no report for the test"}]' \
+          ${uncovered.env.ASSAY_CONFIG}
         # The built-in checks give the configurations the bats suite runs.
         same() {
           jq -S . "$1" >a.json
