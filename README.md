@@ -56,8 +56,8 @@ then every check. `devenv.lock` pins assay; `devenv update assay` moves it.
 - `requires` (default `null`): a glob relative to the repo root, in git's glob pathspec syntax (`**/` crosses
   directories). When no file git sees in the working tree matches it, the check is skipped and counts as passing: a
   new repo has no project yet.
-- `coverage` (default `null`): the coverage report the check writes, LCOV or Cobertura (see below): a path relative
-  to the repo root, in which `$ASSAY_DIR` stands for `<git-dir>/assay`.
+- `coverage` (default `null`): the coverage report the check writes, LCOV or Cobertura (see below): a path, absolute
+  or relative to the repo root, in which `$ASSAY_DIR` (or `${ASSAY_DIR}`) stands for `<git-dir>/assay`.
 - `reason` (default `null`): why the repo loosens one of assay's default checks.
 
 Names match `[A-Za-z0-9][A-Za-z0-9._-]*`.

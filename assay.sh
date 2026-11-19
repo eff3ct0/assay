@@ -357,7 +357,10 @@ measure() {
 		note="no coverage report at $report"
 		return 1
 	fi
-	mkdir -p "$dir"
+	if ! mkdir -p "$dir"; then
+		note="cannot create $dir"
+		return 1
+	fi
 	{
 		echo "\$ diff-cover $(shell_word "$report") --compare-branch=$base_sha --diff-range-notation=.. --include-untracked"
 		PATH=$caller_path diff-cover "$report" --compare-branch="$base_sha" --diff-range-notation=.. \

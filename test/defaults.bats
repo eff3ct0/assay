@@ -77,6 +77,8 @@ bash_project() {
 	printf '#!/usr/bin/env bash\nset -eu\necho "tool $1"\n' >tool
 	printf '#!/usr/bin/env bash\necho untested\necho twice\n' >untested.sh
 	chmod +x tool untested.sh
+	# A library kcov does not take for a script: no .sh, no shebang, no "sh" in its first 80 bytes.
+	printf 'quiet() {\n\ttrue\n}\n' >lib/quiet.bash
 	printf 'x = 1\n' >other.py
 	printf '%s\n' ignored.sh >.gitignore
 	printf '#!/usr/bin/env bash\necho ignored\n' >ignored.sh
@@ -97,7 +99,7 @@ BATS
 	[ "${lines[2]}" = "ok 2 runs the tool" ]
 	run hits .git/assay/kcov/bats/cobertura.xml
 	echo "$output"
-	[ "$output" = "$(printf '%s\n' lib/greet.sh:2:1 tool:2:1 tool:3:1 untested.sh:2:0 untested.sh:3:0)" ]
+	[ "$output" = "$(printf '%s\n' lib/greet.sh:2:1 lib/quiet.bash:2:0 tool:2:1 tool:3:1 untested.sh:2:0 untested.sh:3:0)" ]
 }
 
 @test "assay-bats fails with bats, starts from an empty report, and keeps kcov's trace noise out of its output" {
@@ -124,7 +126,7 @@ BATS
 	echo "$output"
 	[ "$status" -eq 0 ]
 	run hits .git/assay/kcov/bats/cobertura.xml
-	[ "$output" = "$(printf '%s\n' lib/greet.sh:2:0 tool:2:0 tool:3:0 untested.sh:2:0 untested.sh:3:0)" ]
+	[ "$output" = "$(printf '%s\n' lib/greet.sh:2:0 lib/quiet.bash:2:0 tool:2:0 tool:3:0 untested.sh:2:0 untested.sh:3:0)" ]
 	rm -r lib tool untested.sh
 	run --separate-stderr "$bin/assay-bats" .git/assay/kcov
 	[ "$status" -eq 0 ]
