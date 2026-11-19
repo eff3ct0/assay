@@ -47,8 +47,15 @@ Issue #3 ("Built-in checks every repo runs") is the specification; read it and t
 - **assay's own tree.** The hits log example in README.md becomes a `jsonl` block, which oxfmt leaves alone: a commit
   of its own.
 
+## Later messages from p3rkins, verbatim
+
+> Nota del orquestador: cada comando con rm dentro de un sh -c te para en un aviso de permisos y nadie está mirando.
+> Usa un directorio nuevo de mktemp -d en lugar de rm -rf + mkdir, y sigue.
+
 ## Remaining steps
 
-1. Done: the jsonl commit, new code, the four builtins, the module defaults, the tests, the docs. `devenv test`,
-   `nix flake check` and `nix develop -c bats test/devenv` pass.
-2. code-review skill, critic, recheck critic, PR (`Closes https://github.com/eff3ct0/assay/issues/3`, not merged).
+1. Done: the jsonl commit, new code, the four builtins, the module defaults, the tests, the docs, the code-review
+   skill's findings (`afe516d`), PR #19 (open, not merged, CI green), and the first critic.
+2. The first critic failed Done on one point, fixed here: `change_diff` left `diff.renameLimit` and
+   `diff.orderFile` to the user's configuration. Next: one fresh critic rechecks that failure and the fix's diff;
+   then remove this file, update the PR's evidence and report to p3rkins.

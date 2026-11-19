@@ -132,3 +132,33 @@ lines() { seq 1 "$2" >"$1"; }
   new_code --base main
   [ "$json" = '{}' ]
 }
+
+@test "the user's diff configuration changes nothing: rename limit, order file, algorithm, context, prefixes" {
+  local_repo
+  { echo 'keep'; seq 1 20; } >old.txt
+  printf '%s\n' a b >z.txt
+  git add old.txt z.txt
+  git commit --quiet -m old
+  git mv old.txt new.txt
+  sed -i '2s/.*/two/' new.txt
+  echo c >>z.txt
+  echo x >>a.txt
+  # Two new files, so that a rename limit of 1 is exceeded.
+  echo n >n1.txt
+  echo n >n2.txt
+  new_code --base HEAD
+  expected=$json
+  [ "$expected" = '{"a.txt":[[2,2]],"n1.txt":[[1,1]],"n2.txt":[[1,1]],"new.txt":[[2,2]],"z.txt":[[3,3]]}' ]
+  printf '%s\n' z.txt a.txt >"$T/order"
+  git config diff.renameLimit 1
+  git config diff.orderFile "$T/order"
+  git config diff.algorithm patience
+  git config diff.interHunkContext 10
+  git config diff.noprefix true
+  git config diff.mnemonicPrefix true
+  git config diff.renames false
+  git config core.quotePath true
+  run --separate-stderr "$assay" new-code --base HEAD
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(jq -S . <<<"$expected")" ]
+}

@@ -303,3 +303,19 @@ web.ts:11: oxlint-disable gives no reason"
   sup
   [ "$status" -eq 0 ]
 }
+
+@test "a renamed file keeps its suppressions whatever the user's diff.renameLimit" {
+  local_repo
+  { echo 'y = 1  # noqa'; seq -f 'v%g = 0' 1 20; } >old.py
+  git add old.py
+  git commit --quiet -m old
+  base=$(sha HEAD)
+  git mv old.py new.py
+  sed -i '2s/.*/v1 = 1/' new.py
+  # Two new files, so that a rename limit of 1 is exceeded.
+  echo 'a = 1' >a.py
+  echo 'b = 1' >b.py
+  git config diff.renameLimit 1
+  sup
+  [ "$status" -eq 0 ]
+}

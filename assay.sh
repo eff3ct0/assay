@@ -28,7 +28,8 @@ Outside the repo's devenv (ASSAY_CONFIG unset), these run themselves inside it, 
 devenv shell -- assay <command>, so the version the repo pins decides.
 The base of the change: --base, else ASSAY_BASE, else GitHub's event (GITHUB_EVENT_PATH), else the
 fork point of HEAD from the default branch, else their merge base. assay never fetches.
-Exit codes: 0 every selected check passed, 1 at least one failed, 2 assay could not run.
+Exit codes: 0 every selected check passed, 1 at least one failed, 2 assay could not run;
+assay builtin exits 127 when the tool its check runs is missing.
 EOF
 }
 
@@ -327,8 +328,9 @@ requires_met() {
 
 # change_diff <base>: the change as `git diff -U0` prints it, through a copy of the index that adds the untracked
 # files (not the ignored ones) as intent-to-add, so that they count as added. Renames are followed; binary files and
-# submodules show no lines. Every option that a user's configuration could change is fixed, so that the same tree
-# and base give the same diff anywhere. A path is quoted, C-style, only when it holds a control character, `"` or `\`.
+# submodules show no lines. Every option that a user's configuration could change is fixed (renames are looked for
+# without git's limit on their number), so that the same tree and base give the same diff anywhere. A path is
+# quoted, C-style, only when it holds a control character, `"` or `\`.
 change_diff() {
   local index untracked objects store
   tmp_file index
@@ -344,8 +346,8 @@ change_diff() {
       die "cannot add the untracked files to a copy of the index"
   fi
   GIT_INDEX_FILE=$index GIT_OBJECT_DIRECTORY=$objects GIT_ALTERNATE_OBJECT_DIRECTORIES=$store \
-    git -c core.quotePath=false diff -U0 --inter-hunk-context=0 --histogram -M --no-relative --no-color \
-    --no-ext-diff --no-textconv --ignore-submodules=all --src-prefix=a/ --dst-prefix=b/ "$1" ||
+    git -c core.quotePath=false diff -U0 --inter-hunk-context=0 --histogram -M -l0 -O/dev/null --no-relative \
+    --no-color --no-ext-diff --no-textconv --ignore-submodules=all --src-prefix=a/ --dst-prefix=b/ "$1" ||
     die "cannot diff the working tree against the base $1"
 }
 
