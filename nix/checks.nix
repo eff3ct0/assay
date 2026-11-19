@@ -2,6 +2,8 @@
 let
   inherit (pkgs) lib;
 
+  qlty = pkgs.callPackage ./qlty.nix { };
+
   # A stand-in for the devenv options the module sets or reads, so that it evaluates without devenv.
   devenvStub =
     { config, ... }:
@@ -220,6 +222,22 @@ in
         same ${builtinPlain.env.ASSAY_CONFIG} ${../test/defaults/plain.json}
         same ${builtinJavascript.env.ASSAY_CONFIG} ${../test/defaults/javascript.json}
         same ${builtinFrontend.env.ASSAY_CONFIG} ${../test/defaults/javascript-frontend.json}
+        touch $out
+      '';
+}
+// lib.optionalAttrs (lib.meta.availableOn pkgs.stdenv.hostPlatform qlty) {
+  # The pinned static binary runs in the sandbox, which has no network, and every run has telemetry off.
+  qlty =
+    pkgs.runCommand "assay-qlty"
+      {
+        nativeBuildInputs = [ qlty ];
+      }
+      ''
+        export HOME=$TMPDIR
+        version=$(qlty --version)
+        echo "$version"
+        [[ $version == "qlty ${qlty.version} "* ]]
+        grep -q "QLTY_TELEMETRY.*off" ${lib.getExe qlty}
         touch $out
       '';
 }

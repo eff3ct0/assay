@@ -15,10 +15,21 @@
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
     in
     {
-      packages = forAllSystems (pkgs: rec {
-        assay = pkgs.callPackage ./nix/package.nix { };
-        default = assay;
-      });
+      # qlty and radarlint are the tools of the built-in `findings` check; qlty only where its static binary runs.
+      packages = forAllSystems (
+        pkgs:
+        let
+          qlty = pkgs.callPackage ./nix/qlty.nix { };
+        in
+        rec {
+          assay = pkgs.callPackage ./nix/package.nix { };
+          default = assay;
+          radarlint = pkgs.callPackage ./nix/radarlint.nix { };
+        }
+        // nixpkgs.lib.optionalAttrs (nixpkgs.lib.meta.availableOn pkgs.stdenv.hostPlatform qlty) {
+          inherit qlty;
+        }
+      );
 
       # No output for the devenv module: a repo imports devenv/ by path from this repo's source
       # (`imports: [ assay/devenv ]` in its devenv.yaml).
