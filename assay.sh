@@ -2782,7 +2782,7 @@ path_matches() {
 	if [ -n "$3" ]; then
 		abs=$(realpath -m -- "$2") || return 1
 		in_main_checkout "$abs" || return 1
-		workspace=$(realpath -e -- "$3") && checkout_root=$(realpath -e -- "$checkout_root") || return 1
+		workspace=$(realpath -qe -- "$3") && checkout_root=$(realpath -e -- "$checkout_root") || return 1
 		[[ $checkout_root == "$workspace" || $checkout_root == "${workspace%/}/"* ]]
 		return
 	fi

@@ -116,6 +116,20 @@ no_clone='Get repos and worktrees through the workspace tool, not git clone or g
 	denied_by "is in the main checkout $T/repo"
 }
 
+@test "a missing workspace root silently allows both an edit and a matching command" {
+	checkouts
+	export ASSAY_AGENT=claude-code
+	RULES=$T/scoped.json
+	jq --arg root "$T/not-created" '.rules |= map(select(.match == "main-checkout" or .cwd == "main-checkout")
+	  | .workspaceRoot = $root)' "$BATS_TEST_DIRNAME/rules/example.json" >"$RULES"
+	guard_edit "README.md" "$T/repo"
+	allowed
+	[ -z "$stderr" ]
+	guard_bash 'git commit -m x' "$T/repo"
+	allowed
+	[ -z "$stderr" ]
+}
+
 # path_rule <glob>: RULES holds one path rule, for everyone, matching the glob.
 path_rule() {
 	RULES=$T/rules.json
