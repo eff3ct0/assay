@@ -98,8 +98,8 @@ so the version the repo pins always decides; `nix run github:eff3ct0/assay -- ch
 `devenv.nix`, or whose devenv does not import assay's module, is exit 2: the message names
 [docs/adoption.md](docs/adoption.md) and says that an adoption is a change of its own, made before other work.
 
-The machine-level subcommands, `guard`, `git-hook` and `collect`, never delegate; this version only prints their
-usage.
+The machine-level subcommands, [`guard` and `git-hook`](#on-a-machine-the-guard-and-the-global-git-hooks) and
+`collect`, never delegate; this version only prints `collect`'s usage.
 
 ## Built-in checks
 
@@ -281,20 +281,204 @@ every language (it replaces qlty's own 50 for Rust: values are per repo, not per
   (`loosening: findings smells.function_complexity.threshold is 25, above qlty's 18: <reason>`). Lowering a threshold
   or turning a rule on is free.
 
+## On a machine: the guard and the global git hooks
+
+The machine-level half of assay: the **agent guard**, `assay guard`, which reads one harness hook event and allows,
+denies, or keeps a turn going; and the **global git hooks**, `assay git-hook`, which check commits and pushes in every
+repo on the machine and leave no trace in any of them. Both read one **rule list**, which a machine keeps in its own
+home-manager configuration: assay ships the engine and no rules. The guard is a guardrail against habits, not a
+security boundary: matching command text can be evaded (`bash -c`, variables), and that is accepted.
+
+### The home-manager module
+
+```nix
+{
+  inputs.assay.url = "github:eff3ct0/assay";
+  # In a home-manager configuration:
+  imports = [ inputs.assay.homeManagerModules.default ];
+  programs.git.enable = true;
+  programs.assay = {
+    enable = true;
+    rules = [
+      {
+        name = "no-clone";
+        on = "command";
+        match = {
+          kind = "command";
+          all = [
+            { has = { field = "name"; regex = "^git$"; }; }
+            { has = { kind = "word"; regex = "^(clone|worktree)$"; }; }
+          ];
+        };
+        message = "Get repos and worktrees through the workspace tool, not git clone or git worktree.";
+        note = "Why: …\nFix: …\nNot a fix: …";
+        deny = [ "cd x && git clone y" "git -C r worktree add ../x" ];
+        allow = [ "git commit -m \"explain git clone\"" ];
+      }
+    ];
+  };
+}
+```
+
+- `programs.assay.enable` puts `assay` (`programs.assay.package`) on the user's PATH.
+- `programs.assay.rules`: the rule list, one Nix list; several definitions merge. It is rendered into one JSON file,
+  `programs.assay.rulesFile` (read-only), which both entrypoints read with `--rules`. Its types validate it when the
+  configuration evaluates: a rule without a one-line message or without a `deny` and an `allow` example, a `match` or
+  an example its `on` cannot take, or two rules with one name fail evaluation. A broken list never reaches the
+  machine.
+- The global git hooks, as config-based hooks in home-manager's git configuration (`programs.git.settings`; git 2.54
+  or later), which run in every repo beside the repo's own hooks and need no `core.hooksPath`:
+  `hook.assay-commit-msg.event = commit-msg` with
+  `hook.assay-commit-msg.command = <package>/bin/assay git-hook --rules <rulesFile> commit-msg`, and the same for
+  `pre-push`. With `programs.git.enable` off they are not written, and evaluation warns.
+- `ASSAY_HITS_LOG` set to `$XDG_STATE_HOME/assay/hits.jsonl` in the user's environment (`home.sessionVariables`), so
+  only this machine records [hits](#the-hits-log).
+- The harness's hooks call `assay guard --rules <rulesFile>`: Claude Code's `PreToolUse` (Bash, Edit, Write,
+  NotebookEdit) and `Stop` hooks, or an OpenCode plugin that builds the same JSON. Wiring them, and setting the agent
+  marker `ASSAY_AGENT` to the harness's name in the agent's environment, is the machine's configuration.
+
+### Rules
+
+| Field         | What it holds                                                                                         |
+| ------------- | ----------------------------------------------------------------------------------------------------- |
+| `name`        | The rule's stable id, which the hits log records. `[A-Za-z0-9][A-Za-z0-9._-]*`, unique.               |
+| `on`          | `command`, `path`, `commit-msg`, `pre-push` or `stop`: what the rule judges, and which entrypoint.    |
+| `match`       | What breaks the rule, by `on` (below).                                                                |
+| `message`     | One line: what is wrong and what to do instead.                                                       |
+| `note`        | Why, Fix, Not a fix, and the closing line (default empty).                                            |
+| `who`         | `agents` (the default): the rule runs only when `ASSAY_AGENT` is non-empty. `everyone`: always.       |
+| `cwd`         | A `command` rule only: a glob or `main-checkout`; the rule runs only when the event's cwd matches it. |
+| `fileContent` | A `command` rule only: a regex over the file the match binds to `$FILE` (below).                      |
+| `deny`        | Examples the rule must deny, at least one: the corrected command, path, message, push or state.       |
+| `allow`       | Examples the rule must let through, at least one: its fix, plus a near miss.                          |
+
+By `on`:
+
+- `command`, by `assay guard` on the Bash tool's command: `match` is an ast-grep rule for bash, the value of a rule
+  file's `rule:`, or, with a `rule` key, a rule file's body (`rule`, `constraints`, `utils`, `transform`). Every
+  command rule runs at once, through `ast-grep scan --inline-rules <rules> --stdin`. It matches
+  the command's structure, not its text: `cd x && git clone y`, `git -C r worktree add ../x`, `git -c x=y clone z`,
+  `FOO=1 git clone z`, and a command inside `$(…)`, a pipeline, a subshell or an `if` match a `has` rule on the name
+  `git` and the word `clone`; `git commit -m "explain git clone"` and `echo git clone` do not. A command handed as a
+  string or as arguments to another program is not caught, and that is accepted: `bash -c "git clone x"`,
+  `sudo git clone x`, `env git clone x`, `xargs git clone`.
+  - With `cwd`, the rule runs only when the session's cwd matches it: `cwd = "main-checkout"` denies `git commit` in a
+    main checkout and lets it through in a linked worktree.
+  - With `fileContent`, a match that binds the metavariable `$FILE` counts only when the file it names holds text
+    matching the regex: `{ has = { pattern = "$FILE"; follows.regex = "^(--body-file|-F)$"; }; }` reads the body of
+    `gh pr create --body-file body.md`. The file is read relative to the cwd, with the quotes around it, a leading
+    `--option=` and a leading `~/` resolved as the shell would; a file that cannot be read (`-`, a variable) holds
+    nothing. A match that binds no `$FILE` counts as usual, so one rule covers `--body` and `--body-file` with `any`.
+- `path`, by `assay guard` on the path an Edit, Write or NotebookEdit writes (relative to the cwd when it is not
+  absolute): `match` is a glob or `main-checkout`, a path inside a main checkout: in its working tree, whose git dir
+  is its common dir (a linked worktree's is not), or in the git dir of a repo that is not bare. A path that does not
+  exist yet is judged by its nearest existing directory. In a glob, `*` and `?` stay
+  within a path component and `**` crosses them, `[…]` is a class (`[!…]` negated) and `\` makes the next character
+  plain. A glob with no `/` matches the file's name (`*.env`), one that starts with `/` the whole path (`/etc/**`),
+  any other the path's end at a component boundary (`.ssh/*`).
+- `commit-msg`, by `assay git-hook … commit-msg`: `match` is a regex in jq's syntax (Oniguruma, Perl-like) over the
+  message as git stores it, with what follows `git commit --verbose`'s scissors line cut off and comments stripped.
+  `^` and `$` match at the message's ends unless `(?m)` makes them match at each line; `(?i)` ignores case:
+  `(?im)^co-authored-by:`.
+- `pre-push`, by `assay git-hook … pre-push`: `match` names a check built into assay.
+  - `agent-branch`: every pushed `refs/heads/*`, a deletion included, is `agent/*` or the remote's default branch
+    (`refs/remotes/<remote>/HEAD`, else what `git ls-remote --symref` says; an empty remote takes any first branch).
+    Tags and other refs pass.
+  - `agents-md`: every pushed branch tip's tree has the `AGENTS.md` / `CLAUDE.md` shape of the
+    [`agents-md`](#built-in-checks) check, read from the tree, in every repo.
+- `stop`, by `assay guard` on a `Stop` event: `match` is `unsaved-work`, a session whose cwd is in a worktree with
+  uncommitted changes (untracked files included) or, when the repo has a remote, commits on no remote-tracking branch.
+
+Examples are strings or attribute sets. A string stands for a `command`'s command, a `path`'s path, a
+`commit-msg`'s message or a `pre-push`'s pushed ref; an attribute set says more:
+
+| `on`         | Fields                                                                                          |
+| ------------ | ----------------------------------------------------------------------------------------------- |
+| `command`    | `command`; `cwd` (default the fixture's root); `files`, written under the cwd before it runs    |
+| `path`       | `path`; `cwd`                                                                                   |
+| `commit-msg` | `message`                                                                                       |
+| `pre-push`   | `ref` (default `refs/heads/agent/example`); `files`, the tip's files over a tree with the shape |
+| `stop`       | `uncommitted`, `unpushed`, `remote` (default `true`): the session's worktree; no string form    |
+
+In `files`, `null` removes a file.
+
+### `assay guard --rules <file>`
+
+- One hook event on stdin, in Claude Code's hook JSON (`hook_event_name`, `tool_name`, `tool_input`, `cwd`,
+  `stop_hook_active`). Claude Code's documented format is the canonical one: another harness's adapter builds the
+  same JSON and reads the same answers.
+- `PreToolUse`: Bash runs the `command` rules; Edit, Write and NotebookEdit run the `path` rules over `file_path` or
+  `notebook_path`. Other tools and events pass.
+- Allow: no output, exit 0. Deny: exit 0 and
+  `{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "<reason>"}}`.
+- `Stop`: when a `stop` rule finds unsaved work, the guard keeps the turn going once with
+  `{"decision": "block", "reason": "<reason>"}`; with `stop_hook_active` set, a Stop hook already did, and it answers
+  nothing.
+- The reason holds every violated rule: its message, a detail line (the path, or the worktree and what is unsaved),
+  and its note after a blank line.
+- It fails open: on its own error (a rules file it cannot read or use, an event that is not JSON, no ast-grep), exit 1
+  with an `assay:` message on stderr, which Claude Code shows without blocking. Never exit 2, which would block. It
+  sits in front of every tool call, including the ones that would repair it.
+
+### `assay git-hook --rules <file> <hook> [<git's arguments>]`
+
+- Git appends the hook's own arguments and gives it stdin: the message file for `commit-msg`; the remote's name and
+  URL, plus `<local ref> <local oid> <remote ref> <remote oid>` lines on stdin, for `pre-push`.
+- A hook with no rules exits 0. A violated rule makes it exit 1, with `assay: <name>: <message>`, its details and its
+  note on stderr, for every violated rule.
+- It fails closed: when it cannot evaluate its rules (a rules file it cannot read or use, a regex jq rejects, a hook
+  other than `commit-msg` and `pre-push`, a remote whose default branch it cannot find), exit 1 with
+  `assay: cannot evaluate rules: …`. It stands only in front of commits and pushes, and a person can still bypass it.
+
+### Testing a rule list
+
+assay's flake exports a check builder, `lib.rulesCheck`:
+
+```nix
+checks.${system}.agent-rules = inputs.assay.lib.rulesCheck {
+  inherit pkgs;
+  rules = self.homeConfigurations.<name>.config.programs.assay.rulesFile;
+};
+```
+
+`assay` (by default the package the module installs by default) is the package whose entrypoints it runs: a
+configuration that sets `programs.assay.package` passes the same one, since command rules depend on its ast-grep. It
+builds `assay-rules-check`, which feeds every example to the real entrypoint its rule's `on` names, with that rule
+alone and `ASSAY_AGENT` set or not as `who` asks: a `PreToolUse` or `Stop` event to `assay guard`, a message file or
+a pushed ref to `assay git-hook`. It fails when a `deny` example passes, an `allow` example is denied, or an
+entrypoint fails on one, naming the rule and the example; its output is the report. It takes seconds and needs no
+KVM, so a configuration's CI can build it. Each example runs in a fresh fixture, under a root that is its default cwd
+and is in no repository:
+
+- `origin.git`: a bare remote whose default branch is `main`;
+- `repo/`: its clone, a main checkout on `main`, pushed, whose files have the `AGENTS.md` / `CLAUDE.md` shape;
+- `worktree/`: a linked worktree of `repo` on `agent/example`, pushed, its upstream set; `pre-push` examples push
+  from it, and `stop` examples run in it;
+- `local/`: a repo with one commit and no remote, where a `stop` example with `remote = false` runs.
+
+So a `main-checkout` path rule takes `repo/README.md` as a `deny` example and `worktree/README.md` as an `allow` one.
+
 ## The hits log
 
-When `ASSAY_HITS_LOG` names a file, each `assay check` run appends one JSON line to it, passing or not. Append-only
-and best-effort: a failed write is ignored and never changes an exit code. The run that executes the checks writes
-it, never the `assay` that delegates to the repo's devenv.
+When `ASSAY_HITS_LOG` names a file, each `assay check` run appends one JSON line to it, passing or not, and so does
+each denial and block of `assay guard` and each rejection of `assay git-hook`, one line per rule. Allowed calls,
+accepted commits and accepted pushes write nothing. Append-only and best-effort: a failed write is ignored and never
+changes an exit code or an answer. The run that executes the checks writes it, never the `assay` that delegates to the
+repo's devenv.
 
 - Every line: `v` (the line format's version, `1`), `time` (UTC, RFC 3339), `source` (`guard`, `git-hook` or
   `check`), `repo` (the absolute path of the main checkout, from `git rev-parse --git-common-dir`), `agent` (the value
   of `ASSAY_AGENT`, or `null`).
 - `check`: `mode` (`fast` or `full`), `only` (the check names given, as given; empty for all), `seconds`, `failed`
   (the failing checks' names) and `exit`.
+- `guard`: `event` (`PreToolUse` or `Stop`), `tool` (the tool's name; `null` for `Stop`), `rule` (its name) and
+  `decision` (`deny` or `block`). `repo` is the event's cwd's.
+- `git-hook`: `hook` (`commit-msg` or `pre-push`) and `rule`.
 
 ```jsonl
 {"v":1,"time":"2026-11-18T21:04:05Z","source":"check","repo":"/path/to/repo","agent":null,"mode":"fast","only":[],"seconds":0.42,"failed":["lint"],"exit":1}
+{"v":1,"time":"2026-11-18T21:05:10Z","source":"guard","repo":"/path/to/repo","agent":"claude-code","event":"PreToolUse","tool":"Bash","rule":"no-clone","decision":"deny"}
+{"v":1,"time":"2026-11-18T21:06:00Z","source":"git-hook","repo":"/path/to/repo","agent":"claude-code","hook":"pre-push","rule":"agent-branch"}
 ```
 
 ## License

@@ -114,12 +114,20 @@ not_adopted() {
   local_repo
   devenv_files yes
   outside_devenv
-  for cmd in guard git-hook collect; do
-    run --separate-stderr "$assay" "$cmd"
-    [ "$status" -eq 2 ]
-    [[ ${stderr_lines[0]} == "usage: assay $cmd "* ]]
-    [ "${stderr_lines[-1]}" = "assay: $cmd is not implemented yet" ]
-  done
+  example_rules
+  export ASSAY_AGENT=claude-code
+  run --separate-stderr "$assay" guard --rules "$RULES" <<<"$(jq -nc --arg d "$PWD" \
+    '{hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: {command: "git clone x"}, cwd: $d}')"
+  [ "$status" -eq 0 ]
+  jq -e '.hookSpecificOutput.permissionDecision == "deny"' <<<"$output"
+  printf 'Fix\n\nCo-Authored-By: A\n' >"$T/msg"
+  run --separate-stderr "$assay" git-hook --rules "$RULES" commit-msg "$T/msg"
+  [ "$status" -eq 1 ]
+  [[ $stderr == "assay: no-coauthor: "* ]]
+  run --separate-stderr "$assay" collect
+  [ "$status" -eq 2 ]
+  [[ ${stderr_lines[0]} == "usage: assay collect "* ]]
+  [ "${stderr_lines[-1]}" = "assay: collect is not implemented yet" ]
   [ ! -e "$T/devenv.calls" ]
 }
 
