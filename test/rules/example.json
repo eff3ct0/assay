@@ -1,0 +1,145 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "name": "no-clone",
+      "on": "command",
+      "match": {
+        "kind": "command",
+        "all": [
+          { "has": { "field": "name", "regex": "^git$" } },
+          { "has": { "kind": "word", "regex": "^(clone|worktree)$" } }
+        ]
+      },
+      "message": "Get repos and worktrees through the workspace tool, not git clone or git worktree.",
+      "note": "Why: the workspace keeps one clone per repo.\nFix: use the workspace tool.\nNot a fix: wrapping the call in a script. If the rule is wrong here, stop and tell the user.",
+      "who": "agents",
+      "cwd": null,
+      "fileContent": null,
+      "deny": [{ "command": "cd x && git clone y" }, { "command": "git -C r worktree add ../x" }],
+      "allow": [{ "command": "git commit -m \"explain git clone\"" }, { "command": "git status" }]
+    },
+    {
+      "name": "main-checkout-edit",
+      "on": "path",
+      "match": "main-checkout",
+      "message": "The main checkout stays clean: edit files in a worktree of your own.",
+      "note": "",
+      "who": "agents",
+      "cwd": null,
+      "fileContent": null,
+      "deny": [{ "path": "repo/README.md" }],
+      "allow": [{ "path": "worktree/README.md" }, { "path": "notes.md" }]
+    },
+    {
+      "name": "no-env-file",
+      "on": "path",
+      "match": "*.env",
+      "message": "Environment files hold secrets: do not write them.",
+      "note": "",
+      "who": "everyone",
+      "cwd": null,
+      "fileContent": null,
+      "deny": [{ "path": "repo/.config/prod.env" }],
+      "allow": [{ "path": "repo/env.example" }]
+    },
+    {
+      "name": "main-checkout-commit",
+      "on": "command",
+      "match": {
+        "kind": "command",
+        "all": [
+          { "has": { "field": "name", "regex": "^git$" } },
+          { "has": { "kind": "word", "regex": "^(commit|merge|rebase|reset|switch)$" } }
+        ]
+      },
+      "message": "The main checkout stays on its default branch: commit in a worktree of your own.",
+      "note": "",
+      "who": "agents",
+      "cwd": "main-checkout",
+      "fileContent": null,
+      "deny": [{ "command": "git commit -m x", "cwd": "repo" }],
+      "allow": [{ "command": "git commit -m x", "cwd": "worktree" }, { "command": "git pull", "cwd": "repo" }]
+    },
+    {
+      "name": "pr-attribution",
+      "on": "command",
+      "match": {
+        "kind": "command",
+        "all": [
+          { "has": { "field": "name", "regex": "^gh$" } },
+          { "has": { "kind": "word", "regex": "^pr$" } },
+          { "has": { "kind": "word", "regex": "^(create|edit)$" } },
+          {
+            "any": [
+              { "has": { "regex": "(?i)generated with", "follows": { "regex": "^(--body|-b)$" } } },
+              { "has": { "pattern": "$FILE", "follows": { "regex": "^(--body-file|-F)$" } } },
+              { "has": { "pattern": "$FILE", "regex": "^--body-file=" } }
+            ]
+          }
+        ]
+      },
+      "message": "A pull request's description names no tool that wrote it.",
+      "note": "",
+      "who": "agents",
+      "cwd": null,
+      "fileContent": "(?i)generated with",
+      "deny": [
+        { "command": "gh pr create --title t --body 'Fix.\n\nGenerated with a tool'" },
+        { "command": "gh pr create --title t --body-file body.md", "files": { "body.md": "Fix.\n\nGenerated with a tool\n" } }
+      ],
+      "allow": [
+        { "command": "gh pr create --title t --body 'Fix the parser.'" },
+        { "command": "gh pr edit 3 --body-file body.md", "files": { "body.md": "Fix the parser.\n" } }
+      ]
+    },
+    {
+      "name": "no-coauthor",
+      "on": "commit-msg",
+      "match": "(?im)^co-authored-by:",
+      "message": "A commit names no co-author: remove the Co-Authored-By trailer.",
+      "note": "",
+      "who": "everyone",
+      "cwd": null,
+      "fileContent": null,
+      "deny": [{ "message": "Fix the parser\n\nCo-Authored-By: A <a@example.com>\n" }],
+      "allow": [{ "message": "Fix the parser\n\nReviewed-by: A <a@example.com>\n" }, { "message": "Fix the co-authored-by: parser\n" }]
+    },
+    {
+      "name": "agent-branch",
+      "on": "pre-push",
+      "match": "agent-branch",
+      "message": "Agent branches start with agent/: push your work as agent/<topic>.",
+      "note": "",
+      "who": "agents",
+      "cwd": null,
+      "fileContent": null,
+      "deny": [{ "ref": "refs/heads/feature" }],
+      "allow": [{ "ref": "refs/heads/agent/feature" }, { "ref": "refs/heads/main" }, { "ref": "refs/tags/v1" }]
+    },
+    {
+      "name": "agents-md-shape",
+      "on": "pre-push",
+      "match": "agents-md",
+      "message": "Every repo has AGENTS.md with the instructions and CLAUDE.md as the single line @AGENTS.md.",
+      "note": "",
+      "who": "agents",
+      "cwd": null,
+      "fileContent": null,
+      "deny": [{ "files": { "AGENTS.md": "# app\n\n## Related repos\n\nNone.\n", "CLAUDE.md": "# app\n\n## Related repos\n\nNone.\n" } }],
+      "allow": [{ "files": { "AGENTS.md": "# app\n\n## Related repos\n\nNone.\n", "CLAUDE.md": "@AGENTS.md\n" } }]
+    },
+    {
+      "name": "save-work",
+      "on": "stop",
+      "match": "unsaved-work",
+      "message": "Commit and push your branch before you stop, unfinished work included (wip: ...).",
+      "note": "",
+      "who": "agents",
+      "cwd": null,
+      "fileContent": null,
+      "deny": [{ "uncommitted": true }, { "unpushed": true }],
+      "allow": [{}, { "unpushed": true, "remote": false }]
+    }
+  ]
+}

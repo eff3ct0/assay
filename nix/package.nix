@@ -1,6 +1,7 @@
 {
   lib,
   writeShellApplication,
+  ast-grep,
   coreutils,
   gawk,
   git,
@@ -9,10 +10,11 @@
 writeShellApplication {
   name = "assay";
   # No runtimeInputs: they would come first on the PATH of every check too. The script puts these first on its own
-  # PATH and runs each check with the PATH it was called with.
+  # PATH and runs each check with the PATH it was called with. ast-grep is the guard's: it matches command rules.
   text = ''
     assay_tools=${
       lib.makeBinPath [
+        ast-grep
         coreutils
         gawk
         git

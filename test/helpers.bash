@@ -137,3 +137,27 @@ shaped_repo() {
 	git add -A
 	git commit --quiet -m shaped
 }
+
+# example_rules [<name>...]: RULES, the example rule list test/rules/example.json (the home-manager module renders it
+# from test/rules/example.nix), or a copy with only the rules named.
+example_rules() {
+	RULES=$BATS_TEST_DIRNAME/rules/example.json
+	if [ $# -gt 0 ]; then
+		jq --args '.rules |= map(select(.name | IN($ARGS.positional[])))' "$@" <"$RULES" >"$T/rules.json"
+		RULES=$T/rules.json
+	fi
+}
+
+# checkouts: $T/origin.git, a bare remote whose default branch is main; $T/repo, its clone, a main checkout on main
+# with one commit, pushed; $T/worktree, a linked worktree of it on agent/example, pushed with its upstream set; and
+# $T/local, a repo with one commit and no remote.
+checkouts() {
+	git init --quiet --bare "$T/origin.git"
+	git clone --quiet "$T/origin.git" "$T/repo" 2>/dev/null
+	commit_file "$T/repo" README.md "# repo"
+	git -C "$T/repo" push --quiet origin main
+	git -C "$T/repo" worktree add --quiet "$T/worktree" -b agent/example
+	git -C "$T/worktree" push --quiet -u origin agent/example 2>/dev/null
+	git init --quiet "$T/local"
+	commit_file "$T/local" README.md "# local"
+}
