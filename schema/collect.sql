@@ -6,7 +6,7 @@ CREATE INDEX IF NOT EXISTS changes_time ON changes(time);
 CREATE TABLE IF NOT EXISTS snapshots(repo TEXT, tip TEXT, time INTEGER, metrics TEXT, error TEXT);
 CREATE TABLE IF NOT EXISTS checks(repo TEXT, name TEXT, PRIMARY KEY(repo,name));
 CREATE TABLE IF NOT EXISTS hits(repo TEXT, event TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS batches(id TEXT PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS hit_cursors(path TEXT PRIMARY KEY, device INTEGER, inode INTEGER, position INTEGER NOT NULL);
 CREATE VIEW IF NOT EXISTS failures AS
  SELECT repo, unixepoch(event->>'time') AS time, event->>'agent' AS agent, event->>'rule' AS name
  FROM hits WHERE event->>'source' IN ('guard','git-hook')

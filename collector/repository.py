@@ -71,7 +71,8 @@ def snapshot(git, tip, deadline, schema):
             config = json.loads(marker.read_bytes())
             metrics = json.loads(data)
             jsonschema.validate(metrics, schema)
-            return "ok", json.dumps(metrics), None, [
+            error = "Failed checks: " + ", ".join(metrics["failed"]) if metrics["failed"] else None
+            return "failed" if error else "ok", json.dumps(metrics), error, [
                 n for n, c in config["checks"].items() if c.get("enable", True)]
     except (OSError, ValueError, KeyError, tarfile.TarError, jsonschema.ValidationError) as err:
         return "failed", None, str(err), []
@@ -99,7 +100,7 @@ def collect_repo(db, path, repo, schema):
             db.execute("INSERT OR REPLACE INTO repos VALUES (?,?,?)", (repo, tip, state))
             if state != "unadopted":
                 db.execute("INSERT INTO snapshots VALUES (?,?,unixepoch(),?,?)", (repo, tip, metrics, error))
-            if state != "failed":
+            if metrics is not None or state == "unadopted":
                 db.execute("DELETE FROM checks WHERE repo=?", (repo,))
                 db.executemany("INSERT INTO checks VALUES (?,?)", ((repo, n) for n in names))
             if error:

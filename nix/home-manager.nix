@@ -321,7 +321,14 @@ in
           "ASSAY_COLLECT_OWNERS=${builtins.toJSON cfg.collect.owners}"
           "ASSAY_HITS_LOG=${config.home.sessionVariables.ASSAY_HITS_LOG}"
           "ASSAY_RULES=${cfg.rulesFile}"
-          "PATH=${config.home.profileDirectory}/bin:/run/current-system/sw/bin"
+          "PATH=${
+            lib.makeBinPath [
+              pkgs.devenv
+              pkgs.nix
+              pkgs.bash
+              pkgs.openssh
+            ]
+          }:${config.home.profileDirectory}/bin"
         ];
       };
     };

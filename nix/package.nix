@@ -8,7 +8,6 @@
   jq,
   yq-go,
   python3,
-  flock,
   util-linux,
   stdenv,
 }:
@@ -27,7 +26,6 @@ writeShellApplication {
         git
         jq
         yq-go
-        flock
       ]
       + lib.optionalString stdenv.isLinux ":${lib.getBin util-linux}/bin"
     }

@@ -133,9 +133,7 @@ log_hit() {
       {v: 1, time: (now | todate), source: $source, repo: ($repo | text_or_null), agent: ($agent | text_or_null)}
       + ('"$filter"')') &&
 			mkdir -p "$(dirname "$ASSAY_HITS_LOG")" &&
-			(
-				flock -x 9 && printf '%s\n' "$line" >>"$ASSAY_HITS_LOG"
-			) 9>>"$ASSAY_HITS_LOG.lock"
+			printf '%s\n' "$line" >>"$ASSAY_HITS_LOG"
 	} 2>/dev/null || true
 }
 

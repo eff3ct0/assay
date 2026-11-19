@@ -723,8 +723,11 @@ temporary archives, sequentially, allowing 30 minutes per repository. Inspect
 submodule contents or smudged LFS objects. The collector never backfills.
 
 `ASSAY_HITS_LOG` selects the JSONL spool; one collector/database consumes a spool.
-The writer locks before opening the file, and the collector rotates it under the
-same lock. A pending batch stays recoverable until its SQLite transaction commits.
+Writers append without consulting the collector. SQLite commits imported rows and
+its byte offset together; a trailing partial line waits for the next run. Keep
+the log append-only: it grows indefinitely, even after import, so an older
+writer with an open descriptor can finish safely. Do not rotate or truncate it.
+To retire it, stop all writers, finish importing it, then configure a new path.
 `ASSAY_RULES` optionally names the machine's rule list for the inactive-check table.
 The module supplies both paths to the service.
 

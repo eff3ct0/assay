@@ -32,6 +32,9 @@ specifications it links, before changing behaviour.
     codes of `assay check`, `assay preset`, `assay builtin`, `assay findings` and `assay rule new` (the paths it
     creates, the layout it writes). The snapshot metrics command `assay measure` uses the same check configuration
     and the devenv's analyzer tools (qlty, jscpd and scc; xmlstarlet reads Cobertura coverage);
+  - Grafana readers, through `schema/collect.sql` and `dashboard.json` (SQLite datasource); the machine-level
+    `assay collect` reads Grove checkouts and the append-only hits log. Home Manager configures its nightly user
+    timer with `programs.assay.collect.{database,root,owners}`;
   - snapshot metrics consumers, through the JSON and exit codes of `assay measure` and its versioned contract,
     `schema/measure.json` (installed as `share/assay/schema/measure.json` in the Nix package);
   - home-manager configurations, through the package, `homeManagerModules.default` and `lib.rulesCheck`. They rely on
@@ -56,6 +59,8 @@ specifications it links, before changing behaviour.
 - One built-in check alone: `assay builtin <check>` (its `exec`); a change's new code as JSON: `assay new-code`; the
   analyzer's findings on the change: `assay findings [--base <rev>] [--sarif]`; an ast-grep rule's scaffold:
   `assay rule new <kebab-name> [--lang <lang>] [--from <file>:<line>[-<line>]]`.
+- Collection: `assay collect --db FILE` runs outside devenv. See [nightly collection](README.md#nightly-collection)
+  for owner selection, spool retention and datasource setup.
 - Snapshot metrics: `devenv shell -- assay measure` in an adopted repo or a directory extracted with `git archive`.
   It needs no base; see [the JSON contract and exit codes](README.md#assay-measure).
 - The guard and the git hooks, from anywhere: `echo '<hook event>' | assay guard --rules <file>` and
@@ -90,6 +95,8 @@ specifications it links, before changing behaviour.
   (oxfmt 0.45 against 0.75, ast-grep 0.42 against 0.51): the suite passes with both. radarlint, which the module brings
   only to repos with Python or Scala, and TLC, which it brings only to repos that turn the `tla` check on, come from
   assay's own `devenv.nix` for the `bats` check. New behaviour gets a test there.
+- Collector regressions: `nix develop -c bats test/collect.bats test/hits.bats` uses disposable Grove checkouts,
+  local remotes, a synthetic hits log and scratch SQLite databases.
 - Snapshot metrics: `nix develop -c bats test/measure.bats` for the CLI and schema against synthetic archives, and
   `nix develop -c bats -f 'measure:' test/devenv/defaults.bats` for archived Nix and Bash fixtures in real devenv.
 - `nix develop -c bats test/devenv`: the devenv module in throwaway repos that import a `git+file:` copy of this working
