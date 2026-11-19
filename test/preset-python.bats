@@ -206,7 +206,7 @@ dev_group() { awk '/^dev = \[$/ { on = 1; next } on && /^\]$/ { on = 0 } on' pyp
 	printf '%s\n' '' '[tool.ruff]' 'line-length = 100' >>pyproject.toml
 	"$assay" preset >/dev/null || true
 	python_version_2 pytest coverage hypothesis deptry
-	printf '%s\n' '' '[format]' 'quote-style = "single"' >>"$T/presets/python/2/ruff.toml"
+	printf '%s\n' '' '[format]' 'quote-style = "single"' >>"$assay_presets/python/2/ruff.toml"
 	run --separate-stderr "$assay" preset
 	echo "$output"
 	[ "$status" -eq 1 ]
@@ -271,7 +271,7 @@ dev_group() { awk '/^dev = \[$/ { on = 1; next } on && /^\]$/ { on = 0 } on' pyp
 	python_version_2 pytest 'coverage when' '-x'
 	run --separate-stderr "$assay" preset
 	[ "$status" -eq 2 ]
-	[ "$stderr" = "assay: cannot read line 2 of $T/presets/python/2.dependencies: coverage when" ]
+	[ "$stderr" = "assay: cannot read line 2 of $assay_presets/python/2.dependencies: coverage when" ]
 	python_version_2 pytest '-x'
 	run --separate-stderr "$assay" preset
 	[ "$status" -eq 2 ]
