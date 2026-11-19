@@ -223,9 +223,7 @@ python_project() {
 	[ "${lines[-1]}" = "assay-pytest: no Python file to cover; an empty report stands for coverage.py's" ]
 	run hits .git/assay/pytest/coverage.xml
 	[ -z "$output" ]
-	local here
-	here=$(pwd -P)
-	grep -q "<source>$here</source>" .git/assay/pytest/coverage.xml
+	grep -Fq '<sources/>' .git/assay/pytest/coverage.xml
 }
 
 @test "assay-pytest runs Hypothesis derandomized and without its example database: two runs try the same inputs" {
@@ -242,6 +240,18 @@ python_project() {
 	cmp "$T/first" "$T/second"
 	# Hypothesis caches the source's constants under .hypothesis/ whatever the profile, but keeps no examples.
 	[ ! -e .hypothesis/examples ]
+}
+
+@test "an empty Cobertura report passes the pytest check in a path with an ampersand" {
+	local_repo
+	mkdir "$T/space & co"
+	mv .git "$T/space & co"
+	cd "$T/space & co"
+	check pytest "\"$bin/assay-pytest\" \"\$ASSAY_DIR/pytest\"" --coverage '$ASSAY_DIR/pytest/coverage.xml'
+	run --separate-stderr "$assay" check --base HEAD pytest
+	echo "$output"
+	[ "$status" -eq 0 ]
+	[[ ${lines[1]} == "ok   pytest "*"(new code: no lines to cover)" ]]
 }
 
 # fake_deptry: a deptry that prints its arguments, one per line, and exits with DEPTRY_EXIT (0 unless set), first on the

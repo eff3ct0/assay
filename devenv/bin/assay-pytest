@@ -38,7 +38,7 @@ if [ "$rc" -eq 1 ] && grep -qx 'No data to report.' "$out/xml.log"; then
 		echo '<?xml version="1.0" ?>'
 		echo '<coverage version="0" lines-valid="0" lines-covered="0" line-rate="1" branches-valid="0"'
 		echo '  branches-covered="0" branch-rate="0" complexity="0">'
-		echo "	<sources><source>$root</source></sources>"
+		echo '	<sources/>'
 		echo '	<packages/>'
 		echo '</coverage>'
 	} >"$out/coverage.xml"

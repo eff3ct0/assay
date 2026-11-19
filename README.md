@@ -149,10 +149,11 @@ versions in. assay injects no configuration at run time.
   lockfile (Python: `uv add --dev`, into `[dependency-groups] dev`). A dependency the project lacks is added; one whose
   spec the preset changed since the recorded version is upgraded (added again with the new spec); one the preset
   dropped since then is removed, when the project still has it. A dependency only one check needs (Python's
-  `import-linter`) is added while that check is on, and never removed. The project's own spec of a dependency it already
-  has is left alone. Everything is worked out before anything is written: without the manifest (`pyproject.toml`), or
-  without the package manager when something is to change, `assay preset` exits 2 and changes nothing; a package
-  manager that fails is exit 2 with its output.
+  `import-linter`) is added while that check is on, and never removed. For Python, a check's required dev dependency
+  must have an unconditional entry. When a preset tightens a direct requirement, Assay gives uv the intersection
+  with the project's existing constraints and keeps its extras. Ambiguous upgrades (such as marker variants) need
+  manual resolution. Planning errors leave the manifest and record unchanged; a package manager failure exits 2
+  with its output.
 - A file the repo lacks is written from the pinned preset.
 - A file the repo has at an older recorded version is merged three ways with `git merge-file`: the base is the
   recorded version's file, theirs the pinned one's, ours the repo's. A conflict is left as markers, with the base
@@ -430,9 +431,9 @@ venvs (below). With nothing to check, a check passes.
     its mode or a rule; warnings fail too.
   - `osv-scanner`: `assay builtin osv-scanner uv.lock`, [on the change](#advisories-on-the-change).
 - What loads the project's code runs from its venv, which the project's lockfile fills and Python's preset adds to:
-  `deptry`, `pytest` and `import-linter`. Assay defaults `languages.python.venv.enable` to put the venv on `PATH`.
-  Once a root `pyproject.toml` exists, it also defaults `uv.enable` and `uv.sync.enable` (unless uv is disabled).
-  Use uv to initialize a project before syncing it. Repos can override these defaults in `devenv.nix`.
+  `deptry`, `pytest` and `import-linter`. In a uv project, the repo or template enables `languages.python.venv.enable`
+  to put the venv on `PATH`, and `languages.python.uv.enable` and `languages.python.uv.sync.enable` to install the
+  locked dependencies. Assay does not set these options. Initialize the project before enabling sync.
   - `deptry`: `assay-deptry`, deptry over the project with pytest's `conftest.py` files left out, since they import
     development dependencies (deptry leaves `tests/` out by itself), on top of the repo's own
     `[tool.deptry] extend_exclude`, which deptry's command line would otherwise replace.

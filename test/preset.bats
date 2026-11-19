@@ -276,6 +276,17 @@ bash_repo() {
 	holds .assay-preset.json '{"python": 3, "bash": 1}'
 }
 
+@test "Bash preset paths ending in brackets are literal filenames" {
+	bash_repo
+	bash_version_2
+	printf '%s\n' literal >"$assay_presets/bash/2/options [local]"
+	run --separate-stderr "$assay" preset bash
+	[ "$status" -eq 0 ]
+	[ -z "$stderr" ]
+	[[ $output == *'wrote options [local]'* ]]
+	holds 'options [local]' literal
+}
+
 @test "a file a later version adds is written when the repo lacks it, and merged from an empty base when it has one" {
 	bash_repo
 	"$assay" preset >/dev/null

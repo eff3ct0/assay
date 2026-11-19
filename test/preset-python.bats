@@ -110,6 +110,42 @@ dev_group() { awk '/^dev = \[$/ { on = 1; next } on && /^\]$/ { on = 0 } on' pyp
 	[ ! -s "$UV_STUB_CALLS" ]
 }
 
+@test "first adoption refuses a marker-only requirement before writing files or running uv" {
+	python_repo
+	cat >>pyproject.toml <<'EOF'
+[dependency-groups]
+dev = ["pytest; python_version < '3.10'"]
+EOF
+	cp pyproject.toml "$T/before"
+	run --separate-stderr "$assay" preset python
+	[ "$status" -eq 2 ]
+	[[ $stderr == *pytest*'unconditional'* ]]
+	cmp "$T/before" pyproject.toml
+	[ ! -e .assay-preset.json ] && [ ! -e ruff.toml ] && [ ! -s "$UV_STUB_CALLS" ]
+}
+
+@test "upgrades intersect a direct constraint and preserve extras, but leave marker variants for manual resolution" {
+	python_repo
+	"$assay" preset >/dev/null
+	uv add --dev 'coverage[toml]<9'
+	python_version_2 pytest 'coverage>=7' hypothesis deptry
+	: >"$UV_STUB_CALLS"
+	run --separate-stderr "$assay" preset python
+	[ "$status" -eq 0 ]
+	holds "$UV_STUB_CALLS" 'add --dev coverage[toml]<9,>=7'
+	grep -Fq '"coverage[toml]<9,>=7"' pyproject.toml
+	printf '{"python":1}\n' >.assay-preset.json
+	sed -i '/^dev = \[$/a\    "coverage; sys_platform == '\''win32'\''",' pyproject.toml
+	cp pyproject.toml "$T/before"
+	: >"$UV_STUB_CALLS"
+	run --separate-stderr "$assay" preset python
+	[ "$status" -eq 2 ]
+	[[ $stderr == *coverage*'resolve'* ]]
+	cmp "$T/before" pyproject.toml
+	[ ! -s "$UV_STUB_CALLS" ]
+	holds .assay-preset.json '{"python":1}'
+}
+
 @test "a later version upgrades a dependency whose spec changed, adds a new one and removes a dropped one" {
 	python_repo
 	"$assay" preset >/dev/null
@@ -256,7 +292,7 @@ dev_group() { awk '/^dev = \[$/ { on = 1; next } on && /^\]$/ { on = 0 } on' pyp
 	run --separate-stderr env UV_STUB_FAIL=1 "$assay" preset
 	[ "$status" -eq 2 ]
 	[ "${stderr_lines[0]}" = "error: No solution found when resolving dependencies" ]
-	[ "${stderr_lines[1]}" = "assay: uv add --dev pytest coverage hypothesis deptry failed (exit 1)" ]
+	[ "${stderr_lines[1]}" = "assay: uv add --dev pytest coverage hypothesis deptry failed (exit 1): check the dependency constraints in pyproject.toml and retry assay preset" ]
 	[ -z "$output" ]
 	[ ! -e ruff.toml ] && [ ! -e .assay-preset.json ]
 }

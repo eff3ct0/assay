@@ -1320,33 +1320,33 @@ builtin_preset() {
 }
 
 # preset_reads <language> <file>: sets reads to where the tool of a preset file reads its configuration, in the
-# tool's order, the preset's file among them. Each is a file of the preset file's format (shellcheck reads shellcheckrc
-# where a directory has no .shellcheckrc; ruff reads .ruff.toml before ruff.toml), or a section of a file of another
-# format, written "<file> [<section>]": a TOML table, or the INI sections whose names start with a prefix
-# ("setup.cfg [coverage:*]"). The first one the repo has is the tool's: the preset writes no file of its own beside
-# it, which would silently replace it. A file is merged into and shown as the preset's own would be; a section can
-# take neither, so the preset's file, or its change between two versions, is shown for a person to fold in by hand.
+# tool's order, and section_reads to explicit (file, section) pairs checked after the alternate files.
 reads=()
+section_reads=()
 preset_reads() {
+	section_reads=()
 	case $1/$2 in
 	bash/.shellcheckrc) reads=(.shellcheckrc shellcheckrc) ;;
-	python/ruff.toml) reads=(.ruff.toml ruff.toml "pyproject.toml [tool.ruff]") ;;
-	python/pyrightconfig.json) reads=(pyrightconfig.json "pyproject.toml [tool.pyright]") ;;
+	python/ruff.toml)
+		reads=(.ruff.toml ruff.toml)
+		section_reads=(pyproject.toml tool.ruff)
+		;;
+	python/pyrightconfig.json)
+		reads=(pyrightconfig.json)
+		section_reads=(pyproject.toml tool.pyright)
+		;;
 	# coverage.py reads the first of these that configures it.
 	python/.coveragerc)
-		reads=(.coveragerc "setup.cfg [coverage:*]" "tox.ini [coverage:*]" "pyproject.toml [tool.coverage]")
+		reads=(.coveragerc)
+		section_reads=(setup.cfg 'coverage:*' tox.ini 'coverage:*' pyproject.toml tool.coverage)
 		;;
 	*) reads=("$2") ;;
 	esac
 }
 
-# is_section <entry>: an entry of preset_reads is a section of a file, not a file.
-is_section() { [[ $1 == *" ["*"]" ]]; }
-
-# has_section <entry>: the repo has the section an entry of preset_reads names.
+# has_section <file> <section>: the repo has a TOML table or a family of INI sections.
 has_section() {
-	local file=${1%% \[*} section=${1#* \[} json found
-	section=${section%]}
+	local file=$1 section=$2 json found
 	[ -f "$file" ] || return 1
 	if [[ $section == *:\* ]]; then
 		grep -q "^[[:space:]]*\[${section%\*}" -- "$file"
@@ -1406,7 +1406,7 @@ preset_diff() {
 # version is recorded whatever the outcome, so that a conflict once resolved, or a kept file once extended, is not
 # merged again.
 apply_preset() {
-	local lang=$1 from to f target entry theirs base merged files diff rc todo changed=0
+	local lang=$1 from to f target entry i kept_section theirs base merged files diff rc todo changed=0
 	preset_span "$lang"
 	from=$span_from to=$span_to
 	tmp_file files
@@ -1417,19 +1417,24 @@ apply_preset() {
 	while IFS= read -r -d '' f; do
 		theirs=$presets/$lang/$to/$f
 		target=$f
+		kept_section=
 		preset_reads "$lang" "$f"
 		for entry in "${reads[@]}"; do
-			if is_section "$entry"; then
-				if has_section "$entry"; then
-					target=$entry
-					break
-				fi
-			elif ! absent "$entry"; then
+			if ! absent "$entry"; then
 				target=$entry
 				break
 			fi
 		done
-		if is_section "$target"; then
+		if absent "$target"; then
+			for ((i = 0; i < ${#section_reads[@]}; i += 2)); do
+				if has_section "${section_reads[i]}" "${section_reads[i + 1]}"; then
+					kept_section="${section_reads[i]} [${section_reads[i + 1]}]"
+					break
+				fi
+			done
+		fi
+		if [ -n "$kept_section" ]; then
+			target=$kept_section
 			if [ "$from" = "$to" ]; then continue; fi
 			: >"$base"
 			if [ -n "$from" ] && [ -f "$presets/$lang/$from/$f" ]; then
@@ -1589,22 +1594,55 @@ read_dependencies() {
 	done <"$file" >"$3"
 }
 
-# project_dependencies <out>: the normalized names of the project's development dependencies, one per line, where its
-# package manager adds them: for uv, pyproject.toml's [dependency-groups] dev and [tool.uv] dev-dependencies.
+# project_dependencies <out>: rows of origin, normalized name and original requirement, tab-separated.
 project_dependencies() {
-	local json spec specs
+	local json origin spec specs
 	tmp_file specs
 	case $manager in
 	uv)
 		toml_json json "$manifest"
-		jq -r '[(."dependency-groups"?.dev? // []), (.tool?.uv?."dev-dependencies"? // [])] | flatten | .[] | strings' \
+		jq -r '
+			def requirements($groups; $name; $origin; $seen):
+				if $seen | index($name) then error("cyclic dependency groups")
+				else ($groups[$name] // [])[] |
+					if type == "string" then [$origin, .]
+					elif has("include-group") then
+						requirements($groups; ."include-group"; "included"; $seen + [$name])
+					else empty end
+				end;
+			(requirements(."dependency-groups" // {}; "dev"; "direct"; []),
+			 ((.tool?.uv?."dev-dependencies"? // [])[] | ["legacy", .]))
+			| if .[1] | test("[\r\n]") then error("multiline requirement") else join("\t") end' \
 			<<<"$json" >"$specs" || die "cannot read the development dependencies in $manifest"
 		;;
 	esac
-	while IFS= read -r spec; do
+	while IFS=$'\t' read -r origin spec; do
 		spec=${spec#"${spec%%[![:space:]]*}"}
-		if dependency_name "$spec"; then echo "$dep_name"; fi
+		if dependency_name "$spec"; then printf '%s\t%s\t%s\n' "$origin" "$dep_name" "$spec"; fi
 	done <"$specs" >"$1"
+}
+
+# intersect_uv_requirement <existing> <preset>: keep the existing extras and intersect simple PEP 508 version
+# clauses. uv resolves the combined requirement; markers, URLs and changes to preset extras need manual resolution.
+intersect_uv_requirement() {
+	local current=$1 required=$2 extras old new
+	local head='^([a-zA-Z0-9][a-zA-Z0-9._-]*)(\[[a-zA-Z0-9._, -]+\])?(.*)$'
+	local clause='(===|~=|==|!=|<=|>=|<|>)[[:blank:]]*[a-zA-Z0-9.!+*_-]+'
+	local versions="^[[:blank:]]*($clause([[:blank:]]*,[[:blank:]]*$clause)*)?[[:blank:]]*$"
+	[[ $current =~ $head ]] || return 1
+	extras=${BASH_REMATCH[2]} old=${BASH_REMATCH[3]}
+	[[ $required =~ $head && -z ${BASH_REMATCH[2]} ]] || return 1
+	new=${BASH_REMATCH[3]}
+	[[ $old =~ $versions && $new =~ $versions ]] || return 1
+	old=${old//[[:blank:]]/} new=${new//[[:blank:]]/}
+	dependency_name "$required" || return 1
+	combined=$dep_raw$extras$old
+	if [ -n "$new" ]; then combined+=${old:+,}$new; fi
+}
+
+dependency_conflict() {
+	die "cannot apply preset requirement '$1' over '$2' in $manifest: $3;" \
+		"resolve the dev dependency in $manifest and retry assay preset"
 }
 
 # What plan_dependencies found to do for each language: the specs to add (one per line), the names to remove, and the
@@ -1617,8 +1655,8 @@ declare -A plan_add=() plan_remove=() plan_lines=()
 # recorded version is removed, when the project has it. One that only a check needs is added while that check is on,
 # and never removed. Dies when the package manager or its manifest is missing, and something is to change.
 plan_dependencies() {
-	local lang=$1 from to theirs base present name spec check
-	local -A have=() before=() declared=()
+	local lang=$1 from to theirs base present name spec check origin existing combined
+	local -A have=() before=() declared=() unconditional=() sources=() multiple=()
 	preset_manager "$lang"
 	[ -n "$manager" ] || return 0
 	preset_span "$lang"
@@ -1633,7 +1671,11 @@ plan_dependencies() {
 	[ -f "$manifest" ] || die "$lang's preset adds development dependencies to $manifest, which the repo" \
 		"does not have: create the project first ($manager_init)"
 	project_dependencies "$present"
-	while IFS= read -r name; do have[$name]=1; done <"$present"
+	while IFS=$'\t' read -r origin name existing; do
+		if [ -n "${have[$name]+set}" ]; then multiple[$name]=1; fi
+		have[$name]=$existing sources[$name]=$origin
+		if [[ $existing != *';'* ]]; then unconditional[$name]=1; fi
+	done <"$present"
 	while IFS=$'\t' read -r name spec check; do before[$name]=$spec; done <"$base"
 	while IFS=$'\t' read -r name spec check; do
 		declared[$name]=1
@@ -1641,9 +1683,21 @@ plan_dependencies() {
 		if [ -z "${have[$name]:-}" ]; then
 			plan_add[$lang]+=$spec$'\n'
 			plan_lines[$lang]+="added dependency $spec"$'\n'
-		elif [ -n "${before[$name]+set}" ] && [ "${before[$name]}" != "$spec" ]; then
-			plan_add[$lang]+=$spec$'\n'
-			plan_lines[$lang]+="upgraded dependency $spec"$'\n'
+		elif [ -z "${unconditional[$name]:-}" ]; then
+			dependency_conflict "$spec" "${have[$name]}" "the check needs an unconditional dependency"
+		elif { [ -n "${before[$name]+set}" ] && [ "${before[$name]}" != "$spec" ]; } ||
+			{ [ -z "$from" ] && { dependency_name "$spec" && [ "$dep_raw" != "$spec" ]; }; }; then
+			existing=${have[$name]}
+			case $manager in
+			uv)
+				if [ "${sources[$name]}" != direct ] || [ -n "${multiple[$name]:-}" ] ||
+					! intersect_uv_requirement "$existing" "$spec"; then
+					dependency_conflict "$spec" "$existing" "cannot safely combine the existing requirements"
+				fi
+				;;
+			esac
+			plan_add[$lang]+=$combined$'\n'
+			plan_lines[$lang]+="upgraded dependency $combined"$'\n'
 		fi
 	done <"$theirs"
 	while IFS=$'\t' read -r name spec check; do
@@ -1690,6 +1744,9 @@ run_manager() {
 	PATH=$caller_path "${argv[@]}" </dev/null >"$log" 2>&1 || rc=$?
 	[ "$rc" -eq 0 ] && return 0
 	cat -- "$log" >&2
+	if [ "$manager" = uv ] && [ "$what" = add ]; then
+		die "${argv[*]} failed (exit $rc): check the dependency constraints in $manifest and retry assay preset"
+	fi
 	die "${argv[*]} failed (exit $rc)"
 }
 

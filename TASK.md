@@ -4,6 +4,25 @@ Removed once the last critic passes.
 
 ## The request, verbatim
 
+```text
+Retoma Assay #7 en tu worktree, sin abrir PR ni mergear. Informe completo y reproducciones del primer crítico: /tmp/tmp.8GBMlaVWra/review.md. Veredicto recibido literalmente:
+Crítico independiente assay #7, f0155c4: NO integrar. Done: falla; Resume: pasa; Verbatim: falla (TASK.md conserva el encargo anterior, no el actual); Differential: falla. Con uv real, la primera aplicación puede registrar v1 sin pytest y la actualización pierde un límite <9 del usuario. La biblioteca recién creada falla en Vulture; la cobertura vacía produce XML inválido si la ruta contiene &. El preset Bash también confunde un nombre literal con una sección. TLA pasó 6/6 en ambas revisiones; cinco checks Python pasaron sin red. Informe y pruebas: /tmp/tmp.8GBMlaVWra/review.md
+
+Fix findings with focused regressions before the single final recheck:
+- Preserve user dependency constraints, extras and markers on upgrade. Keep compatible constraints where you can prove the combination is valid; otherwise refuse with an actionable conflict, preserving the user's manifest entry. On first apply, a marker that makes a required dev dependency unavailable must not allow a successful apply that records v1. Cover real uv and compatibility of the existing generic preset seams. Do not alter the agreed filenames beyond what is needed to distinguish explicit section metadata from literal preset paths such as `options [local]`; prove Bash keeps its base behavior.
+- Ensure the empty Cobertura document works in ordinary valid paths including an ampersand. Prove it through the relevant check; use only synthetic advisory records if testing comparison.
+- Respect the template boundary for uv, sync and venv; no automatic defaults affecting all Python consumers and no edits to nixos-config for this issue. Set the template-owned options explicitly in the synthetic test fixture, not in consumers by default.
+- Keep Vulture's exact command and normal confidence. Do not silently change the acceptance criterion, edit generated application sources in the preset, special-case hello, or call the amended fixture a fresh uv library. Keep this one discrepancy open for an explicit scope decision: stock uv init --lib contains the unused hello; recommendation is to keep Vulture strict and require a minimal test for the scaffold before calling devenv test green. Still fix the other findings, and report the unmodified and tested scaffold results separately.
+- Bring TASK.md up to date: include the current request verbatim first, retain relevant historical notes and the correction verbatim, and use generic prose outside quotations. Do not remove it until the last critic passes.
+
+Run the targeted regressions, the shared differential fixtures and the complete project checks on the correction as applicable; commit and push in the existing branch, give t32 exact before/after SHAs and the evidence. Keep TLA and --list behavior unchanged. No other repos, no agents of your own.
+
+Petición original literal:
+vale pues necesito que sigas continuando con eso, abriendo agentes de opencode con el modelo de openai que consideres para cada tarea, pero que te centres unicamente en assay y en nixos-config
+```
+
+The initial issue handoff, verbatim:
+
 > https://github.com/eff3ct0/assay/issues/7
 >
 > Toma tú cada decisión con tu recomendación, sin esperarme. Sigue ~/git/AGENTS.md: worktree de grove en una rama
@@ -45,8 +64,7 @@ Issue #7 is the specification; it links eff3ct0/nixos-config#58, #50, #52, #54 a
   yq-go reads pyproject.toml (`-p toml`), inline tables in arrays included.
 - devenv (modules at cachix/devenv 8efcb88): with `languages.python.uv.sync.enable` and no `pyproject.toml`, the task
   `devenv:python:uv` fails and `devenv:enterShell` is skipped ("dependency failed"); the command still runs (exit 0).
-  The venv is on the PATH only with `languages.python.venv.enable`. Both go to p3rkins (the python template lives in
-  nixos-config).
+  The venv is on the PATH only with `languages.python.venv.enable`. The template owns these switches.
 
 ## Decisions
 
@@ -75,9 +93,9 @@ Issue #7 is the specification; it links eff3ct0/nixos-config#58, #50, #52, #54 a
   pyproject.toml, `[coverage:*]` in setup.cfg or tox.ini: the preset writes no file of its own, shows the preset's
   file (or its change between versions) and exits 1. `.ruff.toml` is ruff's other file of the same format.
 
-- vulture at its default confidence, as the issue gives the command: `uv init --lib`'s placeholder `hello()` fails it
-  until a test uses it, so the acceptance's "devenv test passes" holds once that test exists (test/devenv/python.bats
-  shows both). Open for p3rkins: `--min-confidence` would keep only what ruff already finds.
+- Vulture at its default confidence rejects the stock `uv init --lib` scaffold because `hello()` is unused. A separate
+  tested scaffold passes `devenv test`. This does not satisfy the issue's unmodified-scaffold criterion; keep it open
+  for a scope decision. Recommendation: keep the command and require a minimal test for the scaffold.
 - deptry colours its output even into a file: `assay-deptry` passes `--no-ansi`.
 - Hypothesis writes `.hypothesis/constants/` whatever the profile; the `ci` profile keeps no `.hypothesis/examples`.
 - The devenv fixtures commit with `--no-verify` (commit_all): the consumer's pre-commit hook runs the fast checks, and a
@@ -85,12 +103,11 @@ Issue #7 is the specification; it links eff3ct0/nixos-config#58, #50, #52, #54 a
 
 ## Remaining steps
 
-The code review against `cdd2d67` is applied. Vulture retains default confidence: the generated public `hello()`
-is unused until the project adds a test, and the fixture proves both the failure and the pass. Assay now defaults
-the venv on with Python; real devenv sees the root manifest and turns uv and sync on once it exists. Validate the
-template's own switches separately (outside this issue). Advisory change tests use synthetic records; the Python
-fixture runs a clean scan with the real scanner.
+After the first independent review, Assay leaves uv, sync and venv setup to the project or template. Section metadata
+is structural, not inferred from filenames. Empty coverage has no source paths. For Python dev requirements, Assay
+passes compatible direct version intersections to uv without losing existing extras; ambiguous requirements are left
+for manual resolution, and a required marker-only dependency blocks adoption before writing the record.
 
-Rerun `nix flake check` and `nix develop -c bats test/devenv` on the final tree. The orchestrator owns the independent
-critic and any PR; report the pushed branch to `t32` and stop. The merged base includes PR #27: its TLA check and
-`--list` markers are retained. Remove this file only after the last critic passes.
+Run the shared differential fixtures, the focused regressions, `nix flake check` and `devenv test`. The orchestrator
+owns the single independent recheck and any PR; report the pushed branch to `t32` and stop. The base includes PR #27:
+its TLA check and `--list` markers are retained. Remove this file only after the last critic passes.

@@ -8,9 +8,12 @@ source "${BATS_TEST_DIRNAME:?}/helpers.bash"
 # coverage of new code and fixed seed. Advisory comparisons use synthetic lockfiles in test/osv-scanner.bats.
 # The consumers import assay with the languages' checks alone, except where `devenv test` runs them all.
 
-# python_devenv [extra configuration]: assay defaults the venv and enables uv sync once the manifest exists.
+# python_devenv [extra configuration]: the explicit Python template options, after uv init.
 python_devenv() {
-	devenv_nix "{ languages.python.enable = true; ${1:-} }"
+	devenv_nix "{
+  languages.python = { enable = true; venv.enable = true; uv.enable = true; uv.sync.enable = true; };
+  ${1:-}
+}"
 }
 
 # check_fails <check> <text>: `assay check <check>` fails, and its output holds the text.
@@ -34,10 +37,10 @@ check_passes() {
 python_project() {
 	consumer "${1:-$ASSAY_LANGUAGES}"
 	# Bootstrap with uv from the flake shell, before a Python project exists.
-	python_devenv
 	printf '%s\n' .venv/ __pycache__/ .pytest_cache/ .ruff_cache/ .hypothesis/ >>.gitignore
-	devenv shell -- uv init --quiet --lib --name demo --no-pin-python .
+	uv init --quiet --lib --name demo --no-pin-python .
 	[ -f pyproject.toml ]
+	python_devenv
 	# Entering the shell now syncs the project before running the preset.
 	run --separate-stderr devenv shell -- bash -ec 'test -f uv.lock; assay preset python'
 	echo "$output"
@@ -72,7 +75,7 @@ hello_test() {
 
 @test "Python: --list shows four fast checks, import-linter off and three full; without pyproject.toml all are skipped" {
 	consumer "$ASSAY_LANGUAGES"
-	python_devenv 'enterShell = "touch entered";'
+	devenv_nix '{ languages.python.enable = true; enterShell = "touch entered"; }'
 	run --separate-stderr devenv shell -- assay check --list
 	echo "$output"
 	[ "$status" -eq 0 ]
@@ -89,11 +92,14 @@ hello_test() {
 	[ "${lines[-1]%% in *}" = "7 checks passed (7 skipped)" ]
 }
 
-@test "Python: assay preset takes the preset after uv init --lib, and devenv test passes with a test for hello" {
+@test "Python: the stock uv library fails unchanged Vulture at its normal confidence" {
+	python_project
+	check_fails vulture "src/demo/__init__.py:1: unused function 'hello' (60% confidence)"
+}
+
+@test "Python: the scaffold with a minimal test passes devenv test" {
 	python_project "$ASSAY"
 	shape
-	# uv's own placeholder, a public function nothing uses, is dead code to vulture until a test uses it.
-	check_fails vulture "src/demo/__init__.py:1: unused function 'hello' (60% confidence)"
 	hello_test
 	# The pre-commit hook runs the fast checks, the built-in ones included.
 	git add -A
@@ -106,6 +112,53 @@ hello_test() {
 	logs=$(git rev-parse --absolute-git-dir)/assay
 	for n in deptry osv-scanner pyright pytest ruff-check ruff-format vulture preset findings; do [ -f "$logs/$n.log" ]; done
 	[ ! -e "$logs/import-linter.log" ]
+}
+
+@test "Python: real uv keeps compatible constraints and extras, and failed resolution keeps the manifest" {
+	python_project
+	devenv shell -- uv add --dev 'coverage[toml]<9'
+	local presets=$T/presets
+	cp -r "$ASSAY/preset" "$presets"
+	cp -r "$presets/python/1" "$presets/python/2"
+	sed 's/^coverage$/coverage>=7/' "$presets/python/1.dependencies" >"$presets/python/2.dependencies"
+	run --separate-stderr devenv shell -- env assay_presets="$presets" "$ASSAY/assay.sh" preset python
+	echo "$output$stderr"
+	[ "$status" -eq 0 ]
+	devenv shell -- python -c '
+import tomllib
+with open("pyproject.toml", "rb") as f:
+    dev = tomllib.load(f)["dependency-groups"]["dev"]
+requirement, = (r for r in dev if r.startswith("coverage"))
+assert requirement.startswith("coverage[toml]"), requirement
+assert set(requirement.removeprefix("coverage[toml]").split(",")) == {"<9", ">=7"}, requirement
+'
+	holds .assay-preset.json '{' '  "python": 2' '}'
+	cp pyproject.toml "$T/before.toml"
+	cp uv.lock "$T/before.lock"
+	cp -r "$presets/python/2" "$presets/python/3"
+	sed 's/^coverage>=7$/coverage>=9/' "$presets/python/2.dependencies" >"$presets/python/3.dependencies"
+	run --separate-stderr devenv shell -- env assay_presets="$presets" "$ASSAY/assay.sh" preset python
+	echo "$output$stderr"
+	[ "$status" -eq 2 ]
+	[[ $stderr == *'check the dependency constraints in pyproject.toml'* ]]
+	cmp "$T/before.toml" pyproject.toml
+	cmp "$T/before.lock" uv.lock
+	holds .assay-preset.json '{' '  "python": 2' '}'
+}
+
+@test "Python: real uv excludes a marker-only pytest and assay does not record adoption" {
+	consumer "$ASSAY_LANGUAGES"
+	uv init --quiet --lib --name demo --no-pin-python .
+	python_devenv
+	devenv shell -- uv add --dev --no-sync "pytest; python_version < '3.10'"
+	devenv shell -- python -c 'import importlib.util; assert importlib.util.find_spec("pytest") is None'
+	cp pyproject.toml "$T/before.toml"
+	run --separate-stderr devenv shell -- assay preset python
+	echo "$output$stderr"
+	[ "$status" -eq 2 ]
+	[[ $stderr == *pytest*'unconditional'* ]]
+	cmp "$T/before.toml" pyproject.toml
+	[ ! -e .assay-preset.json ] && [ ! -e ruff.toml ]
 }
 
 @test "Python: ruff, ruff format, vulture, deptry and pyright fail on their defects and pass on the fix" {

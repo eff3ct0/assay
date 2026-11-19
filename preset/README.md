@@ -51,7 +51,8 @@ tool's defaults.
 3. The fixtures of `test/devenv/defaults.bats` and `test/devenv/python.bats` are built from the pinned version by
    `assay preset`, so assay's own tests prove what repos receive; adjust them with the change.
 4. A dependency the new version drops is removed from the projects that have it; one whose spec it changes is
-   upgraded.
+   upgraded. For uv, direct version clauses are intersected and the project's extras kept. Where the change cannot
+   safely update the existing requirement (such as marker variants), resolve it in `pyproject.toml` and rerun.
 5. Repos take it with `assay preset`, which the weekly update runs. Until then, `assay check`'s header lists the
    language as behind; a version behind fails nothing.
 
