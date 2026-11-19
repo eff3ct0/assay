@@ -461,9 +461,12 @@ in
     assay.checks = lib.mapAttrs (_: lib.mapAttrs (_: mkDefault)) defaultChecks;
     assay.findings.rules = lib.mapAttrs (_: enable: { enable = mkDefault enable; }) ruleDefaults;
 
-    # The CLI, the tools of assay's default checks, and diff-cover when an enabled check declares coverage.
+    # The CLI, the snapshot tools, the default checks' tools, and diff-cover when a check declares coverage.
     packages = [
       assay
+      (pkgs.callPackage ../nix/jscpd { })
+      pkgs.scc
+      pkgs.xmlstarlet
     ]
     ++ defaultTools
     ++ lib.optional (lib.any (c: c.enable && c.coverage != null) (

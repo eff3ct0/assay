@@ -172,3 +172,44 @@ bash_fixture() {
 	[ "$status" -eq 0 ]
 	[ "${lines[1]}" = "  loosening: new code needs 50% coverage, not assay's 80%: legacy scripts" ]
 }
+
+# Run inside the real fixture's devenv, without Git metadata from either the fixture or its parent.
+measure_archive() {
+	local snapshot=$1
+	mkdir "$snapshot"
+	git archive HEAD | tar -x -C "$snapshot"
+	run --separate-stderr bash -c 'cd "$1" && devenv shell -- assay measure' fixture "$snapshot"
+	echo "$output"
+	echo "$stderr" >&2
+	[ "$status" -eq 0 ]
+	[ ! -e "$snapshot/.git" ]
+	jsonschema -i /dev/stdin "$BATS_TEST_DIRNAME/../../schema/measure.json" <<<"$output"
+}
+
+@test "measure: archived Nix fixture runs in its devenv and validates against the shipped schema" {
+	consumer
+	shape
+	devenv_nix '{ languages.nix.enable = true; }'
+	nix_fixture
+	git add -A
+	git commit --quiet -m nix
+	measure_archive "$T/nix-snapshot"
+	jq -es 'length == 1 and (.[0] | .failed == [] and .coverage == {} and .lint == [] and .smells == []
+		and .duplication != null and any(.loc[]; .language == "Nix" and .lines > 0))' <<<"$output"
+}
+
+@test "measure: archived bash fixture reports real Cobertura, but null after bats fails" {
+	consumer
+	shape
+	devenv_nix '{ languages.shell.enable = true; }'
+	bash_fixture
+	measure_archive "$T/bash-snapshot"
+	jq -es 'length == 1 and (.[0] | .failed == [] and .coverage.bats == {covered: 1, total: 2}
+		and .lint == [] and .smells == [] and .duplication.total > 0
+		and any(.loc[]; .language == "Shell" and .lines > 0))' <<<"$output"
+	sed -i 's/hello you/wrong answer/' test/greet.bats
+	git add -A
+	git commit --quiet -m failing
+	measure_archive "$T/failing-snapshot"
+	jq -e '.failed == ["bats"] and .coverage == {bats: null}' <<<"$output"
+}

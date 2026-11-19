@@ -259,6 +259,9 @@ let
     "packages has the CLI, the default checks' tools and diff-cover" =
       names plain == [
         "assay"
+        "jscpd"
+        "scc"
+        "xmlstarlet"
         "hello"
         "diff-cover"
       ];
@@ -347,6 +350,9 @@ let
     "the built-in checks' tools join every repo's devenv, beside the CLI" =
       map lib.getName builtinPlain.packages == [
         "assay"
+        "jscpd"
+        "scc"
+        "xmlstarlet"
         "actionlint"
         "ast-grep"
         "qlty"

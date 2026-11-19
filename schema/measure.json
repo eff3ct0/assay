@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "assay measure v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "seconds", "failed", "coverage", "lint", "smells", "duplication", "loc"],
+  "properties": {
+    "version": { "const": 1 },
+    "seconds": { "type": "number", "minimum": 0, "description": "Elapsed seconds for the check run, excluding the analyzer probes." },
+    "failed": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/checkName" }
+    },
+    "coverage": {
+      "type": "object",
+      "description": "One entry per eligible check that declares a report, keyed by check name. Null means skipped, failed, or no readable report.",
+      "propertyNames": { "$ref": "#/$defs/checkName" },
+      "additionalProperties": {
+        "type": ["object", "null"],
+        "additionalProperties": false,
+        "required": ["covered", "total"],
+        "properties": {
+          "covered": { "$ref": "#/$defs/count" },
+          "total": { "$ref": "#/$defs/count" }
+        }
+      }
+    },
+    "lint": {
+      "type": ["array", "null"],
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["tool", "rule", "level", "count"],
+        "properties": {
+          "tool": { "$ref": "#/$defs/text" },
+          "rule": { "$ref": "#/$defs/text" },
+          "level": { "$ref": "#/$defs/text" },
+          "count": { "$ref": "#/$defs/count" }
+        }
+      }
+    },
+    "smells": {
+      "type": ["array", "null"],
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "count"],
+        "properties": {
+          "kind": { "$ref": "#/$defs/text" },
+          "count": { "$ref": "#/$defs/count" }
+        }
+      }
+    },
+    "duplication": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["duplicated", "total"],
+      "properties": {
+        "duplicated": { "$ref": "#/$defs/count" },
+        "total": { "$ref": "#/$defs/count" }
+      }
+    },
+    "loc": {
+      "type": ["array", "null"],
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["language", "lines"],
+        "properties": {
+          "language": { "$ref": "#/$defs/text" },
+          "lines": { "$ref": "#/$defs/count" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "checkName": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+    "text": { "type": "string", "minLength": 1 },
+    "count": { "type": "integer", "minimum": 0 }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "name": "assay-jscpd",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "jscpd": "4.0.8"
+  }
+}
