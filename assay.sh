@@ -55,8 +55,7 @@ Exit codes: 0 every selected check passed, 1 at least one failed, 2 assay could 
 assay preset exits 1 on a conflict or on a kept file that differs from the preset;
 assay builtin exits 127 when the tool its check runs is missing, and assay rule new 1 when a rule of
 that name already exists; assay findings and measure exit 0 whenever they ran, regardless of findings or
-failing checks. assay
-guard exits 0 with its answer on stdout, and 1 on its own error, which lets the call through; assay
+failing checks. assay guard exits 0 with its answer on stdout, and 1 on its own error, which lets the call through; assay
 git-hook exits 1 when a rule is violated or cannot be evaluated.
 EOF
 }
@@ -90,6 +89,8 @@ usage_error() {
 # Temporary files and directories, removed on exit.
 tmp_paths=()
 snapshot_gitfile=
+snapshot_qlty_files=()
+snapshot_qlty_dirs=()
 # tmp_file <var> [-d] [<template>]: a new temporary file (or directory, with -d), removed on exit, its path in <var>.
 tmp_file() {
 	local -n tmp_var=$1
@@ -100,7 +101,9 @@ tmp_file() {
 # shellcheck disable=SC2329 # invoked by the EXIT trap
 on_exit() {
 	local rc=$?
-	if [ -n "$snapshot_gitfile" ]; then rm -f -- "$snapshot_gitfile"; fi
+	if [ ${#snapshot_qlty_files[@]} -gt 0 ]; then rm -f -- "${snapshot_qlty_files[@]}" || true; fi
+	if [ ${#snapshot_qlty_dirs[@]} -gt 0 ]; then rmdir -- "${snapshot_qlty_dirs[@]}" 2>/dev/null || true; fi
+	if [ -n "$snapshot_gitfile" ]; then rm -f -- "$snapshot_gitfile" || true; fi
 	if [ ${#tmp_paths[@]} -gt 0 ]; then rm -rf -- "${tmp_paths[@]}"; fi
 	if [ -z "$exiting" ] && [ "$rc" -ne 0 ]; then
 		echo "assay: ${die_prefix}unexpected failure (exit $rc)" >&2
@@ -2519,7 +2522,11 @@ snapshot_git() {
 	gitdir=$dir/git
 	mkdir -p "$gitdir/info"
 	printf '%s\n' /.devenv/ /.devenv.flake.nix /.pre-commit-config.yaml /.qlty/ >"$gitdir/info/exclude"
-	git -c core.autocrlf=false add -A || die "cannot index the snapshot"
+	# An archive can contain committed files that now match a .gitignore pattern. Keep them, but not
+	# the shell's generated files. Do not run global clean filters when constructing the index.
+	GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -c core.autocrlf=false add -f -- . \
+		':(exclude,top).devenv' ':(exclude,top).direnv' ':(exclude,top).devenv.flake.nix' \
+		':(exclude,top).pre-commit-config.yaml' || die "cannot index the snapshot"
 }
 
 snapshot_checks() {
@@ -2532,7 +2539,8 @@ snapshot_checks() {
 		case $n in
 		commit-trailers | findings | suppressions | mutation | diff-cover | advisory | advisories | \
 			*-advisory | *-advisories | osv-scanner | osv-scanner-*)
-			continue ;;
+			continue
+			;;
 		esac
 		report=
 		if [ -n "${c_coverage[$n]}" ]; then
@@ -2561,13 +2569,9 @@ snapshot_checks() {
 snapshot_coverage() {
 	local report=$1 counts covered total
 	if [ -f "$report" ]; then
-		case $(head -c 1 -- "$report") in
-		'<')
-			# Cobertura's root attributes count distinct covered and coverable lines.
-			counts=$(xmlstarlet sel -T -t -v /coverage/@lines-covered -o ' ' -v /coverage/@lines-valid \
-				"$report" 2>/dev/null) || counts=
-			;;
-		*)
+		# Cobertura's root attributes count distinct covered and coverable lines.
+		if ! counts=$(xmlstarlet sel -T -t -v /coverage/@lines-covered -o ' ' -v /coverage/@lines-valid \
+			"$report" 2>/dev/null); then
 			# LCOV summaries are per source record. Some producers omit them; DA records still carry the counts.
 			counts=$(awk -F '[:,]' '
 				{ sub(/\r$/, "") }
@@ -2581,8 +2585,7 @@ snapshot_coverage() {
 				}
 				END { if (bad || open || !records) exit 1; printf "%.0f %.0f\n", covered, total }
 			' "$report") || counts=
-			;;
-		esac
+		fi
 		read -r covered total <<<"$counts"
 		if [[ $covered =~ ^[0-9]+$ && $total =~ ^[0-9]+$ ]]; then
 			if jq -enc --arg c "$covered" --arg t "$total" '{covered: ($c|tonumber), total: ($t|tonumber)}
@@ -2641,6 +2644,25 @@ snapshot_loc() {
 			| map({language: .Name, lines: .Code}) | sort_by(.language)'
 }
 
+# On an archive, keep any pre-existing configuration intact and remove only assay's generated files.
+snapshot_prepare_qlty() {
+	if [ -L .qlty ] || [ -L .qlty/configs ] || [ -L .qlty/qlty.toml ] ||
+		[ -L .qlty/configs/radarlint.properties ]; then
+		printf 'assay: measure: cannot prepare qlty configuration through a symlink\n' >&2
+		return 1
+	fi
+	if [ -n "$snapshot_gitfile" ]; then
+		if [ -e .qlty/qlty.toml ] || [ -e .qlty/configs/radarlint.properties ]; then
+			printf 'assay: measure: the archive already contains qlty configuration; use assay.findings instead\n' >&2
+			return 1
+		fi
+		snapshot_qlty_files=("$root/.qlty/qlty.toml" "$root/.qlty/configs/radarlint.properties")
+		if [ ! -d .qlty/configs ]; then snapshot_qlty_dirs+=("$root/.qlty/configs"); fi
+		if [ ! -d .qlty ]; then snapshot_qlty_dirs+=("$root/.qlty"); fi
+	fi
+	(findings_prepare)
+}
+
 cmd_measure() {
 	[ $# -eq 0 ] || usage_error "measure takes no argument"
 	local dir report n qlty_ready=0 lint_ready=0 tool_missing='' radarlint_bin=''
@@ -2654,7 +2676,7 @@ cmd_measure() {
 	snapshot_metric "$dir/loc.json" 'lines of code' snapshot_loc
 	if command -v qlty >/dev/null; then
 		if findings_tools; then lint_ready=1; else printf 'assay: %s\n' "$tool_missing" >&2; fi
-		if (findings_prepare); then qlty_ready=1; fi
+		if snapshot_prepare_qlty; then qlty_ready=1; fi
 	fi
 	if [ "$qlty_ready" = 1 ]; then
 		snapshot_metric "$dir/smells.json" smells snapshot_qlty smells "$dir/sarif.json" \

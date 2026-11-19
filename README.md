@@ -88,6 +88,19 @@ declares `coverage`.
   is free.
 - Whole-tree coverage is a metric, never a check.
 
+## `assay measure`
+
+Run `devenv shell -- assay measure` from the repo root or a directory extracted with `git archive`. No base
+revision is needed. The command runs the enabled whole-tree checks, including slow checks, and emits one JSON
+document on stdout conforming to [`schema/measure.json`](schema/measure.json). Check failures appear in `failed`;
+they do not change the exit code. Unavailable metrics, including a failed test's coverage, are `null`. A measured
+zero remains zero. Exit `2` means the command could not run, for example in a repo that has not adopted assay.
+The command does not append to the hits log.
+
+Snapshot checks exclude `commit-trailers`, `findings`, `suppressions`, `mutation`, diff-cover and advisory checks.
+Name advisory checks `advisory`, `advisories`, `*-advisory`, `*-advisories`, or `osv-scanner` (optionally with a
+suffix such as `osv-scanner-python`), so that they are kept out of measurements.
+
 ## `assay check`
 
 ```

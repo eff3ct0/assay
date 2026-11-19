@@ -1,5 +1,5 @@
-bats_require_minimum_version 1.5.0
 # shellcheck disable=SC2016 # literal shell and jq in the fixtures
+bats_require_minimum_version 1.5.0
 # shellcheck source=test/helpers.bash
 source "${BATS_TEST_DIRNAME:?}/helpers.bash"
 
@@ -7,7 +7,8 @@ archive_fixture() {
 	git add -A
 	git commit --quiet --allow-empty -m snapshot
 	mkdir "$T/archive"
-	git archive HEAD | tar -x -C "$T/archive"
+	git archive -o "$T/archive.tar" HEAD
+	tar -xf "$T/archive.tar" -C "$T/archive"
 	cd "$T/archive" || return 1
 	[ ! -e .git ]
 }
@@ -118,6 +119,7 @@ EOF
 	printf '#!/bin/sh\necho not-json\n' >"$DEVENV_STUB_PROFILE/scc"
 	run --separate-stderr "$assay" measure
 	[ "$status" -eq 0 ]
+	[ ! -e .qlty/qlty.toml ]
 	jq -e '.lint == [] and .smells == [] and .loc == null and .duplication == null' <<<"$output"
 }
 

@@ -177,7 +177,8 @@ bash_fixture() {
 measure_archive() {
 	local snapshot=$1
 	mkdir "$snapshot"
-	git archive HEAD | tar -x -C "$snapshot"
+	git archive -o "$snapshot.tar" HEAD
+	tar -xf "$snapshot.tar" -C "$snapshot"
 	run --separate-stderr bash -c 'cd "$1" && devenv shell -- assay measure' fixture "$snapshot"
 	echo "$output"
 	echo "$stderr" >&2
