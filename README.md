@@ -48,6 +48,15 @@ The module builds the CLI with the repo's own nixpkgs and puts it on the PATH, a
 over what is staged, and `devenv test` runs every pre-commit hook over all files, then every check. `devenv.lock` pins
 assay; `devenv update assay` moves it.
 
+### Python templates without a manifest
+
+A template that already sets `languages.python.uv.sync.enable = true` can also set
+`assay.python.uv.syncIfManifest = true`. On each run, devenv skips its `devenv:python:uv` task if
+`languages.python.directory` (the project root by default) has no `pyproject.toml`. Once the file exists, the
+normal task runs with the repo's sync settings and reports errors as usual. This uses the task's `status` option
+in devenv 2.4.0; it requires a devenv version that provides that task and option. The switch defaults to `false`
+and does not enable Python, uv, synchronization or a venv.
+
 ### `assay.checks.<name>`
 
 - `exec`: a shell command (bash) run from the repo root inside the devenv. A non-zero exit fails the check.
