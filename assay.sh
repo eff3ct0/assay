@@ -26,7 +26,7 @@ JSON
 usage_text() {
 	cat <<'EOF'
 usage: assay check [--fast] [--base <rev>] [<check>...]    run the repo's checks
-       assay check --list                                  list them, fast ones marked
+       assay check --list                                  list them, fast and off ones marked
        assay preset [<language>...]                        write the languages' presets into the repo, or merge
                                                            newer versions in
        assay builtin agents-md [<commit>]                  one of the built-in checks that are assay's own code
@@ -267,11 +267,15 @@ load_config() {
 	[ "$config_loaded" = 1 ] || die "invalid configuration $cfg: incomplete"
 }
 
+# Every check, in name order, the fast ones and the off ones marked: "<name>", "<name> (fast)", "<name> (off)" or
+# "<name> (fast, off)".
 list_checks() {
-	local n
+	local n marks
 	for n in "${names[@]}"; do
-		if [ "${c_enable[$n]}" != 1 ]; then continue; fi
-		if [ "${c_fast[$n]}" = 1 ]; then echo "$n (fast)"; else echo "$n"; fi
+		marks=
+		if [ "${c_fast[$n]}" = 1 ]; then marks=fast; fi
+		if [ "${c_enable[$n]}" != 1 ]; then marks+="${marks:+, }off"; fi
+		echo "$n${marks:+ ($marks)}"
 	done
 }
 

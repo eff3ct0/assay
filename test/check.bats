@@ -180,14 +180,15 @@ log: $gitdir/assay/test.log
 	[ "${lines[-1]##*; }" = "rerun: assay check --base 'HEAD~1' fails" ]
 }
 
-@test "--list prints the enabled checks in name order, fast ones marked, and exits 0" {
+@test "--list prints every check in name order, fast and off ones marked, and exits 0" {
 	check zeta true
 	check alpha true --fast
 	check off true --off
+	check quick true --fast --off
 	cd "$T"
 	run "$assay" check --list
 	[ "$status" -eq 0 ]
-	[ "$output" = "$(printf 'alpha (fast)\nzeta')" ]
+	[ "$output" = "$(printf '%s\n' 'alpha (fast)' 'off (off)' 'quick (fast, off)' zeta)" ]
 }
 
 @test "--list takes no other argument" {

@@ -7,13 +7,28 @@ source "${BATS_TEST_DIRNAME:?}/helpers.bash"
 
 untimed() { sed -E 's/ [0-9]+\.[0-9]{2}s/ Ns/g' <<<"$output"; }
 
-@test "assay check --list shows the built-in checks, all fast but findings" {
+@test "assay check --list shows the built-in checks, all fast but findings and tla, and tla off" {
 	local_repo
 	builtin_checks plain
 	run --separate-stderr "$assay" check --list
 	[ "$status" -eq 0 ]
 	[ "$output" = "$(printf '%s\n' 'actionlint (fast)' 'agents-md (fast)' 'ast-grep (fast)' 'commit-trailers (fast)' \
-		findings 'gitleaks (fast)' 'oxfmt (fast)' 'preset (fast)' 'suppressions (fast)')" ]
+		findings 'gitleaks (fast)' 'oxfmt (fast)' 'preset (fast)' 'suppressions (fast)' 'tla (off)')" ]
+}
+
+@test "the tla check, turned on in a repo with no tla/*.cfg, is skipped" {
+	shaped_repo
+	export ASSAY_CONFIG=$T/tla.json
+	jq '.checks.tla.enable = true' "$BATS_TEST_DIRNAME/defaults/plain.json" >"$ASSAY_CONFIG"
+	PATH=$DEVENV_STUB_PROFILE:$PATH
+	mkdir tla
+	echo '---- MODULE Lone ----' >tla/Lone.tla
+	run --separate-stderr "$assay" check tla
+	echo "$output"
+	[ "$status" -eq 0 ]
+	[ "${lines[1]}" = "  skipped: tla (no tla/*.cfg)" ]
+	[ "${lines[2]}" = "skip tla (no tla/*.cfg)" ]
+	[ "${lines[3]%% in *}" = "1 check passed (1 skipped)" ]
 }
 
 @test "a repo in shape passes every built-in check; without workflows actionlint is skipped" {

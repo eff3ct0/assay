@@ -122,6 +122,7 @@ let
   builtinFrontend = javascriptIn "./frontend";
   oxfmtExec = config: config.assay.checks.oxfmt.exec;
   builtinDemoPack = evalBuiltin { assay.rulePacks = [ "demo" ]; };
+  builtinTla = evalBuiltin { assay.checks.tla.enable = true; };
   languagesOn = evalWith {
     languages = {
       javascript.enable = true;
@@ -424,6 +425,24 @@ let
         ];
     "redefining a built-in check's exec is a loosening" =
       !evaluatesBuiltin { assay.checks.oxfmt.exec = "oxfmt --check ."; };
+    "the tla check is off by default, runs in the full run only, and requires tla/*.cfg" =
+      (listed builtinPlain).tla == {
+        fast = false;
+        enable = false;
+        requires = "tla/*.cfg";
+        coverage = null;
+      }
+      && builtinPlain.assay.checks.tla.exec == "assay builtin tla";
+    "TLC joins the devenv only once the repo turns the tla check on" =
+      !(lib.elem "tlaplus" (names builtinPlain)) && lib.elem "tlaplus" (names builtinTla);
+    "a default check on by default keeps its tools when the repo turns it off" = lib.elem "gitleaks" (
+      names (evalBuiltin {
+        assay.checks.gitleaks = {
+          enable = false;
+          reason = "off for the test";
+        };
+      })
+    );
   };
   failed = lib.attrNames (lib.filterAttrs (_: ok: !ok) expectations);
 
@@ -662,6 +681,8 @@ in
         same ${builtinJavascript.env.ASSAY_CONFIG} ${../test/defaults/javascript.json}
         same ${builtinFrontend.env.ASSAY_CONFIG} ${../test/defaults/javascript-frontend.json}
         same ${builtinPython.env.ASSAY_CONFIG} ${../test/defaults/python.json}
+        # Turning the tla check on is no loosening.
+        jq -e '.checks.tla.enable and .loosenings == []' ${builtinTla.env.ASSAY_CONFIG}
         # A loosening of the analyzer, with what it is; a tightening, none.
         jq -e '.loosenings == [
             {check: "findings", kind: "setting", reason: "parsers are one big match",
